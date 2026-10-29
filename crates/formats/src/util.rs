@@ -923,9 +923,13 @@ pub fn image_part(mime: Option<String>, data: Option<&str>, url: Option<&str>) -
         return Some(Part::Image { mime, source: MediaSource::Base64 { data: d.to_string() } });
     }
     url.filter(|u| !u.is_empty()).map(|u| {
+        let mut mime = mime;
         let source = if let Some(rest) = u.strip_prefix("data:") {
-            let data = rest.split_once(',').map(|(_, d)| d.to_string()).unwrap_or_default();
-            MediaSource::Base64 { data }
+            let (head, data) = rest.split_once(',').unwrap_or(("", ""));
+            if mime.is_none() {
+                mime = head.split(';').next().filter(|m| m.starts_with("image/")).map(String::from);
+            }
+            MediaSource::Base64 { data: data.to_string() }
         } else if u.starts_with("http") {
             MediaSource::Url { url: u.to_string() }
         } else {

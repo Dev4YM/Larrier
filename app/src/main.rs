@@ -4,6 +4,7 @@
 mod automations;
 mod highlight;
 mod icons;
+mod live;
 mod logos;
 mod markdown;
 mod notify;

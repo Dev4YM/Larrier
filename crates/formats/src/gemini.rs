@@ -22,7 +22,7 @@ pub fn root(home_override: Option<&Path>) -> PathBuf {
 }
 
 /// slug → project path, from `projects.json`.
-fn project_map(root: &Path) -> Vec<(String, String)> {
+pub(crate) fn project_map(root: &Path) -> Vec<(String, String)> {
     let Ok(t) = std::fs::read_to_string(root.join("projects.json")) else { return Vec::new() };
     let v: Value = serde_json::from_str(&t).unwrap_or(Value::Null);
     v["projects"].as_object().map(|m| m.iter().filter_map(|(path, slug)| slug.as_str().map(|s| (s.to_string(), path.clone()))).collect()).unwrap_or_default()
@@ -37,30 +37,36 @@ pub fn discover() -> Vec<NativeSessionInfo> {
     for d in dirs.flatten() {
         let chats = d.path().join("chats");
         let Ok(files) = std::fs::read_dir(&chats) else { continue };
-        let slug = d.file_name().to_string_lossy().to_string();
-        let cwd = projects.iter().find(|(s, _)| *s == slug).map(|(_, p)| p.clone());
         for f in files.flatten() {
-            let p = f.path();
-            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            if !name.starts_with("session-") || !(name.ends_with(".json") || name.ends_with(".jsonl")) {
-                continue;
+            if let Some(info) = file_info(&f.path(), &projects) {
+                out.push(info);
             }
-            let Some(first) = head_lines(&p, 1).into_iter().next() else { continue };
-            let head: Value = if name.ends_with(".json") {
-                std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
-            } else {
-                serde_json::from_str(&first).unwrap_or(Value::Null)
-            };
-            if s(&head, "kind") == Some("subagent") {
-                continue;
-            }
-            let id = string(&head, "sessionId").unwrap_or_else(|| name.clone());
-            let mut info = util::info(AGENT, id, &p);
-            info.cwd = cwd.clone();
-            out.push(info);
         }
     }
     out
+}
+
+/// Session info for one chat file under `tmp/<slug>/chats/`.
+pub fn file_info(p: &Path, projects: &[(String, String)]) -> Option<NativeSessionInfo> {
+    let name = p.file_name()?.to_string_lossy().to_string();
+    if !name.starts_with("session-") || !(name.ends_with(".json") || name.ends_with(".jsonl")) {
+        return None;
+    }
+    let slug = p.parent()?.parent()?.file_name()?.to_string_lossy().to_string();
+    let cwd = projects.iter().find(|(s, _)| *s == slug).map(|(_, p)| p.clone());
+    let first = head_lines(p, 1).into_iter().next()?;
+    let head: Value = if name.ends_with(".json") {
+        std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
+    } else {
+        serde_json::from_str(&first).unwrap_or(Value::Null)
+    };
+    if s(&head, "kind") == Some("subagent") {
+        return None;
+    }
+    let id = string(&head, "sessionId").unwrap_or_else(|| name.clone());
+    let mut info = util::info(AGENT, id, p);
+    info.cwd = cwd;
+    Some(info)
 }
 
 pub fn import(info: &NativeSessionInfo) -> Result<Session> {

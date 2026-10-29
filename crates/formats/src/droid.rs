@@ -22,23 +22,29 @@ pub fn discover() -> Vec<NativeSessionInfo> {
     for d in dirs.flatten() {
         let Ok(files) = std::fs::read_dir(d.path()) else { continue };
         for f in files.flatten() {
-            let p = f.path();
-            if p.extension().map(|x| x != "jsonl").unwrap_or(true) {
-                continue;
+            if let Some(info) = file_info(&f.path()) {
+                out.push(info);
             }
-            let Some(first) = head_lines(&p, 1).into_iter().next() else { continue };
-            let Ok(v) = serde_json::from_str::<Value>(&first) else { continue };
-            if s(&v, "type") != Some("session_start") {
-                continue;
-            }
-            let id = string(&v, "id").unwrap_or_else(|| p.file_stem().unwrap().to_string_lossy().to_string());
-            let mut info = util::info(AGENT, id, &p);
-            info.title = string(&v, "sessionTitle").or_else(|| string(&v, "title")).filter(|t| !t.is_empty());
-            info.cwd = string(&v, "cwd");
-            out.push(info);
         }
     }
     out
+}
+
+/// Session info for one Droid session file.
+pub fn file_info(p: &Path) -> Option<NativeSessionInfo> {
+    if p.extension().map(|x| x != "jsonl").unwrap_or(true) {
+        return None;
+    }
+    let first = head_lines(p, 1).into_iter().next()?;
+    let v = serde_json::from_str::<Value>(&first).ok()?;
+    if s(&v, "type") != Some("session_start") {
+        return None;
+    }
+    let id = string(&v, "id").unwrap_or_else(|| p.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let mut info = util::info(AGENT, id, p);
+    info.title = string(&v, "sessionTitle").or_else(|| string(&v, "title")).filter(|t| !t.is_empty());
+    info.cwd = string(&v, "cwd");
+    Some(info)
 }
 
 pub fn import(info: &NativeSessionInfo) -> Result<Session> {

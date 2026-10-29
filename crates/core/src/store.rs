@@ -48,11 +48,15 @@ pub struct ImportRecord {
     /// exported into it); sync must never re-import it as a new session.
     #[serde(default)]
     pub linked: bool,
+    /// The user deleted the Larrier copy: never import this native session
+    /// again (its own files are left untouched).
+    #[serde(default)]
+    pub deleted: bool,
 }
 
 impl ImportRecord {
     pub fn linked(session_id: impl Into<String>) -> Self {
-        ImportRecord { session_id: session_id.into(), source_mtime: 0, source_len: 0, linked: true }
+        ImportRecord { session_id: session_id.into(), linked: true, ..Default::default() }
     }
 }
 
@@ -222,8 +226,11 @@ impl Store {
             m.remove(id);
             self.flush_index(m);
         });
+        // Keep a tombstone so sync (and live sync) never bring it back.
         self.with_imports(|m| {
-            m.retain(|_, r| r.session_id != id);
+            for r in m.values_mut().filter(|r| r.session_id == id) {
+                r.deleted = true;
+            }
         });
         self.flush_imports();
         Ok(())

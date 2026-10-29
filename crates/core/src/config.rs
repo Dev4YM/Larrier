@@ -124,6 +124,9 @@ pub struct Settings {
     pub run_mode: RunMode,
     #[serde(default = "yes")]
     pub auto_import: bool,
+    /// Watch the agents' session folders and import changes as they happen.
+    #[serde(default = "yes")]
+    pub live_sync: bool,
     #[serde(default)]
     pub use_worktrees: bool,
     #[serde(default)]
@@ -234,6 +237,7 @@ impl Default for Settings {
             right_panel_open: true,
             run_mode: RunMode::default(),
             auto_import: true,
+            live_sync: true,
             use_worktrees: false,
             worktrees_dir: None,
             send_with_ctrl_enter: false,

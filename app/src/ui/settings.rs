@@ -628,10 +628,29 @@ fn Sessions() -> Element {
     by_agent.sort_by(|a, b| b.1.cmp(&a.1));
     let root = store().root().to_string_lossy().to_string();
     let sync = app.sync_status.read().clone();
+    let live_on = app.config.read().settings.live_sync;
+    // Re-read the watcher status shortly after toggling (it starts in the background).
+    let mut tick = use_signal(|| 0u32);
+    let live_status = {
+        let _ = tick();
+        crate::live::status(live_on)
+    };
     rsx! {
         h1 { "Sessions & Import" }
         div { class: "sub", "Every conversation is stored in the Larrier Session Format (LSF) — one portable file per session that any agent can continue." }
         div { class: "set-card",
+            Row { title: "Live sync".to_string(), desc: Some(format!("Sessions you run in a terminal, an IDE or another app update here as they change. {live_status}")),
+                Toggle { on: live_on, onchange: move |v: bool| {
+                    app.update_config(|c| c.settings.live_sync = v);
+                    crate::live::restart(app);
+                    spawn(async move {
+                        for _ in 0..6 {
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            tick += 1;
+                        }
+                    });
+                } }
+            }
             Row { title: "Import from installed agents".to_string(), desc: Some(if sync.is_empty() { "Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Pi, Hermes and more.".to_string() } else { sync.clone() }),
                 button { class: "primary-btn", onclick: move |_| app.sync_imports(false), Icon { i: I::Download, size: 13 } "Import now" }
             }

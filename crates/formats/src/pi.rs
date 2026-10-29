@@ -32,20 +32,26 @@ pub fn discover() -> Vec<NativeSessionInfo> {
         return out;
     }
     for e in walkdir::WalkDir::new(&dir).max_depth(2).into_iter().flatten() {
-        let p = e.path();
-        if p.extension().map(|x| x != "jsonl").unwrap_or(true) {
-            continue;
+        if let Some(info) = file_info(e.path()) {
+            out.push(info);
         }
-        let Some(first) = head_lines(p, 1).into_iter().next() else { continue };
-        let Ok(h) = serde_json::from_str::<Value>(&first) else { continue };
-        if s(&h, "type") != Some("session") {
-            continue;
-        }
-        let mut info = util::info(AGENT, s(&h, "id").unwrap_or_default(), p);
-        info.cwd = string(&h, "cwd");
-        out.push(info);
     }
     out
+}
+
+/// Session info for one Pi session file.
+pub fn file_info(p: &Path) -> Option<NativeSessionInfo> {
+    if p.extension().map(|x| x != "jsonl").unwrap_or(true) {
+        return None;
+    }
+    let first = head_lines(p, 1).into_iter().next()?;
+    let h = serde_json::from_str::<Value>(&first).ok()?;
+    if s(&h, "type") != Some("session") {
+        return None;
+    }
+    let mut info = util::info(AGENT, s(&h, "id").unwrap_or_default(), p);
+    info.cwd = string(&h, "cwd");
+    Some(info)
 }
 
 pub fn import(info: &NativeSessionInfo) -> Result<Session> {

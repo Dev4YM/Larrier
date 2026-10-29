@@ -419,7 +419,7 @@ fn DeleteModal(id: String) -> Element {
     rsx! {
         div { class: "modal-head", "Delete “{title}”?" }
         div { class: "modal-body",
-            "This removes the session from Larrier. The agent's own native session files (if any) are left untouched. Worktrees created for this agent are removed."
+            "This removes the session from Larrier, and it won't be imported again. The agent's own session files are left untouched. Worktrees Larrier created for this agent are removed."
         }
         div { class: "modal-foot",
             button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }

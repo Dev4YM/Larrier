@@ -212,7 +212,8 @@ pub fn Sidebar() -> Element {
     let show_search = searching() || !query.is_empty();
     let name = user_name();
     let initial = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-    let ctx = SideCtx { selected: selected.clone(), running: running.clone(), searching: !query.is_empty() };
+    let live: Vec<String> = app.live.read().keys().cloned().collect();
+    let ctx = SideCtx { selected: selected.clone(), running: running.clone(), live, searching: !query.is_empty() };
 
     rsx! {
         aside { class: "sidebar",
@@ -372,6 +373,8 @@ pub fn Sidebar() -> Element {
 struct SideCtx {
     selected: Option<String>,
     running: Vec<String>,
+    /// Sessions another app is writing right now.
+    live: Vec<String>,
     searching: bool,
 }
 
@@ -425,6 +428,8 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
 fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
     let mut app = use_app();
     let running = ctx.running.contains(&s.id);
+    // Live in another app (and not driven by Larrier right now).
+    let live = !running && ctx.live.contains(&s.id);
     let selected = ctx.selected.as_deref() == Some(s.id.as_str());
     let (id, id2, id3) = (s.id.clone(), s.id.clone(), s.id.clone());
     let mut cls = String::from("chat-row");
@@ -474,6 +479,8 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             span { class: "bullet",
                 if running {
                     span { class: "sunburst", Icon { i: I::Loader, size: 13, stroke: 1.6 } }
+                } else if live {
+                    span { class: "live-dot", title: "Live in {s.origin.display_name()}" }
                 } else if logo {
                     AgentGlyph { kind: s.agent.clone() }
                 } else {
@@ -495,6 +502,8 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
         }
         if running {
             ChatActivity { id: s.id.clone() }
+        } else if live {
+            div { class: "chat-sub live", "Live in {s.origin.display_name()}" }
         }
     }
 }

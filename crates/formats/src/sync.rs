@@ -1,4 +1,8 @@
 //! Incremental import of every agent's native sessions into the store.
+//!
+//! Full syncs ([`sync`]) and live syncs of single files
+//! ([`crate::live::sync_paths`]) share [`apply`], which is serialized so two
+//! passes can never import the same native session twice.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -19,15 +23,26 @@ enum Plan {
     Update(String),
 }
 
-pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
-    let mut report = SyncReport::default();
-    let infos: Vec<NativeSessionInfo> = agents.iter().flat_map(discover).collect();
+/// One sync pass at a time, across full and live syncs.
+static SYNC_LOCK: Mutex<()> = Mutex::new(());
 
+pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
+    let infos: Vec<NativeSessionInfo> = agents.iter().flat_map(discover).collect();
+    apply(store, infos, &|_| false)
+}
+
+/// Import new and changed sessions among `infos`. `skip(session_id)` leaves
+/// an existing Larrier session alone (for example while Larrier itself is
+/// running it, since its agent writes the same native file).
+pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(&str) -> bool) -> SyncReport {
+    let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut report = SyncReport::default();
     let mut todo: Vec<(NativeSessionInfo, Plan, String)> = Vec::new();
     for info in infos {
         let key = import_key(&info.agent, &info.native_id);
         match store.import_record(&key) {
-            Some(r) if r.linked => report.skipped += 1,
+            Some(r) if r.linked || r.deleted => report.skipped += 1,
+            Some(r) if !r.session_id.is_empty() && skip(&r.session_id) => report.skipped += 1,
             // Known-empty source that hasn't changed.
             Some(r) if r.session_id.is_empty() && r.source_mtime == info.mtime_ms && r.source_len == info.size => report.skipped += 1,
             Some(r) if !r.session_id.is_empty() && store.exists(&r.session_id) => {
@@ -59,13 +74,14 @@ pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
                         }
                         Plan::New => report.imported += 1,
                     }
-                    store.set_import_record(key, ImportRecord { session_id: s.id.clone(), source_mtime: info.mtime_ms, source_len: info.size, linked: false });
+                    store.set_import_record(key, ImportRecord { session_id: s.id.clone(), source_mtime: info.mtime_ms, source_len: info.size, ..Default::default() });
+                    report.changed.push(s.id.clone());
                     batch.push(s);
                 }
                 Err(e) if e.downcast_ref::<ImportSkip>().is_some() => {
                     // Remember empty sessions so they aren't re-parsed every run.
                     if matches!(plan, Plan::New) {
-                        store.set_import_record(key, ImportRecord { session_id: String::new(), source_mtime: info.mtime_ms, source_len: info.size, linked: false });
+                        store.set_import_record(key, ImportRecord { session_id: String::new(), source_mtime: info.mtime_ms, source_len: info.size, ..Default::default() });
                     }
                     report.skipped += 1;
                 }
@@ -84,6 +100,11 @@ pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
 /// Keep what the user changed in Larrier when a native session is re-imported.
 fn merge_user_state(new: &mut Session, old: &Session) {
     new.pinned = old.pinned;
+    new.unread = old.unread;
+    // Thumbs up / down and other Larrier-only notes.
+    for (k, v) in old.extra.iter().filter(|(k, _)| k.starts_with("feedback:")) {
+        new.extra.insert(k.clone(), v.clone());
+    }
     new.archived = old.archived || new.archived;
     new.tags = old.tags.clone();
     new.account_id = old.account_id.clone();

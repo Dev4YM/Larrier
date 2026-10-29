@@ -269,6 +269,9 @@ pub struct App {
     pub editing: Signal<EditState>,
     /// Session being dragged (sidebar row or tab), for the drop targets.
     pub drag: Signal<Option<String>>,
+    /// Sessions another app (a terminal CLI, an IDE) is writing right now:
+    /// id → when Larrier first saw it live. See `crate::live`.
+    pub live: Signal<HashMap<String, Instant>>,
 }
 
 /// Signals owned by the root scope so background tasks can use them for the
@@ -347,6 +350,7 @@ impl App {
             split: root_signal(None),
             editing: root_signal(EditState::default()),
             drag: root_signal(None),
+            live: root_signal(HashMap::new()),
         }
     }
 
@@ -467,6 +471,23 @@ impl App {
             list.insert(at, sum);
         }
         save_async(s.clone());
+    }
+
+    /// A session changed outside Larrier (live sync, already saved): show the
+    /// new contents wherever it is open and update its sidebar row.
+    pub fn apply_external(mut self, s: Session) {
+        let sum = s.summary();
+        {
+            let mut list = self.sessions.write();
+            if let Some(i) = list.iter().position(|x| x.id == sum.id) {
+                list.remove(i);
+            }
+            let at = list.partition_point(|x| x.updated_at > sum.updated_at);
+            list.insert(at, sum);
+        }
+        if self.is_loaded(&s.id) {
+            self.put_session(s);
+        }
     }
 
     /// Save a loaded session by id.
@@ -841,12 +862,15 @@ impl App {
 
     fn drive(self, id: String, mut handle: TurnHandle, mut rec: TurnRecorder) {
         let mut app = self;
+        // Our agent writes the native session too: keep live sync off it.
+        crate::live::mark_busy(&id);
         spawn_forever(async move {
             let mut last_save = Instant::now();
             let mut last_row = Instant::now();
             let mut done = false;
             let Some(mut sig) = app.open.peek().get(&id).copied() else {
                 app.running.write().remove(&id);
+                crate::live::mark_idle(&id);
                 return;
             };
             while let Some(first) = handle.events.recv().await {
@@ -913,6 +937,7 @@ impl App {
             });
             app.running.write().remove(&id);
             app.permissions.write().remove(&id);
+            crate::live::mark_idle(&id);
             if let Some((t, st)) = &title {
                 let ok = *st != SessionStatus::Error;
                 let what = if ok { "is ready for review" } else { "failed" };

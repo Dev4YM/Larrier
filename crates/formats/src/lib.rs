@@ -23,6 +23,7 @@ pub mod cursor;
 pub mod droid;
 pub mod gemini;
 pub mod hermes;
+pub mod live;
 pub mod markdown;
 pub mod opencode;
 pub mod pi;
@@ -101,6 +102,9 @@ pub struct SyncReport {
     pub updated: usize,
     pub skipped: usize,
     pub errors: Vec<String>,
+    /// Larrier ids of the sessions that were imported or updated.
+    #[serde(default)]
+    pub changed: Vec<String>,
 }
 
 /// Agents whose native sessions this crate can read.

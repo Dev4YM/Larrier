@@ -48,6 +48,8 @@ pub fn Root() -> Element {
         if app.config.read().settings.auto_import {
             app.sync_imports(true);
         }
+        // Sessions other apps are writing update here as they change.
+        crate::live::start(app);
         // `larrier-desktop --open <session-id>` opens a session directly.
         let args: Vec<String> = std::env::args().collect();
         if let Some(id) = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1)) {

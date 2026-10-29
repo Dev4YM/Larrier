@@ -53,21 +53,45 @@ pub fn discover() -> Vec<NativeSessionInfo> {
         }
         let Ok(files) = std::fs::read_dir(&dir) else { continue };
         for f in files.flatten() {
-            let p = f.path();
-            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            if !name.ends_with(".jsonl") || name.starts_with("agent-") {
-                continue;
+            if let Some(info) = file_info(&f.path()) {
+                out.push(info);
             }
-            let id = name.trim_end_matches(".jsonl").to_string();
-            let mut info = util::info(AGENT, id, &p);
-            if info.size < 64 {
-                continue;
-            }
-            peek(&p, &mut info);
-            out.push(info);
         }
     }
     out
+}
+
+/// Session info for one transcript file; `None` for anything that isn't a
+/// top-level session transcript.
+pub fn file_info(p: &Path) -> Option<NativeSessionInfo> {
+    let name = p.file_name()?.to_string_lossy().to_string();
+    if !name.ends_with(".jsonl") || name.starts_with("agent-") {
+        return None;
+    }
+    let id = name.trim_end_matches(".jsonl").to_string();
+    let mut info = util::info(AGENT, id, p);
+    if info.size < 64 {
+        return None;
+    }
+    peek(p, &mut info);
+    Some(info)
+}
+
+/// The session transcript a changed file belongs to: a subagent transcript
+/// (`<project>/<sessionId>/subagents/agent-*.jsonl`) maps to its parent.
+pub fn session_file_for(changed: &Path) -> Option<PathBuf> {
+    let name = changed.file_name()?.to_string_lossy().to_string();
+    if name.ends_with(".jsonl") && !name.starts_with("agent-") {
+        return Some(changed.to_path_buf());
+    }
+    // <project>/<sessionId>/subagents/agent-*.jsonl (or its .meta.json)
+    let sub = changed.parent()?;
+    if sub.file_name()?.to_string_lossy() != "subagents" {
+        return None;
+    }
+    let session_dir = sub.parent()?;
+    let id = session_dir.file_name()?.to_string_lossy().to_string();
+    Some(session_dir.parent()?.join(format!("{id}.jsonl")))
 }
 
 fn peek(path: &Path, info: &mut NativeSessionInfo) {

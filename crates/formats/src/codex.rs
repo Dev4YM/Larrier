@@ -28,7 +28,7 @@ pub fn root(home_override: Option<&Path>) -> PathBuf {
     home_override.map(PathBuf::from).or_else(|| env_dir("CODEX_HOME")).unwrap_or_else(|| util::home().join(".codex"))
 }
 
-fn thread_names(root: &Path) -> HashMap<String, String> {
+pub(crate) fn thread_names(root: &Path) -> HashMap<String, String> {
     let mut map = HashMap::new();
     if let Ok(t) = std::fs::read_to_string(root.join("session_index.jsonl")) {
         for v in json_lines(&t) {
@@ -52,29 +52,9 @@ pub fn discover() -> Vec<NativeSessionInfo> {
             continue;
         }
         for e in walkdir::WalkDir::new(&dir).into_iter().flatten() {
-            let p = e.path();
-            let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            if !name.starts_with("rollout-") || !(name.ends_with(".jsonl") || name.ends_with(".jsonl.zst")) {
-                continue;
+            if let Some(info) = file_info(e.path(), &names) {
+                out.push(info);
             }
-            let Some(first) = head_lines(p, 1).into_iter().next() else { continue };
-            let Ok(v) = serde_json::from_str::<Value>(&first) else { continue };
-            if s(&v, "type") != Some("session_meta") {
-                continue;
-            }
-            let pl = &v["payload"];
-            // Sub-agent threads live in their parent's history.
-            if pl["source"].get("subagent").is_some() || pl.get("parent_thread_id").map(|x| !x.is_null()).unwrap_or(false) {
-                continue;
-            }
-            let id = s(pl, "id").or_else(|| s(pl, "session_id")).unwrap_or("").to_string();
-            if id.is_empty() {
-                continue;
-            }
-            let mut info = util::info(AGENT, id.clone(), p);
-            info.cwd = string(pl, "cwd");
-            info.title = names.get(&id).cloned();
-            out.push(info);
         }
     }
     // A rollout may exist both live and archived; keep the newest.
@@ -82,6 +62,32 @@ pub fn discover() -> Vec<NativeSessionInfo> {
     let mut seen = HashSet::new();
     out.retain(|i| seen.insert(i.native_id.clone()));
     out
+}
+
+/// Session info for one rollout file; `None` for sub-agent threads (they
+/// live in their parent's history) and anything that isn't a rollout.
+pub fn file_info(p: &Path, names: &HashMap<String, String>) -> Option<NativeSessionInfo> {
+    let name = p.file_name()?.to_string_lossy().to_string();
+    if !name.starts_with("rollout-") || !(name.ends_with(".jsonl") || name.ends_with(".jsonl.zst")) {
+        return None;
+    }
+    let first = head_lines(p, 1).into_iter().next()?;
+    let v = serde_json::from_str::<Value>(&first).ok()?;
+    if s(&v, "type") != Some("session_meta") {
+        return None;
+    }
+    let pl = &v["payload"];
+    if pl["source"].get("subagent").is_some() || pl.get("parent_thread_id").map(|x| !x.is_null()).unwrap_or(false) {
+        return None;
+    }
+    let id = s(pl, "id").or_else(|| s(pl, "session_id")).unwrap_or("").to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let mut info = util::info(AGENT, id.clone(), p);
+    info.cwd = string(pl, "cwd");
+    info.title = names.get(&id).cloned();
+    Some(info)
 }
 
 pub fn import(info: &NativeSessionInfo) -> Result<Session> {

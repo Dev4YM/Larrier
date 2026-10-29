@@ -1066,3 +1066,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
   .mr-row > .c-num:nth-child(3), .mr-row > .c-num:nth-child(6) { display: none; }
   .mr-row .c-name .id { display: none; }
 }
+
+/* Registry rows: the model name never truncates before its id does. */
+.mr-row .c-name .nm { flex-shrink: 0; max-width: 62%; }
+.mr-row .c-name .mr-tag { flex-shrink: 0; }
+.mr-row .c-name .id { flex: 1 1 0; }

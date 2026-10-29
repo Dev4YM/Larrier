@@ -435,11 +435,13 @@ pub fn all() -> Vec<ModelInfo> {
         out.insert(id.clone(), c);
     }
     let mut v: Vec<ModelInfo> = out.into_values().collect();
+    // Official models in catalog order (newest first), then the rest by name.
+    let rank = |m: &ModelInfo| ANTHROPIC.iter().position(|c| c.id == m.id).unwrap_or(usize::MAX);
     v.sort_by(|a, b| {
         a.vendor
             .cmp(&b.vendor)
             .then((a.status as u8).cmp(&(b.status as u8)))
-            .then(b.source.eq(&Source::Official).cmp(&a.source.eq(&Source::Official)))
+            .then(rank(a).cmp(&rank(b)))
             .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     v

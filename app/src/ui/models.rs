@@ -35,11 +35,15 @@ pub fn ModelRegistry() -> Element {
             None => vendors.push((m.vendor, 1)),
         }
     }
-    vendors.sort_by(|a, b| b.1.cmp(&a.1));
+    // Best-known vendors first, "Other" last.
+    vendors.sort_by_key(|(v, n)| (*v == Vendor::Other, Vendor::ALL.iter().position(|x| x == v).unwrap_or(99), std::cmp::Reverse(*n)));
     let shown: Vec<ModelInfo> = all
         .into_iter()
         .filter(|m| vend.map(|v| v == m.vendor).unwrap_or(true))
         .filter(|m| show_old() || m.status == ModelStatus::Active)
+        // Anthropic's own catalog is complete; older third-party listings of
+        // the same models only show with legacy models.
+        .filter(|m| show_old() || m.vendor != Vendor::Anthropic || m.source == Source::Official)
         .filter(|m| q.is_empty() || m.name.to_lowercase().contains(&q) || m.id.contains(&q) || m.vendor.name().to_lowercase().contains(&q))
         .collect();
     let total = shown.len();

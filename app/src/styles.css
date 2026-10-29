@@ -1062,3 +1062,17 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .mr-row .c-name .nm { flex-shrink: 0; max-width: 62%; }
 .mr-row .c-name .mr-tag { flex-shrink: 0; }
 .mr-row .c-name .id { flex: 1 1 0; }
+
+/* Tool views: duration, images a tool returned, input / output, plans and questions. */
+.step .dur { font-size: 11px; color: var(--fg-4); margin-left: 6px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.tool-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.tool-images img { max-width: 260px; max-height: 170px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; cursor: zoom-in; background: var(--chip); }
+.tool-card.tool-io { padding: 6px 0 0; }
+.tool-card.tool-io .io-label { font-size: 11px; color: var(--fg-3); padding: 4px 12px 2px; }
+.tool-card.tool-io pre.io { margin: 0; max-height: 280px; overflow: auto; }
+.plan-proposal .a-text { padding: 6px 14px 10px; }
+.question-card.answered { padding: 10px 14px; }
+.question-card .q-opts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.question-card .q-chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--chip); color: var(--fg-2); }
+.question-card .q-chip.on { background: color-mix(in srgb, var(--accent-c) 16%, var(--chip)); color: var(--fg); font-weight: 500; }
+.question-card .q-answer { font-size: 12.5px; color: var(--fg-2); margin-top: 4px; }

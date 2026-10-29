@@ -639,10 +639,13 @@ fn is_explore(t: &ToolCall) -> bool {
 }
 
 fn group_parts(parts: &[Part]) -> Vec<Item> {
+    // Only the newest to-do list of a message is shown (each call repeats it).
+    let last_todo = parts.iter().rposition(|p| matches!(p, Part::Tool(t) if t.kind == ToolKind::Todo));
     let mut out: Vec<Item> = Vec::new();
-    for p in parts {
+    for (i, p) in parts.iter().enumerate() {
         match p {
-            Part::Tool(t) if t.kind == ToolKind::Todo || t.kind == ToolKind::Think => {}
+            Part::Tool(t) if t.kind == ToolKind::Think => {}
+            Part::Tool(t) if t.kind == ToolKind::Todo && Some(i) != last_todo => {}
             Part::Tool(t) if is_explore(t) => match out.last_mut() {
                 Some(Item::Explore(v)) => v.push(t.clone()),
                 _ => out.push(Item::Explore(vec![t.clone()])),
@@ -833,46 +836,121 @@ fn is_running(t: &ToolCall) -> bool {
     matches!(t.status, ToolStatus::Running | ToolStatus::Pending | ToolStatus::Approval)
 }
 
-/// Verb + target for a step ("Read" + "src/main.rs").
 fn verb_target(t: &ToolCall) -> (&'static str, String) {
     let running = is_running(t);
+    let pick = |a: &'static str, b: &'static str| if running { a } else { b };
+    let arg = |keys: &[&str]| keys.iter().find_map(|k| t.input.get(*k).and_then(|v| v.as_str())).map(|v| larrier_core::lsf::first_line(v).to_string()).unwrap_or_default();
+    // Tools named by what they do, whatever kind their name suggests.
+    let named = match t.name.as_str() {
+        "AskUserQuestion" | "ask_user" | "request_user_input" => Some((pick("Asking", "Asked"), question_text(t))),
+        "ExitPlanMode" => Some((pick("Proposing plan", "Proposed plan"), String::new())),
+        "EnterPlanMode" => Some(("Entered plan mode", String::new())),
+        "Skill" => Some((pick("Using skill", "Used skill"), arg(&["skill", "name", "command"]))),
+        "SlashCommand" => Some((pick("Running", "Ran"), arg(&["command"]))),
+        "ToolSearch" => Some((pick("Loading tools", "Loaded tools"), arg(&["query"]))),
+        "SendMessage" => Some((pick("Messaging", "Messaged"), arg(&["to", "recipient"]))),
+        "SendUserFile" => Some((pick("Sending", "Sent"), t.input.get("files").and_then(|f| f.as_array()).map(|a| format!("{} file{}", a.len(), if a.len() == 1 { "" } else { "s" })).unwrap_or_default())),
+        "PushNotification" => Some((pick("Notifying", "Notified"), arg(&["message"]))),
+        "BashOutput" | "TaskOutput" | "AgentOutputTool" => Some((pick("Checking output", "Checked output"), arg(&["bash_id", "task_id", "shell_id", "agentId"]))),
+        "KillShell" | "KillBash" | "TaskStop" => Some((pick("Stopping", "Stopped"), arg(&["shell_id", "task_id", "bash_id"]))),
+        "Monitor" => Some((pick("Watching", "Watched"), arg(&["description", "command"]))),
+        "ScheduleWakeup" => Some((pick("Scheduling", "Scheduled"), arg(&["reason"]))),
+        "LSP" => Some((pick("Querying code", "Queried code"), arg(&["operation", "file_path"]))),
+        "Workflow" => Some((pick("Running workflow", "Ran workflow"), arg(&["name", "description"]))),
+        "ReadNotifications" => Some((pick("Reading notifications", "Read notifications"), String::new())),
+        "WebFetch" | "web_fetch" | "fetch" => Some((pick("Fetching", "Fetched"), arg(&["url"]))),
+        "WebSearch" | "web_search" | "google_web_search" => Some((pick("Searching web", "Searched web"), arg(&["query"]))),
+        "Glob" => Some((pick("Finding", "Found"), arg(&["pattern"]))),
+        "Grep" => Some((pick("Searching", "Searched"), arg(&["pattern"]))),
+        _ => None,
+    };
+    if let Some(v) = named {
+        return v;
+    }
+    if t.kind == ToolKind::Mcp {
+        // mcp__server__tool → "server › tool" plus its main argument.
+        let mut it = t.name.trim_start_matches("mcp__").trim_start_matches("mcp_").splitn(2, "__");
+        let server = it.next().unwrap_or("").replace('_', " ");
+        let tool = it.next().unwrap_or("").replace('_', " ");
+        let main = generic_arg(t);
+        let target = if tool.is_empty() { server } else { format!("{server} › {tool}") };
+        return (pick("Calling", "Called"), if main.is_empty() { target } else { format!("{target} · {main}") });
+    }
     let title = t.title.clone().unwrap_or_default();
     let rest = title.split_once(' ').map(|(_, r)| r.trim().to_string()).unwrap_or_default();
-    let verb = match (t.kind, running) {
-        (ToolKind::Read, true) => "Reading",
-        (ToolKind::Read, false) => "Read",
-        (ToolKind::Edit, true) => "Editing",
-        (ToolKind::Edit, false) => "Edited",
-        (ToolKind::Write, true) => "Writing",
-        (ToolKind::Write, false) => "Wrote",
-        (ToolKind::Delete, _) => "Deleted",
-        (ToolKind::Move, _) => "Moved",
-        (ToolKind::Search, true) => "Searching",
-        (ToolKind::Search, false) => "Searched",
-        (ToolKind::Shell, true) => "Running",
-        (ToolKind::Shell, false) => "Ran",
-        (ToolKind::Fetch, true) => "Fetching",
-        (ToolKind::Fetch, false) => "Fetched",
-        (ToolKind::WebSearch, true) => "Searching web",
-        (ToolKind::WebSearch, false) => "Searched web",
-        (ToolKind::Think, _) => "Thought",
-        (ToolKind::Task, true) => "Running subagent",
-        (ToolKind::Task, false) => "Subagent",
-        (ToolKind::Todo, _) => "Updated to-dos",
-        (ToolKind::Mcp, true) => "Calling",
-        (ToolKind::Mcp, false) => "Called",
-        (ToolKind::Other, true) => "Running",
-        (ToolKind::Other, false) => "Used",
+    let verb = match t.kind {
+        ToolKind::Read => pick("Reading", "Read"),
+        ToolKind::Edit => pick("Editing", "Edited"),
+        ToolKind::Write => pick("Writing", "Wrote"),
+        ToolKind::Delete => "Deleted",
+        ToolKind::Move => "Moved",
+        ToolKind::Search => pick("Searching", "Searched"),
+        ToolKind::Shell => pick("Running", "Ran"),
+        ToolKind::Fetch => pick("Fetching", "Fetched"),
+        ToolKind::WebSearch => pick("Searching web", "Searched web"),
+        ToolKind::Think => "Thought",
+        ToolKind::Task => pick("Running subagent", "Subagent"),
+        ToolKind::Todo => "Updated to-dos",
+        ToolKind::Mcp | ToolKind::Other => pick("Running", "Used"),
     };
     let target = match t.kind {
-        ToolKind::Other | ToolKind::Mcp => {
-            let name = t.name.trim_start_matches("mcp__").replace("__", " › ");
-            if rest.is_empty() || t.kind == ToolKind::Other { name } else { format!("{name} {rest}") }
+        ToolKind::Other => {
+            let main = generic_arg(t);
+            let name = humanize_tool(&t.name);
+            if main.is_empty() { name } else { format!("{name} · {main}") }
         }
         ToolKind::Todo | ToolKind::Think => String::new(),
         _ => rest,
     };
     (verb, target)
+}
+
+/// The argument that best describes a call to an unfamiliar tool.
+fn generic_arg(t: &ToolCall) -> String {
+    const KEYS: [&str; 14] = ["description", "command", "url", "query", "pattern", "file_path", "path", "name", "title", "prompt", "message", "text", "id", "repo"];
+    KEYS.iter()
+        .find_map(|k| t.input.get(*k).and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()))
+        .map(|v| {
+            let l = larrier_core::lsf::first_line(v);
+            if l.chars().count() > 80 { l.chars().take(77).collect::<String>() + "…" } else { l.to_string() }
+        })
+        .unwrap_or_default()
+}
+
+/// "ReadNotifications" → "Read notifications", "create_issue" → "Create issue".
+fn humanize_tool(name: &str) -> String {
+    let mut out = String::new();
+    let mut prev_lower = false;
+    for c in name.trim_start_matches("mcp__").chars() {
+        if c == '_' || c == '-' {
+            out.push(' ');
+            prev_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && prev_lower {
+            out.push(' ');
+        }
+        prev_lower = c.is_lowercase() || c.is_ascii_digit();
+        out.push(c);
+    }
+    let lower = out.to_lowercase();
+    let mut ch = lower.chars();
+    match ch.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + ch.as_str(),
+        None => String::new(),
+    }
+}
+
+/// First question of an AskUserQuestion call.
+fn question_text(t: &ToolCall) -> String {
+    t.input
+        .get("questions")
+        .and_then(|q| q.as_array())
+        .and_then(|a| a.first())
+        .and_then(|q| q.get("question").and_then(|x| x.as_str()))
+        .or_else(|| t.input.get("question").and_then(|x| x.as_str()))
+        .map(|s| s.to_string())
+        .unwrap_or_default()
 }
 
 /// Short present-tense label for the sidebar ("Reading main.rs").
@@ -920,19 +998,147 @@ fn Step(tool: ToolCall) -> Element {
     let (verb, target) = verb_target(&tool);
     let failed = tool.is_error || tool.status == ToolStatus::Failed;
     let has_output = tool.output.as_ref().map(|o| !o.trim().is_empty()).unwrap_or(false);
+    // MCP and unfamiliar tools also show what they were called with.
+    let show_input = matches!(tool.kind, ToolKind::Mcp | ToolKind::Other) && tool.input.as_object().map(|o| !o.is_empty()).unwrap_or(false);
+    let expandable = has_output || show_input;
     let output = clip(tool.output.clone().unwrap_or_default(), 12_000);
+    let input = if show_input { clip(serde_json::to_string_pretty(&tool.input).unwrap_or_default(), 6_000) } else { String::new() };
+    let dur = tool.duration_ms.filter(|d| *d >= 1000).map(|d| format!("{}s", (d + 500) / 1000));
     rsx! {
         div {
             class: if is_running(&tool) { "step running" } else if failed { "step failed" } else { "step" },
-            onclick: move |_| if has_output { open.toggle() },
+            onclick: move |_| if expandable { open.toggle() },
             span { class: "verb", "{verb}" }
             span { class: "target", "{target}" }
-            if has_output {
+            if let Some(d) = dur { span { class: "dur", "{d}" } }
+            if expandable {
                 span { class: "chev", if open() { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
             }
         }
+        ToolImages { images: tool.images.clone() }
         if open() {
-            div { class: "tool-card", pre { "{output}" } }
+            div { class: "tool-card tool-io",
+                if show_input {
+                    div { class: "io-label", "Input" }
+                    pre { class: "io", "{input}" }
+                }
+                if has_output {
+                    if show_input { div { class: "io-label", "Output" } }
+                    pre { class: "io", "{output}" }
+                }
+            }
+        }
+    }
+}
+
+/// Images a tool returned, as thumbnails that open full size.
+#[component]
+fn ToolImages(images: Vec<Part>) -> Element {
+    let mut app = use_app();
+    let srcs: Vec<String> = images.iter().filter_map(crate::state::image_src).collect();
+    if srcs.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "tool-images",
+            for (i, src) in srcs.into_iter().enumerate() {
+                img { key: "{i}", src: "{src}", onclick: move |e| { e.stop_propagation(); app.ui.write().lightbox = Some(src.clone()); } }
+            }
+        }
+    }
+}
+
+/// The agent's to-do list (TodoWrite, update_plan, write_todos).
+#[component]
+fn TodoCard(tool: ToolCall) -> Element {
+    // Claude: {todos: [{content, status, activeForm}]}; Codex: {plan: [{step, status}]}.
+    let list = tool.input.get("todos").or_else(|| tool.input.get("plan")).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let items: Vec<(String, String)> = list
+        .iter()
+        .map(|e| {
+            let text = ["content", "step", "text", "title"].iter().find_map(|k| e.get(*k).and_then(|v| v.as_str())).unwrap_or("").to_string();
+            let status = e.get("status").and_then(|v| v.as_str()).unwrap_or("pending").to_string();
+            (text, status)
+        })
+        .filter(|(t, _)| !t.is_empty())
+        .collect();
+    if items.is_empty() {
+        return rsx! { Step { tool } };
+    }
+    let done = items.iter().filter(|(_, s)| s == "completed").count();
+    rsx! {
+        div { class: "plan-card",
+            div { class: "plan-head", "{items.len()} To-dos · {done} done" }
+            for (i, (text, status)) in items.into_iter().enumerate() {
+                div {
+                    key: "{i}",
+                    class: match status.as_str() {
+                        "completed" => "plan-entry completed",
+                        "in_progress" => "plan-entry in_progress",
+                        _ => "plan-entry",
+                    },
+                    span { class: "box",
+                        if status == "completed" { Icon { i: I::Check, size: 9, stroke: 3.0 } }
+                    }
+                    span { class: "txt", "{text}" }
+                }
+            }
+        }
+    }
+}
+
+/// A plan the agent proposed (ExitPlanMode).
+#[component]
+fn PlanProposal(tool: ToolCall) -> Element {
+    let plan = tool.input.get("plan").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if plan.trim().is_empty() {
+        return rsx! { Step { tool } };
+    }
+    let html = markdown::to_html(&plan);
+    rsx! {
+        div { class: "tool-card plan-proposal",
+            div { class: "tool-card-head", span { class: "ic", Icon { i: I::List, size: 13 } } span { class: "name", "Plan" } }
+            div { class: "a-text md", dangerous_inner_html: "{html}" }
+        }
+    }
+}
+
+/// Questions the agent asked (AskUserQuestion) with the answers given.
+#[component]
+fn QuestionView(tool: ToolCall) -> Element {
+    let qs: Vec<(String, Vec<String>)> = tool
+        .input
+        .get("questions")
+        .and_then(|q| q.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|q| {
+                    let text = q.get("question").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                    let opts = q.get("options").and_then(|o| o.as_array()).map(|o| o.iter().filter_map(|x| x.get("label").and_then(|l| l.as_str()).or_else(|| x.as_str())).map(String::from).collect()).unwrap_or_default();
+                    (text, opts)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if qs.is_empty() {
+        return rsx! { Step { tool } };
+    }
+    let answer = tool.output.clone().unwrap_or_default();
+    rsx! {
+        div { class: "question-card answered",
+            for (i, (q, opts)) in qs.into_iter().enumerate() {
+                div { key: "{i}",
+                    div { class: "q-title", "{q}" }
+                    div { class: "q-opts",
+                        for (j, o) in opts.into_iter().enumerate() {
+                            span { key: "{j}", class: if answer.contains(&o) { "q-chip on" } else { "q-chip" }, "{o}" }
+                        }
+                    }
+                }
+            }
+            if !answer.trim().is_empty() {
+                div { class: "q-answer", "{larrier_core::lsf::first_line(&answer)}" }
+            }
         }
     }
 }
@@ -941,6 +1147,15 @@ fn Step(tool: ToolCall) -> Element {
 fn ToolView(session_id: String, tool: ToolCall) -> Element {
     if tool.kind == ToolKind::Task || !tool.subagent.is_empty() {
         return rsx! { super::tasks::SubagentCard { session_id, tool } };
+    }
+    match tool.name.as_str() {
+        "ExitPlanMode" => return rsx! { PlanProposal { tool } },
+        "AskUserQuestion" => return rsx! { QuestionView { tool } },
+        "BashOutput" | "TaskOutput" | "KillShell" | "KillBash" | "TaskStop" | "Monitor" => return rsx! { Step { tool } },
+        _ => {}
+    }
+    if tool.kind == ToolKind::Todo {
+        return rsx! { TodoCard { tool } };
     }
     if tool.kind.is_mutation() && !tool.diffs.is_empty() && !tool.is_error {
         return rsx! {

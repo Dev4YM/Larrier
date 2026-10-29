@@ -1104,21 +1104,19 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 
 /* Prompt timeline: dashes on the left of the chat; hovering anywhere near
    them opens the full list (prompt + answer preview) to scan and jump. */
-.turn-nav { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 8; padding: 28px 30px 28px 12px; }
-.tn-dashes { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: hidden; transition: opacity .15s ease; }
-.tn-dash { width: 12px; height: 2px; border-radius: 2px; background: var(--fg-4); transition: width .18s ease, background-color .18s ease; flex-shrink: 0; }
-.tn-dash.on { width: 20px; background: var(--fg); }
-.tn-panel { position: absolute; left: 8px; top: 50%; width: 340px; max-height: min(72vh, 600px); display: flex; flex-direction: column; background: var(--card-2); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-pop); opacity: 0; pointer-events: none; transform: translate(-8px, -50%) scale(.98); transform-origin: left center; transition: opacity .16s ease .12s, transform .2s cubic-bezier(.2, .8, .2, 1) .12s; }
-.turn-nav:hover .tn-panel { opacity: 1; pointer-events: auto; transform: translate(0, -50%); transition-delay: .04s; }
-.turn-nav:hover .tn-dashes { opacity: 0; }
-.tn-head { font-size: 11px; color: var(--fg-3); padding: 9px 14px 5px; flex-shrink: 0; }
-.tn-list { overflow-y: auto; padding: 0 6px 6px; overscroll-behavior: contain; }
-.tn-row { display: block; width: 100%; text-align: left; padding: 7px 9px; border-radius: 8px; transition: background-color .12s ease; }
-.tn-row:hover { background: var(--hover); }
-.tn-row.on { background: var(--selected); }
-.tn-q { font-size: 12.5px; line-height: 18px; color: var(--fg); font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tn-a { font-size: 12px; line-height: 17px; color: var(--fg-3); margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; transition: color .12s ease; }
-.tn-row:hover .tn-a, .tn-row.on .tn-a { -webkit-line-clamp: 3; color: var(--fg-2); }
+.turn-nav { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 8; padding: 24px 34px 24px 12px; display: flex; flex-direction: column; max-height: 76vh; }
+.tn-item { position: relative; display: flex; align-items: center; height: 8px; width: 26px; padding: 0; background: none; border: none; flex-shrink: 0; }
+.tn-dash { width: 12px; height: 2px; border-radius: 2px; background: var(--fg-4); transition: width .16s ease, background-color .16s ease; }
+.tn-item.on .tn-dash { width: 18px; background: var(--fg-2); }
+.tn-item.hot .tn-dash { width: 22px; background: var(--fg); }
+.tn-card { position: absolute; left: 32px; top: 50%; width: min(360px, 60vw); display: flex; flex-direction: column; gap: 4px; padding: 11px 14px 10px; text-align: left;
+  background: var(--card-2); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 10px 30px rgba(0, 0, 0, .10);
+  opacity: 0; pointer-events: none; transform: translate(-6px, -50%); transition: opacity .12s ease, transform .16s cubic-bezier(.2, .8, .2, 1); cursor: pointer; }
+.tn-item.hot .tn-card { opacity: 1; pointer-events: auto; transform: translate(0, -50%); }
+.tn-q { font-size: 13px; line-height: 19px; font-weight: 600; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.tn-a { font-size: 12.5px; line-height: 18px; color: var(--fg-3); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.tn-meta { font-size: 11px; color: var(--fg-4); margin-top: 2px; }
+.app[data-theme="dark"] .tn-card { box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .35); }
 .app.narrow .turn-nav { display: none; }
 
 /* Agent modes in the + menu: label, Default badge, description, check, key. */

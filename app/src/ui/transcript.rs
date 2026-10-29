@@ -90,6 +90,8 @@ struct NavItem {
     uid: String,
     prompt: String,
     answer: String,
+    /// "3h ago · worked 4m".
+    meta: String,
 }
 
 /// What the transcript mounts for one turn.
@@ -148,11 +150,17 @@ pub fn Transcript(id: String) -> Element {
                     .filter(|m| m.role == Role::Assistant)
                     .find_map(|m| m.parts.iter().rev().find_map(|p| match p { Part::Text { text } if !text.trim().is_empty() => Some(text.clone()), _ => None }))
                     .unwrap_or_default();
+                let worked = msgs.last().map(|m| m.created_at - msgs[0].created_at).filter(|d| d.num_seconds() >= 5).map(|d| {
+                    let m = d.num_minutes();
+                    if m == 0 { format!("worked {}s", d.num_seconds()) } else if m < 60 { format!("worked {m}m") } else { format!("worked {}h {}m", m / 60, m % 60) }
+                });
+                let when = crate::state::rel_time(msgs[0].created_at);
                 NavItem {
                     ti: *i,
                     uid: t.user_id.clone().unwrap_or_default(),
-                    prompt: larrier_core::lsf::preview_line(&q, 160),
-                    answer: larrier_core::lsf::preview_line(&answer, 220),
+                    prompt: larrier_core::lsf::preview_line(&q, 300),
+                    answer: larrier_core::lsf::preview_line(&answer, 360),
+                    meta: match worked { Some(w) => format!("{when} · {w}"), None => when },
                 }
             })
             .collect();
@@ -198,6 +206,32 @@ pub fn Transcript(id: String) -> Element {
                     el.addEventListener('touchmove', mark, {{ passive: true }});
                     el.addEventListener('keydown', mark);
                 }}
+                // Timeline: the dash nearest the pointer is "hot" (its card
+                // shows); the card itself keeps it while being read.
+                const tn = document.querySelector('.turn-nav[data-for="{tid2}"]');
+                if (tn && !tn.__wired) {{
+                    tn.__wired = true;
+                    const hot = (it) => {{
+                        tn.querySelectorAll('.tn-item.hot').forEach(x => {{ if (x !== it) x.classList.remove('hot'); }});
+                        if (it) it.classList.add('hot');
+                    }};
+                    tn.addEventListener('pointermove', (e) => {{
+                        if (e.target.closest && e.target.closest('.tn-card')) return;
+                        let best = null, bd = 1e9;
+                        for (const it of tn.querySelectorAll('.tn-item')) {{
+                            const r = it.getBoundingClientRect();
+                            const d = Math.abs(r.top + r.height / 2 - e.clientY);
+                            if (d < bd) {{ bd = d; best = it; }}
+                        }}
+                        hot(best);
+                    }});
+                    tn.addEventListener('pointerleave', () => hot(null));
+                    tn.addEventListener('click', (e) => {{
+                        if (e.target.closest && e.target.closest('.tn-item')) return;
+                        const h = tn.querySelector('.tn-item.hot');
+                        if (h) h.click();
+                    }});
+                }}
                 if (el.__current) requestAnimationFrame(el.__current);
                 const fresh = el.dataset.fresh !== '0';
                 const near = el.scrollHeight - el.scrollTop - el.clientHeight < 260;
@@ -222,37 +256,34 @@ pub fn Transcript(id: String) -> Element {
     let tid3 = tid.clone();
     rsx! {
         if nav.len() > 1 {
-            // A wide hover zone: the dashes open into the full timeline.
+            // The prompt timeline, like Cursor's: a dash per prompt. Anywhere
+            // in its strip the nearest dash lights up with a card (prompt,
+            // the answer it got, when); a click jumps there.
             div { class: "turn-nav", "data-for": "{tid}",
-                div { class: "tn-dashes",
-                    for it in nav.iter() {
-                        span { key: "d-{it.ti}", class: "tn-dash", "data-uid": "{it.uid}" }
-                    }
-                }
-                div { class: "tn-panel",
-                    div { class: "tn-head", if total > nav.len() { "Last {nav.len()} of {total} prompts" } else { "{nav.len()} prompts" } }
-                    div { class: "tn-list",
-                        for it in nav.iter().cloned() {
-                            button {
-                                key: "r-{it.ti}",
-                                class: "tn-row",
-                                "data-uid": "{it.uid}",
-                                onclick: move |e| {
-                                    e.stop_propagation();
-                                    // Mount the turn first if it is above the loaded window.
-                                    if it.ti < first {
-                                        shown.set(total - it.ti);
-                                    }
-                                    let uid = it.uid.clone();
-                                    document::eval(&format!(
-                                        "setTimeout(() => {{ const m = document.getElementById('m-{uid}'); const t = m && (m.closest('.turn') || m); if (t) t.scrollIntoView({{block: 'start', behavior: document.querySelector('.app.no-motion') ? 'auto' : 'smooth'}}); }}, 30)"
-                                    ));
-                                },
-                                div { class: "tn-q", "{it.prompt}" }
-                                if !it.answer.is_empty() {
-                                    div { class: "tn-a", "{it.answer}" }
-                                }
+                for it in nav.iter().cloned() {
+                    button {
+                        key: "d-{it.ti}",
+                        class: "tn-item",
+                        "data-uid": "{it.uid}",
+                        "aria-label": "{it.prompt}",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            // Mount the turn first if it is above the loaded window.
+                            if it.ti < first {
+                                shown.set(total - it.ti);
                             }
+                            let uid = it.uid.clone();
+                            document::eval(&format!(
+                                "setTimeout(() => {{ const m = document.getElementById('m-{uid}'); const t = m && (m.closest('.turn') || m); if (t) t.scrollIntoView({{block: 'start', behavior: document.querySelector('.app.no-motion') ? 'auto' : 'smooth'}}); }}, 30)"
+                            ));
+                        },
+                        span { class: "tn-dash" }
+                        span { class: "tn-card",
+                            span { class: "tn-q", "{it.prompt}" }
+                            if !it.answer.is_empty() {
+                                span { class: "tn-a", "{it.answer}" }
+                            }
+                            span { class: "tn-meta", "{it.meta}" }
                         }
                     }
                 }

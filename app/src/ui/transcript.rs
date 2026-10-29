@@ -80,6 +80,15 @@ fn turn_fp(msgs: &[Message], feedback: Option<&str>) -> u64 {
     h.finish()
 }
 
+/// One prompt in the timeline.
+#[derive(Clone, PartialEq)]
+struct NavItem {
+    ti: usize,
+    uid: String,
+    prompt: String,
+    answer: String,
+}
+
 /// What the transcript mounts for one turn.
 #[derive(Clone, PartialEq)]
 struct TurnRow {
@@ -123,8 +132,27 @@ pub fn Transcript(id: String) -> Element {
                 }
             })
             .collect();
-        let users: Vec<(usize, String)> = spans.iter().enumerate().filter_map(|(i, t)| t.user_id.clone().map(|u| (i, u))).collect();
-        let nav: Vec<(usize, String)> = users[users.len().saturating_sub(NAV_MAX)..].to_vec();
+        // The prompt timeline: each prompt with a preview of its answer.
+        let with_prompt: Vec<(usize, &TurnSpan)> = spans.iter().enumerate().filter(|(_, t)| t.user_id.is_some()).collect();
+        let nav: Vec<NavItem> = with_prompt[with_prompt.len().saturating_sub(NAV_MAX)..]
+            .iter()
+            .map(|(i, t)| {
+                let msgs = &s.messages[t.start..t.end];
+                let (q, _) = super::mentions::split_mentions(&msgs[0].text());
+                let answer = msgs
+                    .iter()
+                    .rev()
+                    .filter(|m| m.role == Role::Assistant)
+                    .find_map(|m| m.parts.iter().rev().find_map(|p| match p { Part::Text { text } if !text.trim().is_empty() => Some(text.clone()), _ => None }))
+                    .unwrap_or_default();
+                NavItem {
+                    ti: *i,
+                    uid: t.user_id.clone().unwrap_or_default(),
+                    prompt: larrier_core::lsf::preview_line(&q, 160),
+                    answer: larrier_core::lsf::preview_line(&answer, 220),
+                }
+            })
+            .collect();
         let running = app.is_active(&id);
         let waiting = running && s.messages.last().map(|m| m.role == Role::User).unwrap_or(false);
         (rows, nav, total, s.messages.is_empty(), waiting, s.updated_at)
@@ -146,11 +174,28 @@ pub fn Transcript(id: String) -> Element {
                 if (!el) return;
                 if (!el.__wired) {{
                     el.__wired = true;
+                    const nav = () => document.querySelector('.turn-nav[data-for="{tid2}"]');
+                    const current = () => {{
+                        const top = el.getBoundingClientRect().top + 48;
+                        let cur = null;
+                        for (const t of el.querySelectorAll('.turn')) {{
+                            if (t.getBoundingClientRect().top > top) break;
+                            const m = t.querySelector('.user-msg[id^="m-"]');
+                            if (m) cur = m.id.slice(2);
+                        }}
+                        const n = nav(); if (!n) return;
+                        if (!cur) {{ const first = n.querySelector('[data-uid]'); cur = first && first.dataset.uid; }}
+                        n.querySelectorAll('[data-uid]').forEach(d => d.classList.toggle('on', d.dataset.uid === cur));
+                    }};
+                    let pending = false;
+                    el.addEventListener('scroll', () => {{ if (!pending) {{ pending = true; requestAnimationFrame(() => {{ pending = false; current(); }}); }} }}, {{ passive: true }});
+                    el.__current = current;
                     const mark = () => {{ el.__userAt = performance.now(); }};
                     el.addEventListener('wheel', mark, {{ passive: true }});
                     el.addEventListener('touchmove', mark, {{ passive: true }});
                     el.addEventListener('keydown', mark);
                 }}
+                if (el.__current) requestAnimationFrame(el.__current);
                 const fresh = el.dataset.fresh !== '0';
                 const near = el.scrollHeight - el.scrollTop - el.clientHeight < 260;
                 if (!fresh && !near) return;
@@ -174,19 +219,38 @@ pub fn Transcript(id: String) -> Element {
     let tid3 = tid.clone();
     rsx! {
         if nav.len() > 1 {
-            div { class: "turn-nav",
-                for (n, (ti, uid)) in nav.iter().cloned().enumerate() {
-                    button {
-                        key: "{uid}",
-                        class: if n + 1 == nav.len() { "on" } else { "" },
-                        title: "Jump to prompt {ti + 1}",
-                        onclick: move |_| {
-                            // Mount the turn first if it is above the loaded window.
-                            if ti < first {
-                                shown.set(total - ti);
+            // A wide hover zone: the dashes open into the full timeline.
+            div { class: "turn-nav", "data-for": "{tid}",
+                div { class: "tn-dashes",
+                    for it in nav.iter() {
+                        span { key: "d-{it.uid}", class: "tn-dash", "data-uid": "{it.uid}" }
+                    }
+                }
+                div { class: "tn-panel",
+                    div { class: "tn-head", if total > nav.len() { "Last {nav.len()} of {total} prompts" } else { "{nav.len()} prompts" } }
+                    div { class: "tn-list",
+                        for it in nav.iter().cloned() {
+                            button {
+                                key: "r-{it.uid}",
+                                class: "tn-row",
+                                "data-uid": "{it.uid}",
+                                onclick: move |e| {
+                                    e.stop_propagation();
+                                    // Mount the turn first if it is above the loaded window.
+                                    if it.ti < first {
+                                        shown.set(total - it.ti);
+                                    }
+                                    let uid = it.uid.clone();
+                                    document::eval(&format!(
+                                        "setTimeout(() => {{ const m = document.getElementById('m-{uid}'); const t = m && (m.closest('.turn') || m); if (t) t.scrollIntoView({{block: 'start', behavior: document.querySelector('.app.no-motion') ? 'auto' : 'smooth'}}); }}, 30)"
+                                    ));
+                                },
+                                div { class: "tn-q", "{it.prompt}" }
+                                if !it.answer.is_empty() {
+                                    div { class: "tn-a", "{it.answer}" }
+                                }
                             }
-                            document::eval(&format!("setTimeout(() => document.getElementById('m-{uid}')?.scrollIntoView({{block: 'start', behavior: 'smooth'}}), 30)"));
-                        },
+                        }
                     }
                 }
             }

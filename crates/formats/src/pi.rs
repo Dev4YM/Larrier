@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use larrier_core::{AgentKind, NativeLink, Part, Role, Session, ToolCall, Usage};
 use serde_json::{json, Value};
 
-use crate::util::{self, content_text, env_dir, finish, head_lines, json_lines, parse_ts, s, string, ts_value, Conv, Meta};
+use crate::util::{self, content_text, env_dir, finish, head_lines, image_parts, json_lines, parse_ts, s, string, ts_value, Conv, Meta};
 use crate::NativeSessionInfo;
 
 const AGENT: AgentKind = AgentKind::Pi;
@@ -84,12 +84,33 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
     }
     let mut conv = Conv::new(AGENT);
     let mut title = None;
+    // Whether Pi is still mid-turn: the last message is a prompt, a tool
+    // result or a reply that called tools.
+    let mut open = false;
     for &i in &chain {
         let e = entries[i];
         let ts = e.get("timestamp").and_then(ts_value);
+        if s(e, "type") == Some("message") {
+            let m = &e["message"];
+            open = match s(m, "role") {
+                Some("user") | Some("toolResult") => true,
+                Some("assistant") => s(m, "stopReason") == Some("toolUse"),
+                _ => open,
+            };
+        }
         match s(e, "type").unwrap_or("") {
             "session_info" => title = string(e, "name").or(title.take()),
             "compaction" => conv.notice("Context compacted", ts),
+            // Moving to another point of the session tree summarizes the
+            // branch left behind.
+            "branch_summary" => conv.notice("Summarized the branch left behind", ts),
+            // Messages extensions inject; only those meant to be shown.
+            "custom_message" if e["display"].as_bool().unwrap_or(false) => {
+                let t = content_text(&e["content"]);
+                if !t.trim().is_empty() {
+                    conv.notice(larrier_core::lsf::first_line(&t), ts);
+                }
+            }
             "model_change" => {
                 if let Some(m) = s(e, "modelId") {
                     conv.model = Some(m.to_string());
@@ -143,15 +164,31 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                                 cost_usd: u["cost"]["total"].as_f64().filter(|c| *c > 0.0),
                             });
                         }
-                        if s(m, "stopReason") == Some("error") {
-                            if let Some(err) = s(m, "errorMessage") {
-                                conv.error(err, mts);
+                        match s(m, "stopReason") {
+                            Some("error") => {
+                                if let Some(err) = s(m, "errorMessage") {
+                                    conv.error(err, mts);
+                                }
                             }
+                            Some("aborted") => conv.notice("Interrupted", mts),
+                            _ => {}
                         }
                     }
                     "toolResult" => {
+                        let id = s(m, "toolCallId").unwrap_or("");
                         let out = content_text(&m["content"]);
-                        conv.tool_result(s(m, "toolCallId").unwrap_or(""), Some(out), m["isError"].as_bool().unwrap_or(false), Vec::new());
+                        conv.tool_result(id, Some(out), m["isError"].as_bool().unwrap_or(false), Vec::new());
+                        conv.tool_images(id, image_parts(&m["content"]));
+                    }
+                    // A command the user ran with `!` (or `!!`, kept out of
+                    // the model's context).
+                    "bashExecution" => {
+                        let mut t = ToolCall::new(larrier_core::lsf::new_id(), "bash", json!({"command": m["command"]}));
+                        let code = m["exitCode"].as_i64();
+                        t.output = Some(util::trim_output(&string(m, "output").unwrap_or_default()));
+                        t.is_error = m["cancelled"].as_bool().unwrap_or(false) || code.is_some_and(|c| c != 0);
+                        t.status = larrier_core::ToolStatus::Completed;
+                        conv.tool(t, mts, None);
                     }
                     _ => {}
                 }
@@ -168,7 +205,9 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
         resume_path: path.map(|p| p.to_string_lossy().to_string()),
         ..Default::default()
     };
-    finish(conv, AGENT, meta)
+    let mut session = finish(conv, AGENT, meta)?;
+    session.external_turn = open;
+    Ok(session)
 }
 
 // ---------------------------------------------------------------- export
@@ -243,6 +282,28 @@ mod tests {
         let a = s.messages[1].text();
         assert!(a.contains("new answer") && !a.contains("old answer"));
         assert_eq!(s.messages[1].tool_calls().next().unwrap().output.as_deref(), Some("a.rs"));
+        assert!(!s.external_turn);
+    }
+
+    #[test]
+    fn user_shell_runs_aborts_tool_images_and_open_turns() {
+        let t = [
+            r#"{"type":"session","version":3,"id":"P2","timestamp":"2026-01-01T00:00:00Z","cwd":"/r"}"#,
+            r#"{"type":"message","id":"a","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"look at the screenshot"}}"#,
+            r#"{"type":"message","id":"b","parentId":"a","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"t1","name":"read","arguments":{"path":"shot.png"}}],"model":"m","stopReason":"toolUse"}}"#,
+            r#"{"type":"message","id":"c","parentId":"b","timestamp":"2026-01-01T00:00:03Z","message":{"role":"toolResult","toolCallId":"t1","content":[{"type":"text","text":"Read image file"},{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}],"isError":false}}"#,
+            r#"{"type":"message","id":"d","parentId":"c","timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"It shows"}],"model":"m","stopReason":"aborted"}}"#,
+            r#"{"type":"message","id":"e","parentId":"d","timestamp":"2026-01-01T00:00:05Z","message":{"role":"bashExecution","command":"cargo test","output":"1 failed","exitCode":101,"cancelled":false,"truncated":false}}"#,
+            r#"{"type":"message","id":"f","parentId":"e","timestamp":"2026-01-01T00:00:06Z","message":{"role":"user","content":"fix it"}}"#,
+        ];
+        let s = parse(&t.join("\n"), None).unwrap();
+        assert!(s.external_turn, "the last prompt has no reply yet");
+        let tools: Vec<&ToolCall> = s.messages.iter().flat_map(|m| m.tool_calls()).collect();
+        assert_eq!(tools[0].images.len(), 1);
+        let bash = tools.iter().find(|t| t.name == "bash").unwrap();
+        assert!(bash.is_error);
+        assert_eq!(bash.output.as_deref(), Some("1 failed"));
+        assert!(s.messages.iter().flat_map(|m| &m.parts).any(|p| matches!(p, Part::Notice { text } if text == "Interrupted")));
     }
 
     #[test]

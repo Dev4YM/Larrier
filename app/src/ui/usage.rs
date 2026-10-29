@@ -1401,6 +1401,7 @@ mod tests {
             pinned: false,
             archived: false,
             unread: false,
+            external_turn: false,
             parent_id: None,
             usage: Usage::default(),
         }

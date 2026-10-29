@@ -20,7 +20,7 @@ use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::util::{self, content_text, env_dir, finish, head_lines, image_part, json_lines, parse_ts, s, string, tail_lines, Conv, Meta};
+use crate::util::{self, content_text, env_dir, finish, head_lines, image_part, image_parts, image_refs, json_lines, parse_ts, s, string, tail_lines, Conv, Meta};
 use crate::NativeSessionInfo;
 
 const AGENT: AgentKind = AgentKind::ClaudeCode;
@@ -251,7 +251,49 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
     if let Some(p) = path {
         meta.resume_path = Some(p.to_string_lossy().to_string());
     }
-    finish(conv, AGENT, meta)
+    let mut session = finish(conv, AGENT, meta)?;
+    session.external_turn = turn_open(&lines);
+    Ok(session)
+}
+
+/// Whether Claude Code is still mid-turn: the last prompt (or queued prompt)
+/// has no `end_turn` / `stop_sequence` reply and no stop-hook summary after it.
+/// Every assistant record carries `stop_reason`; `tool_use` means more is
+/// coming.
+fn turn_open(lines: &[Value]) -> bool {
+    let mut open = false;
+    for v in lines {
+        if v["isSidechain"].as_bool().unwrap_or(false) {
+            continue;
+        }
+        match s(v, "type") {
+            Some("user") if !v["isMeta"].as_bool().unwrap_or(false) => {
+                let c = &v["message"]["content"];
+                let text = match c {
+                    Value::String(t) => t.clone(),
+                    Value::Array(b) => b.iter().filter_map(|x| s(x, "text")).collect::<Vec<_>>().join(" "),
+                    _ => String::new(),
+                };
+                if text.contains("[Request interrupted") {
+                    open = false;
+                } else {
+                    open = true;
+                }
+            }
+            Some("assistant") => {
+                open = !matches!(s(&v["message"], "stop_reason"), Some("end_turn") | Some("stop_sequence") | Some("max_tokens") | Some("refusal"));
+            }
+            Some("system") if s(v, "subtype") == Some("stop_hook_summary") => open = false,
+            Some("attachment") => {
+                let a = &v["attachment"];
+                if s(a, "type") == Some("queued_command") && s(a, "commandMode") != Some("task-notification") {
+                    open = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    open
 }
 
 /// Result fields that describe subagents and background tasks.
@@ -271,6 +313,29 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
         if ty == "system" {
             if s(v, "subtype") == Some("compact_boundary") && active.as_ref().map(|a| a.contains(&i)).unwrap_or(true) {
                 conv.notice("Context compacted", s(v, "timestamp").and_then(parse_ts));
+            }
+            continue;
+        }
+        // Prompts sent while the agent was working arrive as queued commands
+        // (never as user records): show them where they were sent.
+        if ty == "attachment" && !sidechain {
+            let a = &v["attachment"];
+            if s(a, "type") == Some("queued_command") {
+                let prompt = s(a, "prompt").unwrap_or("");
+                let ts = s(a, "timestamp").or_else(|| s(v, "timestamp")).and_then(parse_ts);
+                if s(a, "commandMode") == Some("task-notification") || prompt.trim_start().starts_with("<task-notification>") {
+                    notes.extend(task_notes(prompt));
+                } else {
+                    let (text, images) = image_refs(&clean_user_text(prompt));
+                    let mut parts = Vec::new();
+                    if !text.is_empty() {
+                        parts.push(Part::Text { text });
+                    }
+                    parts.extend(images);
+                    if !parts.is_empty() {
+                        conv.user_parts(parts, ts);
+                    }
+                }
             }
             continue;
         }
@@ -296,24 +361,26 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
             match content {
                 Value::String(t) => {
                     notes.extend(task_notes(t));
-                    let t = clean_user_text(t);
+                    let (t, images) = image_refs(&clean_user_text(t));
                     if t.starts_with("[Request interrupted") {
                         conv.notice("Interrupted", ts);
                     } else if !t.is_empty() {
                         parts.push(Part::Text { text: t });
                     }
+                    parts.extend(images);
                 }
                 Value::Array(blocks) => {
                     for b in blocks {
                         match s(b, "type") {
                             Some("text") => {
                                 notes.extend(task_notes(s(b, "text").unwrap_or("")));
-                                let t = clean_user_text(s(b, "text").unwrap_or(""));
+                                let (t, images) = image_refs(&clean_user_text(s(b, "text").unwrap_or("")));
                                 if t.starts_with("[Request interrupted") {
                                     conv.notice("Interrupted", ts);
                                 } else if !t.is_empty() {
                                     parts.push(Part::Text { text: t });
                                 }
+                                parts.extend(images);
                             }
                             Some("image") => {
                                 let src = &b["source"];
@@ -323,10 +390,15 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
                             }
                             Some("tool_result") => {
                                 let id = s(b, "tool_use_id").unwrap_or("");
-                                let out = content_text(&b["content"]);
+                                let images = image_parts(&b["content"]);
+                                let mut out = content_text(&b["content"]);
+                                if !images.is_empty() {
+                                    out = out.lines().filter(|l| l.trim() != "[image]").collect::<Vec<_>>().join("\n");
+                                }
                                 let is_err = b["is_error"].as_bool().unwrap_or(false);
                                 let diffs = tool_meta.map(diffs_from_result).unwrap_or_default();
                                 conv.tool_result(id, Some(out), is_err, diffs);
+                                conv.tool_images(id, images);
                                 if let Some(m) = tool_meta.filter(|m| TASK_KEYS.iter().any(|k| m.get(*k).is_some())) {
                                     results.push((id.to_string(), m.clone()));
                                 }
@@ -738,6 +810,42 @@ mod tests {
         assert!(a.text().contains("Done."));
         assert_eq!(s.usage.output_tokens, 11);
         assert_eq!(s.workspace.as_ref().unwrap().branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn running_turns_queued_prompts_and_images() {
+        let png = "iVBORw0KGgo=";
+        let mut lines = vec![
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"take a screenshot"}}"#.to_string(),
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","timestamp":"2026-10-01T10:00:01Z","message":{"id":"m1","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"mcp__browser__screenshot","input":{}}]}}"#.to_string(),
+            format!(r#"{{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"S","timestamp":"2026-10-01T10:00:02Z","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","content":[{{"type":"text","text":"done"}},{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{png}"}}}}]}}]}}}}"#),
+            r#"{"type":"attachment","uuid":"x1","parentUuid":"u2","sessionId":"S","timestamp":"2026-10-01T10:00:03Z","attachment":{"type":"queued_command","prompt":"also check the footer","commandMode":"prompt","timestamp":"2026-10-01T10:00:03Z"}}"#.to_string(),
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"x1","sessionId":"S","timestamp":"2026-10-01T10:00:04Z","message":{"id":"m2","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/r/footer.html"}}]}}"#.to_string(),
+        ];
+        let s = parse(&lines.join("\n"), None, "S").unwrap();
+        assert!(s.external_turn, "a tool_use stop reason means the turn is still running");
+        let users: Vec<String> = s.messages.iter().filter(|m| m.role == Role::User).map(|m| m.text()).collect();
+        assert!(users.iter().any(|t| t.contains("also check the footer")), "queued prompt imported: {users:?}");
+        let shot = s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == "t1").unwrap();
+        assert_eq!(shot.images.len(), 1);
+        assert_eq!(shot.output.as_deref(), Some("done"));
+
+        lines.push(r#"{"type":"assistant","uuid":"a3","parentUuid":"a2","sessionId":"S","timestamp":"2026-10-01T10:00:05Z","message":{"id":"m3","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"All good."}]}}"#.to_string());
+        lines.push(r#"{"type":"system","subtype":"stop_hook_summary","uuid":"y1","parentUuid":"a3","sessionId":"S","timestamp":"2026-10-01T10:00:06Z"}"#.to_string());
+        assert!(!parse(&lines.join("\n"), None, "S").unwrap().external_turn, "end_turn closes the turn");
+    }
+
+    #[test]
+    fn pasted_image_references_become_images() {
+        let dir = tempfile::tempdir().unwrap();
+        let img = dir.path().join("1.png");
+        std::fs::write(&img, b"png").unwrap();
+        let text = format!("look at this\n[Image: source: {}]", img.display());
+        let (t, parts) = crate::util::image_refs(&text);
+        assert_eq!(t, "look at this");
+        assert_eq!(parts.len(), 1);
+        let (t, parts) = crate::util::image_refs("[Image: source: /no/such/missing.png] hi");
+        assert!(parts.is_empty() && t.contains("missing.png"), "missing files stay as text");
     }
 
     #[test]

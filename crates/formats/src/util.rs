@@ -344,6 +344,55 @@ pub fn json_or_string(raw: &str) -> Value {
 }
 
 /// Flatten text-ish content (`string`, `[{type:text,text}]`, `{text}`).
+/// Image blocks inside message or tool-result content (Anthropic `image`,
+/// OpenAI `input_image` / `image_url`).
+pub fn image_parts(v: &Value) -> Vec<Part> {
+    let Value::Array(items) = v else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|i| match i.get("type").and_then(|t| t.as_str()) {
+            Some("image") => {
+                let src = &i["source"];
+                let mime = src.get("media_type").and_then(|m| m.as_str()).map(String::from);
+                image_part(mime, src.get("data").and_then(|d| d.as_str()), src.get("url").and_then(|u| u.as_str()))
+            }
+            Some("input_image") | Some("image_url") => {
+                let url = i.get("image_url").and_then(|u| u.as_str().or_else(|| u.get("url").and_then(|x| x.as_str())));
+                image_part(None, None, url)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// `[Image: source: C:\…\shot.png]` references (images pasted into a prompt
+/// and saved to disk) → image parts for files that exist; the references
+/// are removed from the text.
+pub fn image_refs(text: &str) -> (String, Vec<Part>) {
+    let mut out = String::with_capacity(text.len());
+    let mut parts = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("[Image: source: ") {
+        let after = &rest[i + 16..];
+        let Some(end) = after.find(']') else { break };
+        let path = after[..end].trim();
+        out.push_str(&rest[..i]);
+        if std::path::Path::new(path).is_file() {
+            let lower = path.to_lowercase();
+            let mime = [("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("gif", "image/gif"), ("webp", "image/webp")]
+                .iter()
+                .find(|(e, _)| lower.ends_with(&format!(".{e}")))
+                .map(|(_, m)| m.to_string());
+            parts.push(Part::Image { mime, source: MediaSource::Path { path: path.to_string() } });
+        } else {
+            out.push_str(&rest[i..i + 16 + end + 1]);
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    (out.trim().to_string(), parts)
+}
+
 pub fn content_text(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -538,6 +587,17 @@ impl Conv {
 
     /// Attach a result to a previously seen tool call. Returns false when the
     /// call is unknown.
+    /// Attach images a tool returned (screenshots, image reads, MCP content).
+    pub fn tool_images(&mut self, id: &str, images: Vec<Part>) {
+        if images.is_empty() {
+            return;
+        }
+        let Some(&(mi, pi)) = self.tools.get(id) else { return };
+        if let Some(Part::Tool(t)) = self.messages.get_mut(mi).and_then(|m| m.parts.get_mut(pi)) {
+            t.images.extend(images);
+        }
+    }
+
     pub fn tool_result(&mut self, id: &str, output: Option<String>, is_error: bool, diffs: Vec<FileDiff>) -> bool {
         let Some(&(mi, pi)) = self.tools.get(id) else { return false };
         if let Some(Part::Tool(t)) = self.messages.get_mut(mi).and_then(|m| m.parts.get_mut(pi)) {

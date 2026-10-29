@@ -130,7 +130,25 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
     let (conv, spawns) = convert(&lines, path, &mut meta);
     let mut s = finish(conv, AGENT, meta)?;
     attach_children(&mut s.messages, &spawns, path, 0);
+    s.external_turn = turn_open(&lines);
     Ok(s)
+}
+
+/// Whether Codex is still mid-turn: a `task_started` event with no
+/// `task_complete` / `turn_aborted` after it.
+fn turn_open(lines: &[Value]) -> bool {
+    let mut open = false;
+    for v in lines {
+        if v.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        match v["payload"].get("type").and_then(|t| t.as_str()) {
+            Some("task_started") | Some("turn_started") => open = true,
+            Some("task_complete") | Some("turn_complete") | Some("turn_aborted") => open = false,
+            _ => {}
+        }
+    }
+    open
 }
 
 /// Convert rollout lines. Returns `(spawn call_id, child thread id)` pairs.
@@ -577,6 +595,17 @@ pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn running_turn_until_task_complete() {
+        let open = r#"{"timestamp":"2026-10-29T10:00:00Z","type":"session_meta","payload":{"id":"T","cwd":"/r"}}
+{"timestamp":"2026-10-29T10:00:01Z","type":"event_msg","payload":{"type":"task_started"}}
+{"timestamp":"2026-10-29T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"fix it"}]}}"#;
+        assert!(super::turn_open(&crate::util::json_lines(open)));
+        let done = format!("{open}
+{}", r#"{"timestamp":"2026-10-29T10:00:09Z","type":"event_msg","payload":{"type":"task_complete"}}"#);
+        assert!(!super::turn_open(&crate::util::json_lines(&done)));
+    }
+
     use super::*;
 
     #[test]

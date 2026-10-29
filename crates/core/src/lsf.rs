@@ -65,6 +65,10 @@ pub struct Session {
     pub archived: bool,
     #[serde(default)]
     pub unread: bool,
+    /// An imported session whose agent is still mid-turn in its own app
+    /// (a terminal CLI, an IDE): the transcript has no end-of-turn marker yet.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub external_turn: bool,
     #[serde(default)]
     pub usage: Usage,
     #[serde(default)]
@@ -449,6 +453,10 @@ pub struct ToolCall {
     /// Subagent type, e.g. `Explore`, `general-purpose`, a Codex task name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
+    /// Images the tool returned (screenshots, image reads, MCP image
+    /// content), as `Part::Image` parts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<Part>,
 }
 
 impl ToolCall {
@@ -482,6 +490,7 @@ impl ToolCall {
             subagent: Vec::new(),
             background,
             agent_name,
+            images: Vec::new(),
         };
         t.title = Some(t.describe());
         t
@@ -841,6 +850,7 @@ impl Session {
             pinned: false,
             archived: false,
             unread: false,
+            external_turn: false,
             usage: Usage::default(),
             messages: Vec::new(),
             extra: Map::new(),
@@ -976,6 +986,7 @@ impl Session {
             pinned: self.pinned,
             archived: self.archived,
             unread: self.unread,
+            external_turn: self.external_turn,
             parent_id: self.parent.as_ref().map(|p| p.session_id.clone()),
             usage: self.usage.clone(),
         }
@@ -1240,6 +1251,8 @@ pub struct SessionSummary {
     pub archived: bool,
     #[serde(default)]
     pub unread: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub external_turn: bool,
     #[serde(default)]
     pub parent_id: Option<String>,
     /// Token and cost totals (for the Usage page).

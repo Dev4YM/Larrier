@@ -23,7 +23,7 @@ use dioxus::prelude::*;
 use larrier_core::AgentKind;
 
 use crate::icons::{Icon, I};
-use crate::state::{App, SettingsTab, View};
+use crate::state::{use_ui, App, SettingsTab, View};
 
 pub use overlays::{ContextMenu, GlobalMenu, ModalHost, Palette, TabMenu, Toasts};
 
@@ -274,10 +274,13 @@ pub fn Root() -> Element {
         dioxus::desktop::window().set_zoom_level(zoom_level.clamp(0.5, 2.0));
     }));
 
-    let ui = app.ui.read();
+    let dark = use_ui(|u| u.dark)();
+    let narrow = use_ui(|u| u.win_w < NARROW)();
+    let sidebar_open = use_ui(|u| u.sidebar_open)();
+    let lightbox = use_ui(|u| u.lightbox.clone())();
     let cfg = app.config.read();
     let st = &cfg.settings;
-    let theme = if ui.dark { "dark" } else { "light" };
+    let theme = if dark { "dark" } else { "light" };
     let mut style = format!("--sidebar-w: {}px; --chat-w: {}px; --tw: {}px; {}", st.sidebar_width, st.chat_width, st.transcript_width.clamp(560, 1600), text_size_vars(st));
     if !st.accent.trim().is_empty() {
         style.push_str(&format!(" --accent-c: {};", st.accent.trim()));
@@ -295,7 +298,6 @@ pub fn Root() -> Element {
             }
         }
     }
-    let narrow = ui.win_w < NARROW;
     let mut class = String::from("app");
     if st.density == larrier_core::Density::Compact {
         class.push_str(" compact");
@@ -309,10 +311,7 @@ pub fn Root() -> Element {
     if narrow {
         class.push_str(" narrow");
     }
-    let sidebar_open = ui.sidebar_open;
-    let lightbox = ui.lightbox.clone();
     let code_themes = (st.code_theme_light.clone(), st.code_theme_dark.clone());
-    drop(ui);
     drop(cfg);
 
     let in_settings = matches!(&*app.view.read(), View::Settings(_));
@@ -363,23 +362,26 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
             match (k, shift) {
                 ("escape", _) => {
                     let editing = app.editing.peek().clone();
-                    let mut ui = app.ui.write();
-                    if ui.gctx.is_some() || ui.ctx.is_some() || ui.menubar.is_some() || ui.tab_ctx.is_some() {
+                    let (menus, palette, modal) = {
+                        let ui = app.ui.peek();
+                        (ui.gctx.is_some() || ui.ctx.is_some() || ui.menubar.is_some() || ui.tab_ctx.is_some(), ui.palette_open, ui.modal.is_some())
+                    };
+                    if menus {
+                        let mut ui = app.ui.write();
                         ui.gctx = None;
                         ui.ctx = None;
                         ui.menubar = None;
                         ui.tab_ctx = None;
                     } else if editing.msg.is_some() {
-                        drop(ui);
                         if editing.confirm.is_some() {
                             app.editing.write().confirm = None;
                         } else {
                             app.request_edit(None);
                         }
-                    } else if ui.palette_open {
-                        ui.palette_open = false;
-                    } else if ui.modal.is_some() {
-                        ui.modal = None;
+                    } else if palette {
+                        app.ui.write().palette_open = false;
+                    } else if modal {
+                        app.ui.write().modal = None;
                     }
                 }
                 ("k", _) | ("p", true) => {
@@ -474,7 +476,11 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
         }
         Some("size") => {
             let w = v["w"].as_f64().unwrap_or(1400.0);
-            let was_narrow = app.ui.read().win_w < NARROW;
+            let old = app.ui.peek().win_w;
+            if (old - w).abs() < 0.5 {
+                return;
+            }
+            let was_narrow = old < NARROW;
             app.ui.write().win_w = w;
             // Entering the narrow layout closes the overlay sidebar.
             if w < NARROW && !was_narrow {

@@ -476,9 +476,7 @@ pub const NARROW: f64 = 760.0;
 
 /// Open the review pane on a tool tab (Changes, Browser, Terminal, Files).
 pub fn open_tool(mut app: App, tab: crate::state::RightTab) {
-    let mut ui = app.ui.write();
-    ui.right_open = true;
-    ui.right_tab = tab;
+    app.ui.write().open_panel(tab, false);
 }
 
 /// Ctrl + / Ctrl - / Ctrl 0 interface zoom (persisted in settings).

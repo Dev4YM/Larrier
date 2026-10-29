@@ -3,7 +3,7 @@
 //! A subagent call (Task / Agent / spawn_agent) shows in the transcript as a
 //! one-line row; clicking it opens the subagent's transcript in its own tab
 //! ([`SubagentTranscript`]). Background shells, monitors and subagents of the
-//! current turn are listed by the pill above the composer ([`BackgroundTasks`]).
+//! current turn are listed by the chips above the composer ([`BackgroundChips`]).
 
 use std::time::Duration;
 
@@ -54,11 +54,12 @@ const CSS: &str = r#"
   .tk-tx-meta { width: 100%; }
 }
 
-.tk-bg { display: flex; min-width: 0; padding: 0 0 6px; }
-.tk-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 12px; min-width: 0; max-width: 100%;
-  background: var(--card); border: 1px solid var(--border); font-size: 12px; color: var(--fg-2); }
-.tk-pill:hover, .tk-pill.on { background: var(--hover); color: var(--fg); }
-.tk-pill .lb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-chip { gap: 6px; min-width: 0; max-width: 100%; }
+.tk-chip.on { background: var(--hover); color: var(--fg); }
+.tk-chip .lb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 16px; display: flex; flex-direction: column; gap: 2px; }
+.tk-panel-label { font-size: 11px; color: var(--fg-3); padding: 10px 8px 4px; }
+.tk-panel-hint { max-width: 260px; color: var(--fg-3); }
 .menu.tk-pop { width: min(400px, calc(100vw - 32px)); max-width: none; max-height: min(380px, 60vh); }
 .tk-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border-radius: 6px; color: var(--fg); min-width: 0; }
 .tk-row.link { cursor: pointer; }
@@ -196,62 +197,115 @@ pub fn SubagentTranscript(session_id: String, tool_id: String) -> Element {
     }
 }
 
-/// "N background tasks" pill above the composer, with a popover listing the
-/// current turn's background shells, monitors and subagents.
+/// Chips above the composer while background work runs: one for subagents,
+/// one for background terminals (shells and monitors). Each lists its tasks.
 #[component]
-pub fn BackgroundTasks(session_id: String) -> Element {
-    let app = use_app();
+pub fn BackgroundChips(session_id: String) -> Element {
+    let rows = use_app().with_session(&session_id, |s| session_rows(&s.messages)).unwrap_or_default();
+    let (agents, shells): (Vec<TaskRow>, Vec<TaskRow>) = rows.into_iter().partition(|r| r.kind == TaskKind::Subagent);
+    rsx! {
+        style { {CSS} }
+        TaskChip { session_id: session_id.clone(), rows: agents, icon: I::Bot, one: "subagent", many: "subagents" }
+        TaskChip { session_id: session_id.clone(), rows: shells, icon: I::Terminal, one: "background terminal", many: "background terminals" }
+    }
+}
+
+#[component]
+fn TaskChip(session_id: String, rows: Vec<TaskRow>, icon: I, one: &'static str, many: &'static str) -> Element {
+    let mut app = use_app();
     let mut open = use_signal(|| false);
+    let now = use_ticker(open);
+    let active = rows.iter().filter(|r| r.active).count();
+    // Keep the chip while its list is open so it closes on the user's terms.
+    if active == 0 && !open() {
+        return rsx! {};
+    }
+    let label = match active {
+        0 => format!("{many} finished"),
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
+    };
+    rsx! {
+        div { class: "menu-anchor",
+            button {
+                class: if open() { "pill-btn tk-chip on" } else { "pill-btn tk-chip" },
+                title: "Show {many}",
+                onclick: move |_| open.toggle(),
+                if active > 0 { super::Spinner { size: 12 } } else { span { class: "tk-st ok", Icon { i: I::CircleCheck, size: 12 } } }
+                Icon { i: icon, size: 13, stroke: 1.6 }
+                span { class: "lb", "{label}" }
+            }
+            if open() {
+                div { class: "menu-backdrop", onclick: move |_| open.set(false) }
+                div { class: "menu up tk-pop",
+                    div { class: "menu-label", "{label}" }
+                    for r in rows {
+                        TaskRowView { key: "{r.id}", session_id: session_id.clone(), row: r.clone(), now: now(), on_open: move |_| open.set(false) }
+                    }
+                    div { class: "menu-sep" }
+                    button { class: "menu-item",
+                        onclick: move |_| {
+                            open.set(false);
+                            app.ui.write().open_panel(crate::state::RightTab::Tasks, false);
+                        },
+                        span { class: "muted", Icon { i: I::Workflow, size: 14 } }
+                        span { "Open Background Tasks" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The side panel's Background Tasks tab: every background shell, monitor
+/// and subagent of the session, running ones first.
+#[component]
+pub fn TasksPanel(session_id: String) -> Element {
+    let app = use_app();
+    let on = use_signal(|| true);
+    let now = use_ticker(on);
+    let mut rows = app.with_session(&session_id, |s| all_rows(&s.messages)).unwrap_or_default();
+    rows.reverse();
+    let (running, done): (Vec<TaskRow>, Vec<TaskRow>) = rows.into_iter().partition(|r| r.active);
+    rsx! {
+        style { {CSS} }
+        div { class: "tk-panel",
+            if running.is_empty() && done.is_empty() {
+                div { class: "rp-empty",
+                    Icon { i: I::Workflow, size: 18, stroke: 1.5 }
+                    "No background tasks yet"
+                    span { class: "tk-panel-hint", "Subagents and commands an agent runs in the background show up here." }
+                }
+            }
+            if !running.is_empty() {
+                div { class: "tk-panel-label", "Running · {running.len()}" }
+                for r in running {
+                    TaskRowView { key: "{r.id}", session_id: session_id.clone(), row: r.clone(), now: now(), on_open: move |_| {} }
+                }
+            }
+            if !done.is_empty() {
+                div { class: "tk-panel-label", "Finished · {done.len()}" }
+                for r in done {
+                    TaskRowView { key: "{r.id}", session_id: session_id.clone(), row: r.clone(), now: now(), on_open: move |_| {} }
+                }
+            }
+        }
+    }
+}
+
+/// The current time, ticking every second while `on` is true (elapsed
+/// times of running tasks).
+fn use_ticker(on: Signal<bool>) -> Signal<DateTime<Utc>> {
     let mut now = use_signal(Utc::now);
-    // Tick elapsed times only while the list is showing.
     use_future(move || async move {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            if *open.peek() {
+            if *on.peek() {
                 now.set(Utc::now());
             }
         }
     });
-    let rows = app.with_session(&session_id, |s| task_rows(&s.messages)).unwrap_or_default();
-    let active = rows.iter().filter(|r| r.active).count();
-    // Keep the pill while the list is open so it closes on the user's terms.
-    if active == 0 && !open() {
-        return rsx! {};
-    }
-    let now = now();
-    let label = match active {
-        0 => "Background tasks finished".to_string(),
-        1 => "1 background task".to_string(),
-        n => format!("{n} background tasks"),
-    };
-    rsx! {
-        style { {CSS} }
-        div { class: "tk-bg",
-            div { class: "menu-anchor",
-                button {
-                    class: if open() { "tk-pill on" } else { "tk-pill" },
-                    title: "Show background tasks",
-                    onclick: move |_| open.toggle(),
-                    if active > 0 {
-                        span { class: "tk-st", super::Spinner { size: 12 } }
-                    } else {
-                        span { class: "tk-st ok", Icon { i: I::CircleCheck, size: 12 } }
-                    }
-                    span { class: "lb", "{label}" }
-                    Icon { i: if open() { I::ChevronDown } else { I::ChevronRight }, size: 11 }
-                }
-                if open() {
-                    div { class: "menu-backdrop", onclick: move |_| open.set(false) }
-                    div { class: "menu up tk-pop",
-                        div { class: "menu-label", "Background tasks" }
-                        for r in rows {
-                            TaskRowView { key: "{r.id}", session_id: session_id.clone(), row: r.clone(), now, on_open: move |_| open.set(false) }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    now
 }
 
 #[component]
@@ -339,11 +393,21 @@ struct TaskRow {
     tail: Vec<String>,
 }
 
-/// Background work and subagents of the latest turn (recursive).
-fn task_rows(messages: &[Message]) -> Vec<TaskRow> {
+/// Background work and subagents of the latest turn, plus any still running
+/// from earlier turns (recursive).
+fn session_rows(messages: &[Message]) -> Vec<TaskRow> {
     let start = messages.iter().rposition(|m| m.role == Role::User).unwrap_or(0);
     let mut out = Vec::new();
+    collect_rows(&messages[..start], &mut out, 0);
+    out.retain(|r| r.active);
     collect_rows(&messages[start..], &mut out, 0);
+    out
+}
+
+/// Every background task and subagent of the session (recursive).
+fn all_rows(messages: &[Message]) -> Vec<TaskRow> {
+    let mut out = Vec::new();
+    collect_rows(messages, &mut out, 0);
     out
 }
 
@@ -411,6 +475,9 @@ fn tail_lines(t: &ToolCall) -> Vec<String> {
                 }
             }
         }
+    } else if t.is_subagent() {
+        // Without its transcript a subagent's output is the launch notice
+        // ("Async agent launched … output_file: …"), not its work.
     } else if let Some(o) = &t.output {
         lines = o.lines().rev().filter(|l| !l.trim().is_empty()).take(3).map(|l| l.trim_end().to_string()).collect();
     }

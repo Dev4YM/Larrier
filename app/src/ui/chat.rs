@@ -134,9 +134,6 @@ pub fn AgentView(id: String) -> Element {
 fn ChatColumn(id: String, input_id: &'static str) -> Element {
     rsx! {
         Transcript { key: "t-{id}", id: id.clone() }
-        div { class: "composer-wrap", style: "padding-top: 0; padding-bottom: 0;",
-            super::tasks::BackgroundTasks { session_id: id.clone() }
-        }
         AboveComposer { id: id.clone() }
         Composer { session_id: Some(id.clone()), input_id }
     }
@@ -586,7 +583,8 @@ fn AboveComposer(id: String) -> Element {
     let mut run = run;
     rsx! {
         div { class: "composer-wrap", style: "padding-bottom: 8px;",
-            div { class: "row", style: "gap: 6px;",
+            div { class: "row above-composer", style: "gap: 6px;",
+                super::tasks::BackgroundChips { session_id: id.clone() }
                 button { class: "pill-btn", onclick: move |_| open_tool(app, RightTab::Changes),
                     "Changes"
                     span { class: "add num", "+{added}" }

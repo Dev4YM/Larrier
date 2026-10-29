@@ -26,6 +26,8 @@ const SKIP_INDEX: &[&str] = &[".git", "node_modules", "target", "dist", "build",
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Tabs {
     files: Vec<String>,
+    /// The tab a single click opened; the next one replaces it.
+    preview: Option<String>,
     active: Option<String>,
     history: Vec<String>,
     pos: usize,
@@ -41,10 +43,20 @@ fn with_tabs<R>(sid: &str, f: impl FnOnce(&mut Tabs) -> R) -> R {
     f(map.entry(sid.to_string()).or_default())
 }
 
-fn open_tab(sid: &str, path: &str) {
+/// Show a file. A file that is open is shown; otherwise the preview tab is
+/// replaced (or a tab added). `keep` opens it as a regular tab.
+fn open_tab(sid: &str, path: &str, keep: bool) {
     with_tabs(sid, |t| {
-        if !t.files.iter().any(|f| f == path) {
+        if t.files.iter().any(|f| f == path) {
+            if keep && t.preview.as_deref() == Some(path) {
+                t.preview = None;
+            }
+        } else if let Some(i) = t.preview.as_ref().filter(|_| !keep).and_then(|p| t.files.iter().position(|f| f == p)) {
+            t.files[i] = path.to_string();
+            t.preview = Some(path.to_string());
+        } else {
             t.files.push(path.to_string());
+            t.preview = (!keep).then(|| path.to_string());
         }
         t.active = Some(path.to_string());
         if t.history.get(t.pos).map(|h| h.as_str()) != Some(path) {
@@ -57,8 +69,19 @@ fn open_tab(sid: &str, path: &str) {
     });
 }
 
+fn keep_tab(sid: &str, path: &str) {
+    with_tabs(sid, |t| {
+        if t.preview.as_deref() == Some(path) {
+            t.preview = None;
+        }
+    });
+}
+
 fn close_tab(sid: &str, path: &str) {
     with_tabs(sid, |t| {
+        if t.preview.as_deref() == Some(path) {
+            t.preview = None;
+        }
         if let Some(i) = t.files.iter().position(|f| f == path) {
             t.files.remove(i);
             if t.active.as_deref() == Some(path) {
@@ -362,7 +385,7 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
         let cand = PathBuf::from(&p);
         let full = if cand.is_absolute() { cand } else { root_r.as_deref().map(|r| Path::new(r).join(&p)).unwrap_or(cand) };
         if full.is_file() {
-            open_tab(&sid_r, &full.to_string_lossy());
+            open_tab(&sid_r, &full.to_string_lossy(), false);
             quick_open.set(false);
             cur_line.set(None);
             scroll_top.set(0.0);
@@ -410,7 +433,7 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
         let rd = root_dir.clone();
         move |relp: String| {
             let full = Path::new(&rd).join(&relp);
-            open_tab(&sid, &full.to_string_lossy());
+            open_tab(&sid, &full.to_string_lossy(), false);
             quick_open.set(false);
             quick.set(String::new());
             hl.set(0);
@@ -454,18 +477,29 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                         let name = file_name(f);
                         let relp = rel(Some(&root_dir), f);
                         let is_active = active.as_deref() == Some(f.as_str());
-                        let (f1, f2) = (f.clone(), f.clone());
-                        let (s1, s2) = (sid_tabs.clone(), sid_tabs.clone());
+                        let preview = tabs.preview.as_deref() == Some(f.as_str());
+                        let (f1, f2, f3) = (f.clone(), f.clone(), f.clone());
+                        let (s1, s2, s3) = (sid_tabs.clone(), sid_tabs.clone(), sid_tabs.clone());
+                        let cls = match (is_active, preview) {
+                            (true, true) => "fv-tab on preview",
+                            (true, false) => "fv-tab on",
+                            (false, true) => "fv-tab preview",
+                            (false, false) => "fv-tab",
+                        };
                         rsx! {
                             div {
                                 key: "{f}",
-                                class: if is_active { "fv-tab on" } else { "fv-tab" },
-                                title: "{relp}",
+                                class: "{cls}",
+                                title: if preview { "{relp}\nPreview — double-click to keep open" } else { "{relp}" },
                                 "data-path": "{relp}",
                                 onclick: move |_| {
-                                    open_tab(&s1, &f1);
+                                    open_tab(&s1, &f1, false);
                                     quick_open.set(false);
                                     cur_line.set(None);
+                                    rev += 1;
+                                },
+                                ondoubleclick: move |_| {
+                                    keep_tab(&s3, &f3);
                                     rev += 1;
                                 },
                                 onmousedown: move |e| {
@@ -555,10 +589,17 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                             expanded,
                             dirs,
                             active: active.clone(),
+                            on_keep: {
+                                let sid = session_id.clone();
+                                move |p: String| {
+                                    open_tab(&sid, &p, true);
+                                    rev += 1;
+                                }
+                            },
                             on_open: {
                                 let sid = session_id.clone();
                                 move |p: String| {
-                                    open_tab(&sid, &p);
+                                    open_tab(&sid, &p, false);
                                     quick_open.set(false);
                                     cur_line.set(None);
                                     scroll_top.set(0.0);
@@ -680,6 +721,7 @@ fn TreeLevel(
     dirs: Signal<HashMap<String, Vec<Entry>>>,
     active: Option<String>,
     on_open: EventHandler<String>,
+    on_keep: EventHandler<String>,
 ) -> Element {
     let mut expanded = expanded;
     let mut dirs = dirs;
@@ -692,6 +734,7 @@ fn TreeLevel(
                 let relp = rel(Some(&root), &e.path);
                 let is_active = active_norm.as_deref() == Some(norm(&e.path).as_str());
                 let p = e.path.clone();
+                let p2 = e.path.clone();
                 let is_dir = e.dir;
                 let pad = 8 + depth * 12;
                 rsx! {
@@ -717,6 +760,14 @@ fn TreeLevel(
                                 on_open.call(p.clone());
                             }
                         },
+                        ondoubleclick: {
+                            let p = p2.clone();
+                            move |_| {
+                                if !is_dir {
+                                    on_keep.call(p.clone());
+                                }
+                            }
+                        },
                         if is_dir {
                             span { class: "fv-chev", Lucide { name: if open { "chevron-down".to_string() } else { "chevron-right".to_string() }, size: 12 } }
                             span { class: "fv-ic", Lucide { name: if open { "folder-open".to_string() } else { "folder".to_string() }, size: 14, stroke: 1.5 } }
@@ -727,7 +778,7 @@ fn TreeLevel(
                         span { class: "fv-node-name", "{e.name}" }
                     }
                     if is_dir && open {
-                        TreeLevel { dir: e.path.clone(), root: root.clone(), depth: depth + 1, expanded, dirs, active: active.clone(), on_open }
+                        TreeLevel { dir: e.path.clone(), root: root.clone(), depth: depth + 1, expanded, dirs, active: active.clone(), on_open, on_keep }
                     }
                 }
             }
@@ -743,6 +794,7 @@ const CSS: &str = r#"
 .fv-tab { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; border-radius: 7px; font-size: 13px; color: var(--fg-2); cursor: pointer; flex-shrink: 0; max-width: 220px; user-select: none; }
 .fv-tab:hover { background: var(--hover); color: var(--fg); }
 .fv-tab.on { background: var(--selected); color: var(--fg); }
+.fv-tab.preview .fv-tab-name { font-style: italic; }
 .fv-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fv-x { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); opacity: 0; }
 .fv-tab:hover .fv-x, .fv-tab.on .fv-x { opacity: 1; }
@@ -816,9 +868,9 @@ mod tests {
     #[test]
     fn files_tabs_and_history() {
         let sid = "test-session-files";
-        open_tab(sid, "/r/a.rs");
-        open_tab(sid, "/r/b.rs");
-        open_tab(sid, "/r/a.rs");
+        open_tab(sid, "/r/a.rs", true);
+        open_tab(sid, "/r/b.rs", false);
+        open_tab(sid, "/r/a.rs", false);
         let t = with_tabs(sid, |t| t.clone());
         assert_eq!(t.files.len(), 2);
         assert_eq!(t.active.as_deref(), Some("/r/a.rs"));
@@ -826,6 +878,20 @@ mod tests {
         assert_eq!(with_tabs(sid, |t| t.active.clone()).as_deref(), Some("/r/b.rs"));
         close_tab(sid, "/r/b.rs");
         assert_eq!(with_tabs(sid, |t| t.active.clone()).as_deref(), Some("/r/a.rs"));
+    }
+
+    #[test]
+    fn files_preview_tab_is_replaced_until_kept() {
+        let sid = "test-session-preview";
+        open_tab(sid, "/r/a.rs", false);
+        open_tab(sid, "/r/b.rs", false);
+        assert_eq!(with_tabs(sid, |t| t.files.clone()), ["/r/b.rs"]);
+        keep_tab(sid, "/r/b.rs");
+        open_tab(sid, "/r/c.rs", false);
+        open_tab(sid, "/r/d.rs", false);
+        let t = with_tabs(sid, |t| t.clone());
+        assert_eq!(t.files, ["/r/b.rs", "/r/d.rs"]);
+        assert_eq!(t.preview.as_deref(), Some("/r/d.rs"));
     }
 
     #[test]

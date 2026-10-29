@@ -17,6 +17,7 @@ fn tab_meta(t: RightTab) -> (I, &'static str, &'static str) {
         RightTab::Browser => (I::Globe, "Browser", "Ctrl+Shift+B"),
         RightTab::Terminal => (I::Terminal, "Terminal", "Ctrl+J"),
         RightTab::Files => (I::Files, "File", "Ctrl+G"),
+        RightTab::Tasks => (I::Workflow, "Background Tasks", ""),
     }
 }
 
@@ -26,9 +27,9 @@ pub fn RightPane(id: String) -> Element {
     let mut plus = use_signal(|| false);
     let mut q = use_signal(String::new);
     let tab = crate::state::use_ui(|u| u.right_tab)();
+    let tabs = crate::state::use_ui(|u| u.right_tabs.clone())();
     let id_c = id.clone();
     let cwd = use_memo(move || app.with_session(&id_c, |s| s.cwd()).flatten())();
-    let (ticon, ttitle, _) = tab_meta(tab);
     let mut open_q = move |_: ()| {
         let v = q.read().trim().to_string();
         plus.set(false);
@@ -36,22 +37,52 @@ pub fn RightPane(id: String) -> Element {
         let mut ui = app.ui.write();
         if v.contains("://") || v.starts_with("localhost") || v.contains('.') && !v.contains(' ') && !v.contains('\\') && !v.contains('/') {
             ui.browser_url = if v.contains("://") { v } else { format!("http://{v}") };
-            ui.right_tab = RightTab::Browser;
+            ui.open_panel(RightTab::Browser, false);
         } else {
             ui.reveal_file = if v.is_empty() { None } else { Some(v) };
-            ui.right_tab = RightTab::Files;
+            ui.open_panel(RightTab::Files, false);
         }
     };
     rsx! {
         div { class: "right-pane",
             div { class: "rp-head",
-                if tab != RightTab::Home {
-                    span { class: "rp-tab active",
-                        Icon { i: ticon, size: 14, stroke: 1.5 }
-                        "{ttitle}"
-                        button { class: "icon-btn sm", style: "margin-right: -6px;", title: "Close tab",
-                            onclick: move |_| app.ui.write().right_tab = RightTab::Home,
-                            Icon { i: I::X, size: 12 }
+                div { class: "rp-tabs", role: "tablist",
+                    for t in tabs {
+                        {
+                            let (ticon, ttitle, _) = tab_meta(t.tab);
+                            let mut cls = String::from("rp-tab");
+                            if t.tab == tab {
+                                cls.push_str(" active");
+                            }
+                            if t.preview {
+                                cls.push_str(" preview");
+                            }
+                            let kind = t.tab;
+                            rsx! {
+                                span {
+                                    key: "{ttitle}",
+                                    class: "{cls}",
+                                    role: "tab",
+                                    title: if t.preview { "{ttitle} · Preview — double-click to keep open" } else { "{ttitle}" },
+                                    onclick: move |_| app.ui.write().right_tab = kind,
+                                    ondoubleclick: move |_| app.ui.write().keep_panel(kind),
+                                    onmousedown: move |e| {
+                                        if e.trigger_button() == Some(dioxus::html::input_data::MouseButton::Auxiliary) {
+                                            e.prevent_default();
+                                            app.ui.write().close_panel(kind);
+                                        }
+                                    },
+                                    Icon { i: ticon, size: 14, stroke: 1.5 }
+                                    span { class: "t", "{ttitle}" }
+                                    button { class: "icon-btn sm x", title: "Close tab",
+                                        onclick: move |e| {
+                                            e.stop_propagation();
+                                            app.ui.write().close_panel(kind);
+                                        },
+                                        Icon { i: I::X, size: 12 }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -65,12 +96,12 @@ pub fn RightPane(id: String) -> Element {
                                 onkeydown: move |e| if e.key() == Key::Enter { open_q(()) },
                             }
                         }
-                        for t in [RightTab::Files, RightTab::Terminal, RightTab::Browser, RightTab::Changes] {
+                        for t in [RightTab::Files, RightTab::Terminal, RightTab::Browser, RightTab::Changes, RightTab::Tasks] {
                             {
                                 let (i, label, kb) = tab_meta(t);
                                 rsx! {
                                     button { key: "{label}", class: "menu-item", style: "height: 32px;",
-                                        onclick: move |_| { plus.set(false); app.ui.write().right_tab = t; },
+                                        onclick: move |_| { plus.set(false); app.ui.write().open_panel(t, false); },
                                         span { class: "muted", Icon { i, size: 15, stroke: 1.5 } }
                                         span { "{label}" }
                                         span { class: "kb", "{kb}" }
@@ -101,13 +132,13 @@ pub fn RightPane(id: String) -> Element {
                     RightTab::Home => rsx! {
                         div { class: "rp-empty",
                             div { style: "display: grid; grid-template-columns: 150px 150px; gap: 14px;",
-                                for t in [RightTab::Changes, RightTab::Browser, RightTab::Terminal, RightTab::Files] {
+                                for t in [RightTab::Changes, RightTab::Browser, RightTab::Terminal, RightTab::Files, RightTab::Tasks] {
                                     {
                                         let (i, label, _) = tab_meta(t);
                                         rsx! {
                                             button { key: "{label}", class: "tile",
                                                 style: "height: 120px; border: 1px solid var(--border); border-radius: 12px; background: var(--card-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-2); font-size: 13px;",
-                                                onclick: move |_| app.ui.write().right_tab = t,
+                                                onclick: move |_| app.ui.write().open_panel(t, false),
                                                 Icon { i, size: 18, stroke: 1.5 }
                                                 "{label}"
                                             }
@@ -121,6 +152,7 @@ pub fn RightPane(id: String) -> Element {
                     RightTab::Browser => rsx! { BrowserTab {} },
                     RightTab::Terminal => rsx! { super::terminal::TerminalPanel { key: "t-{id}", session_id: id.clone(), cwd: cwd.clone() } },
                     RightTab::Files => rsx! { super::files::FilesPanel { key: "f-{id}", session_id: id.clone(), cwd: cwd.clone() } },
+                    RightTab::Tasks => rsx! { super::tasks::TasksPanel { key: "k-{id}", session_id: id.clone() } },
                 }
             }
         }

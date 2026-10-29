@@ -116,6 +116,16 @@ pub enum RightTab {
     Browser,
     Terminal,
     Files,
+    /// Background shells, monitors and subagents of the session.
+    Tasks,
+}
+
+/// A tool tab in the side panel. Like chat tabs, a newly opened tool is a
+/// preview (italic) that the next one replaces until it is double-clicked.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PanelTab {
+    pub tab: RightTab,
+    pub preview: bool,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -131,7 +141,9 @@ pub enum Modal {
 pub struct Ui {
     pub sidebar_open: bool,
     pub right_open: bool,
+    /// The side panel's active tab (`Home` when none is open).
     pub right_tab: RightTab,
+    pub right_tabs: Vec<PanelTab>,
     pub palette_open: bool,
     pub palette_query: String,
     pub sidebar_query: String,
@@ -173,6 +185,41 @@ pub struct Ui {
     pub compose_inbox: Vec<(Option<String>, String)>,
     /// Right-click menu of a chat tab.
     pub tab_ctx: Option<TabCtx>,
+}
+
+impl Ui {
+    /// Show a side-panel tool: an open tab is shown, otherwise the preview
+    /// tab is replaced (or a tab added). `keep` opens it as a regular tab.
+    pub fn open_panel(&mut self, tab: RightTab, keep: bool) {
+        self.right_open = true;
+        if tab == RightTab::Home {
+            self.right_tab = RightTab::Home;
+            return;
+        }
+        if let Some(t) = self.right_tabs.iter_mut().find(|t| t.tab == tab) {
+            t.preview &= !keep;
+        } else if let Some(t) = self.right_tabs.iter_mut().find(|t| t.preview).filter(|_| !keep) {
+            t.tab = tab;
+        } else {
+            self.right_tabs.push(PanelTab { tab, preview: !keep });
+        }
+        self.right_tab = tab;
+    }
+
+    /// Turn a preview tab into a regular one.
+    pub fn keep_panel(&mut self, tab: RightTab) {
+        if let Some(t) = self.right_tabs.iter_mut().find(|t| t.tab == tab) {
+            t.preview = false;
+        }
+    }
+
+    pub fn close_panel(&mut self, tab: RightTab) {
+        let Some(i) = self.right_tabs.iter().position(|t| t.tab == tab) else { return };
+        self.right_tabs.remove(i);
+        if self.right_tab == tab {
+            self.right_tab = self.right_tabs.get(i).or_else(|| i.checked_sub(1).and_then(|j| self.right_tabs.get(j))).map(|t| t.tab).unwrap_or(RightTab::Home);
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -312,6 +359,7 @@ impl App {
             sidebar_open: true,
             right_open: cfg.settings.right_panel_open,
             right_tab: RightTab::Changes,
+            right_tabs: vec![PanelTab { tab: RightTab::Changes, preview: false }],
             palette_open: false,
             palette_query: String::new(),
             sidebar_query: String::new(),

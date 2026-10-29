@@ -1145,3 +1145,15 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .chat-row.unread .bullet .pt { width: 7px; height: 7px; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c, var(--blue)) 18%, transparent); }
 .chat-row .bullet { position: relative; }
 .chat-row .bullet .unread-dot { position: absolute; right: -1px; top: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 2px var(--win); }
+
+/* Side panel tool tabs (preview tabs are italic until kept). */
+.rp-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; }
+.rp-tabs::-webkit-scrollbar { display: none; }
+.rp-tab { cursor: pointer; flex-shrink: 0; user-select: none; padding: 0 4px 0 10px; }
+.rp-tab .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-tab.preview .t { font-style: italic; }
+.rp-tab .x { opacity: 0; }
+.rp-tab:hover .x, .rp-tab.active .x { opacity: 1; }
+
+/* Background chips share the row with Changes / Commit & Push. */
+.above-composer { flex-wrap: wrap; row-gap: 6px; }

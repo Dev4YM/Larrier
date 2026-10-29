@@ -1279,8 +1279,7 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
             div { class: "tool-card-head", title: "{diff.path}", "data-path": "{diff.path}",
                 onclick: move |_| {
                     let mut ui = app.ui.write();
-                    ui.right_open = true;
-                    ui.right_tab = RightTab::Changes;
+                    ui.open_panel(RightTab::Changes, false);
                     ui.reveal_file = Some(path.clone());
                 },
                 span { class: "ic", if running { super::Spinner { size: 13 } } else { Icon { i: I::Lines, size: 13 } } }

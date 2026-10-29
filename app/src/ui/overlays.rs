@@ -47,14 +47,15 @@ fn run_action(mut app: App, a: &str) {
             app.ui.write().right_open = v;
         }
         "changes" | "browser" | "terminal" | "files" => {
-            let mut ui = app.ui.write();
-            ui.right_open = true;
-            ui.right_tab = match a {
-                "changes" => RightTab::Changes,
-                "browser" => RightTab::Browser,
-                "terminal" => RightTab::Terminal,
-                _ => RightTab::Files,
-            };
+            app.ui.write().open_panel(
+                match a {
+                    "changes" => RightTab::Changes,
+                    "browser" => RightTab::Browser,
+                    "terminal" => RightTab::Terminal,
+                    _ => RightTab::Files,
+                },
+                false,
+            );
         }
         "import" => app.sync_imports(false),
         "import-file" => app.import_files(),

@@ -12,7 +12,7 @@ use std::hash::{Hash, Hasher};
 use dioxus::prelude::*;
 use larrier_core::{
     lsf::{short_path, MediaSource},
-    FileDiff, Message, Part, PlanStatus, Role, ToolCall, ToolKind, ToolStatus,
+    FileDiff, Message, Part, PlanEntry, PlanStatus, Role, ToolCall, ToolKind, ToolStatus,
 };
 
 use crate::icons::{Icon, I};
@@ -730,13 +730,15 @@ fn is_explore(t: &ToolCall) -> bool {
 }
 
 fn group_parts(parts: &[Part]) -> Vec<Item> {
-    // Only the newest to-do list of a message is shown (each call repeats it).
-    let last_todo = parts.iter().rposition(|p| matches!(p, Part::Tool(t) if t.kind == ToolKind::Todo));
+    // Only the newest to-do list of a message is shown: each update repeats
+    // it, and imports keep both the list and the call that wrote it.
+    let is_todo = |p: &Part| matches!(p, Part::Plan { .. }) || matches!(p, Part::Tool(t) if t.kind == ToolKind::Todo);
+    let last_todo = parts.iter().rposition(is_todo);
     let mut out: Vec<Item> = Vec::new();
     for (i, p) in parts.iter().enumerate() {
         match p {
             Part::Tool(t) if t.kind == ToolKind::Think => {}
-            Part::Tool(t) if t.kind == ToolKind::Todo && Some(i) != last_todo => {}
+            p if is_todo(p) && Some(i) != last_todo => {}
             Part::Tool(t) if is_explore(t) => match out.last_mut() {
                 Some(Item::Explore(v)) => v.push(t.clone()),
                 _ => out.push(Item::Explore(vec![t.clone()])),
@@ -824,28 +826,7 @@ pub fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool
             rsx! { Reasoning { text, duration_ms, live } }
         }
         Part::Tool(t) => rsx! { ToolView { session_id: session_id.clone(), tool: t } },
-        Part::Plan { entries } => {
-            let done = entries.iter().filter(|e| e.status == PlanStatus::Completed).count();
-            rsx! {
-                div { class: "plan-card",
-                    div { class: "plan-head", "{entries.len()} To-dos · {done} done" }
-                    for (i, e) in entries.iter().enumerate() {
-                        div {
-                            key: "{i}",
-                            class: match e.status {
-                                PlanStatus::Completed => "plan-entry completed",
-                                PlanStatus::InProgress => "plan-entry in_progress",
-                                _ => "plan-entry",
-                            },
-                            span { class: "box",
-                                if e.status == PlanStatus::Completed { Icon { i: I::Check, size: 9, stroke: 3.0 } }
-                            }
-                            span { class: "txt", "{e.content}" }
-                        }
-                    }
-                }
-            }
-        }
+        Part::Plan { entries } => rsx! { PlanCard { entries } },
         Part::Error { message } => {
             let m = message.to_lowercase();
             let needs_login = m.contains("logged in") || m.contains("/login") || m.contains("authenticat") || m.contains("api key");
@@ -1170,36 +1151,32 @@ fn ToolImages(images: Vec<Part>) -> Element {
 /// The agent's to-do list (TodoWrite, update_plan, write_todos).
 #[component]
 fn TodoCard(tool: ToolCall) -> Element {
-    // Claude: {todos: [{content, status, activeForm}]}; Codex: {plan: [{step, status}]}.
-    let list = tool.input.get("todos").or_else(|| tool.input.get("plan")).and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let items: Vec<(String, String)> = list
-        .iter()
-        .map(|e| {
-            let text = ["content", "step", "text", "title"].iter().find_map(|k| e.get(*k).and_then(|v| v.as_str())).unwrap_or("").to_string();
-            let status = e.get("status").and_then(|v| v.as_str()).unwrap_or("pending").to_string();
-            (text, status)
-        })
-        .filter(|(t, _)| !t.is_empty())
-        .collect();
-    if items.is_empty() {
+    // Claude {todos: [{content, status}]}, Codex {plan: [{step, status}]},
+    // Droid {todos: "1. [completed] …"}.
+    let Some(entries) = larrier_formats::util::plan_from(&tool.input) else {
         return rsx! { Step { tool } };
-    }
-    let done = items.iter().filter(|(_, s)| s == "completed").count();
+    };
+    rsx! { PlanCard { entries } }
+}
+
+#[component]
+fn PlanCard(entries: Vec<PlanEntry>) -> Element {
+    let done = entries.iter().filter(|e| e.status == PlanStatus::Completed).count();
     rsx! {
         div { class: "plan-card",
-            div { class: "plan-head", "{items.len()} To-dos · {done} done" }
-            for (i, (text, status)) in items.into_iter().enumerate() {
+            div { class: "plan-head", "{entries.len()} To-dos · {done} done" }
+            for (i, e) in entries.iter().enumerate() {
                 div {
                     key: "{i}",
-                    class: match status.as_str() {
-                        "completed" => "plan-entry completed",
-                        "in_progress" => "plan-entry in_progress",
+                    class: match e.status {
+                        PlanStatus::Completed => "plan-entry completed",
+                        PlanStatus::InProgress => "plan-entry in_progress",
                         _ => "plan-entry",
                     },
                     span { class: "box",
-                        if status == "completed" { Icon { i: I::Check, size: 9, stroke: 3.0 } }
+                        if e.status == PlanStatus::Completed { Icon { i: I::Check, size: 9, stroke: 3.0 } }
                     }
-                    span { class: "txt", "{text}" }
+                    span { class: "txt", "{e.content}" }
                 }
             }
         }

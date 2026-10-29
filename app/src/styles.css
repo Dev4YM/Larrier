@@ -1220,3 +1220,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .transcript { mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
 .transcript-inner { padding-bottom: 36px; }
 .above-composer { padding-top: 6px; }
+
+/* A tool call that never ran (rejected, or the turn stopped). */
+.step.skipped .verb, .step.skipped .target { color: var(--fg-3); text-decoration: line-through; text-decoration-color: var(--border-2); }
+.step .skip-tag, .tool-card-head .skip-tag { flex-shrink: 0; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: var(--chip); color: var(--fg-2); }

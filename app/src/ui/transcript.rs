@@ -1095,6 +1095,18 @@ fn ExploreGroup(tools: Vec<ToolCall>) -> Element {
     }
 }
 
+/// A call that never ran: "Rejected" by the user, or "Stopped" with the turn.
+fn skipped_label(tool: &ToolCall) -> Option<&'static str> {
+    (tool.status == ToolStatus::Cancelled).then(|| {
+        let out = tool.output.as_deref().unwrap_or("").to_ascii_lowercase();
+        if out.contains("reject") || out.contains("denied") || out.contains("declined") {
+            "Rejected"
+        } else {
+            "Stopped"
+        }
+    })
+}
+
 #[component]
 fn Step(tool: ToolCall) -> Element {
     let mut open = use_signal(|| false);
@@ -1107,12 +1119,14 @@ fn Step(tool: ToolCall) -> Element {
     let output = clip(tool.output.clone().unwrap_or_default(), 12_000);
     let input = if show_input { clip(serde_json::to_string_pretty(&tool.input).unwrap_or_default(), 6_000) } else { String::new() };
     let dur = tool.duration_ms.filter(|d| *d >= 1000).map(|d| format!("{}s", (d + 500) / 1000));
+    let skipped = skipped_label(&tool);
     rsx! {
         div {
-            class: if is_running(&tool) { "step running" } else if failed { "step failed" } else { "step" },
+            class: if is_running(&tool) { "step running" } else if failed { "step failed" } else if skipped.is_some() { "step skipped" } else { "step" },
             onclick: move |_| if expandable { open.toggle() },
             span { class: "verb", "{verb}" }
             span { class: "target", "{target}" }
+            if let Some(label) = skipped { span { class: "skip-tag", "{label}" } }
             if let Some(d) = dur { span { class: "dur", "{d}" } }
             if expandable {
                 span { class: "chev", if open() { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
@@ -1375,6 +1389,7 @@ fn CommandCard(tool: ToolCall) -> Element {
     let programs = command_programs(&command);
     let running = is_running(&tool);
     let failed = tool.is_error || tool.status == ToolStatus::Failed;
+    let skipped = skipped_label(&tool);
     let output = clip(tool.output.clone().unwrap_or_default(), 16_000);
     rsx! {
         div { class: "tool-card",
@@ -1391,6 +1406,7 @@ fn CommandCard(tool: ToolCall) -> Element {
                     },
                     None => rsx! { span { class: "desc mono", style: "font-size: 11px;", "{larrier_core::lsf::first_line(&command)}" } },
                 }
+                if let Some(label) = skipped { span { class: "skip-tag", "{label}" } }
             }
             if open() {
                 div { class: "cmd", "$ {command}" }

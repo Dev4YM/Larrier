@@ -435,12 +435,37 @@ pub struct ToolCall {
     pub diffs: Vec<FileDiff>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// When the call started (set by the runtime, or from the transcript
+    /// timestamp on import).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    /// Nested transcript of a subagent (Task / Agent / spawn_agent) call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagent: Vec<Message>,
+    /// Long-running background command or task (`run_in_background`, async
+    /// subagents, monitors). Stays `Running` until the agent reports it done.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background: bool,
+    /// Subagent type, e.g. `Explore`, `general-purpose`, a Codex task name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
 }
 
 impl ToolCall {
     pub fn new(id: impl Into<String>, name: impl Into<String>, input: Value) -> Self {
         let name = name.into();
         let kind = ToolKind::classify(&name);
+        let background = input.get("run_in_background").and_then(|v| v.as_bool()).unwrap_or(false)
+            || name == "Monitor";
+        let agent_name = if kind == ToolKind::Task {
+            ["subagent_type", "agent_type", "task_name", "agent"]
+                .iter()
+                .find_map(|k| input.get(*k).and_then(|v| v.as_str()))
+                .filter(|v| !v.trim().is_empty())
+                .map(|v| v.to_string())
+        } else {
+            None
+        };
         let mut t = ToolCall {
             id: id.into(),
             name,
@@ -453,9 +478,35 @@ impl ToolCall {
             locations: Vec::new(),
             diffs: Vec::new(),
             duration_ms: None,
+            started_at: None,
+            subagent: Vec::new(),
+            background,
+            agent_name,
         };
         t.title = Some(t.describe());
         t
+    }
+
+    /// A subagent call (Task / Agent / spawn_agent) or one with a nested transcript.
+    pub fn is_subagent(&self) -> bool {
+        self.kind == ToolKind::Task || !self.subagent.is_empty()
+    }
+
+    /// Still working (running, pending or waiting for approval).
+    pub fn is_active(&self) -> bool {
+        matches!(self.status, ToolStatus::Running | ToolStatus::Pending | ToolStatus::Approval)
+    }
+
+    /// Record the run time from `started_at` (when not already known).
+    pub fn stamp_duration(&mut self) {
+        if let (None, Some(start)) = (self.duration_ms, self.started_at) {
+            self.duration_ms = Some((Utc::now() - start).num_milliseconds().max(0) as u64);
+        }
+    }
+
+    /// Number of tool steps inside the nested transcript (recursive).
+    pub fn subagent_steps(&self) -> usize {
+        self.subagent.iter().flat_map(|m| m.tool_calls()).map(|t| 1 + t.subagent_steps()).sum()
     }
 
     /// Best-effort one-line description from the native input.
@@ -490,7 +541,10 @@ impl ToolCall {
             }
             ToolKind::WebSearch => format!("Searched web for {}", s("query").unwrap_or_default()),
             ToolKind::Fetch => format!("Fetched {}", s("url").unwrap_or_default()),
-            ToolKind::Task => format!("Subagent {}", s("description").or_else(|| s("prompt")).map(|d| first_line(&d)).unwrap_or_default()),
+            ToolKind::Task => format!(
+                "Subagent {}",
+                s("description").or_else(|| s("task_name")).or_else(|| s("prompt")).or_else(|| s("message")).map(|d| first_line(&d)).unwrap_or_default()
+            ),
             ToolKind::Todo => "Updated todos".to_string(),
             ToolKind::Think => "Thought".to_string(),
             ToolKind::Mcp => format!("MCP {}", self.name),
@@ -855,20 +909,26 @@ impl Session {
     /// Per-file change totals across every tool call (latest diff wins for
     /// stats per file is not attempted; we sum hunks).
     pub fn changed_files(&self) -> Vec<FileChange> {
-        let mut map: BTreeMap<String, FileChange> = BTreeMap::new();
-        for m in &self.messages {
-            for t in m.tool_calls() {
-                if t.is_error {
-                    continue;
-                }
-                for d in &t.diffs {
-                    let e = map.entry(d.path.clone()).or_insert_with(|| FileChange { path: d.path.clone(), added: 0, removed: 0, edits: 0 });
-                    e.added += d.added;
-                    e.removed += d.removed;
-                    e.edits += 1;
+        fn walk(msgs: &[Message], map: &mut BTreeMap<String, FileChange>) {
+            for m in msgs {
+                for t in m.tool_calls() {
+                    if !t.subagent.is_empty() {
+                        walk(&t.subagent, map);
+                    }
+                    if t.is_error {
+                        continue;
+                    }
+                    for d in &t.diffs {
+                        let e = map.entry(d.path.clone()).or_insert_with(|| FileChange { path: d.path.clone(), added: 0, removed: 0, edits: 0 });
+                        e.added += d.added;
+                        e.removed += d.removed;
+                        e.edits += 1;
+                    }
                 }
             }
         }
+        let mut map: BTreeMap<String, FileChange> = BTreeMap::new();
+        walk(&self.messages, &mut map);
         map.into_values().collect()
     }
 
@@ -917,6 +977,7 @@ impl Session {
             archived: self.archived,
             unread: self.unread,
             parent_id: self.parent.as_ref().map(|p| p.session_id.clone()),
+            usage: self.usage.clone(),
         }
     }
 
@@ -1181,6 +1242,9 @@ pub struct SessionSummary {
     pub unread: bool,
     #[serde(default)]
     pub parent_id: Option<String>,
+    /// Token and cost totals (for the Usage page).
+    #[serde(default)]
+    pub usage: Usage,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1189,6 +1253,140 @@ pub enum LsfError {
     Empty,
     #[error("invalid LSF json: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+// ---------------------------------------------------------------------------
+// Nested transcripts (subagents)
+// ---------------------------------------------------------------------------
+
+/// Path to a tool call: `(message index, part index)` per nesting level,
+/// descending through `ToolCall::subagent` transcripts.
+pub fn find_tool_path(messages: &[Message], id: &str) -> Option<Vec<(usize, usize)>> {
+    for (mi, m) in messages.iter().enumerate().rev() {
+        for (pi, p) in m.parts.iter().enumerate() {
+            if let Part::Tool(t) = p {
+                if t.id == id {
+                    return Some(vec![(mi, pi)]);
+                }
+                if !t.subagent.is_empty() {
+                    if let Some(mut rest) = find_tool_path(&t.subagent, id) {
+                        rest.insert(0, (mi, pi));
+                        return Some(rest);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve a path from [`find_tool_path`].
+pub fn tool_at_path_mut<'a>(messages: &'a mut [Message], path: &[(usize, usize)]) -> Option<&'a mut ToolCall> {
+    let (&(mi, pi), rest) = path.split_first()?;
+    let mut t = match messages.get_mut(mi)?.parts.get_mut(pi)? {
+        Part::Tool(t) => t,
+        _ => return None,
+    };
+    for &(mi, pi) in rest {
+        t = match t.subagent.get_mut(mi)?.parts.get_mut(pi)? {
+            Part::Tool(t) => t,
+            _ => return None,
+        };
+    }
+    Some(t)
+}
+
+/// Find a tool call anywhere, including inside subagent transcripts.
+pub fn find_tool_deep_mut<'a>(messages: &'a mut [Message], id: &str) -> Option<&'a mut ToolCall> {
+    let path = find_tool_path(messages, id)?;
+    tool_at_path_mut(messages, &path)
+}
+
+/// Close every still-active tool (recursively) with `status`.
+pub fn close_active_tools(messages: &mut [Message], status: ToolStatus) {
+    for m in messages.iter_mut() {
+        for t in m.tool_calls_mut() {
+            close_active_tools(&mut t.subagent, status);
+            if t.is_active() {
+                t.status = status;
+            }
+        }
+    }
+}
+
+/// Every background / subagent call that is still active (recursive), in
+/// transcript order.
+pub fn active_tasks(messages: &[Message]) -> Vec<&ToolCall> {
+    fn walk<'a>(msgs: &'a [Message], out: &mut Vec<&'a ToolCall>) {
+        for m in msgs {
+            for t in m.tool_calls() {
+                if (t.background || t.is_subagent()) && t.is_active() {
+                    out.push(t);
+                }
+                walk(&t.subagent, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(messages, &mut out);
+    out
+}
+
+/// Shrink a nested (subagent) transcript before storing it: long outputs,
+/// inputs, reasoning and answers are trimmed and only the last `max_parts`
+/// parts are kept.
+pub fn slim_transcript(messages: &mut Vec<Message>, max_parts: usize) {
+    fn clip(s: &str, max: usize) -> String {
+        if s.len() <= max {
+            return s.to_string();
+        }
+        truncate_middle(s, max)
+    }
+    fn slim_value(v: &mut Value) {
+        match v {
+            Value::String(s) if s.len() > 1200 => *s = clip(s, 1200),
+            Value::Array(a) => a.iter_mut().for_each(slim_value),
+            Value::Object(o) => o.values_mut().for_each(slim_value),
+            _ => {}
+        }
+    }
+    let mut total: usize = messages.iter().map(|m| m.parts.len()).sum();
+    while total > max_parts && !messages.is_empty() {
+        let m = &mut messages[0];
+        if m.parts.len() <= total - max_parts {
+            total -= m.parts.len();
+            messages.remove(0);
+        } else {
+            let drop = total - max_parts;
+            m.parts.drain(..drop);
+            total -= drop;
+        }
+    }
+    for m in messages.iter_mut() {
+        for p in m.parts.iter_mut() {
+            match p {
+                Part::Text { text } => *text = clip(text, 6000),
+                Part::Reasoning { text, .. } => *text = clip(text, 1500),
+                Part::Tool(t) => {
+                    if let Some(o) = &t.output {
+                        t.output = Some(clip(o, 1500));
+                    }
+                    slim_value(&mut t.input);
+                    for d in t.diffs.iter_mut() {
+                        d.old_text = None;
+                        d.new_text = None;
+                        if let Some(u) = &d.unified {
+                            d.unified = Some(clip(u, 4000));
+                        }
+                    }
+                    let keep = max_parts / 2;
+                    slim_transcript(&mut t.subagent, keep.max(20));
+                }
+                Part::Image { .. } => *p = Part::Notice { text: "[image]".into() },
+                _ => {}
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1301,6 +1499,59 @@ mod tests {
         let mut e = ToolCall::new("2", "Edit", serde_json::json!({"file_path":"x.rs","old_string":"a","new_string":"b\nc"}));
         e.infer_diffs();
         assert_eq!((e.diffs[0].added, e.diffs[0].removed), (2, 1));
+    }
+
+    #[test]
+    fn nested_tool_lookup_and_closing() {
+        let mut task = ToolCall::new("task1", "Agent", serde_json::json!({"description": "Audit", "subagent_type": "Explore", "prompt": "look"}));
+        assert!(task.is_subagent());
+        assert_eq!(task.agent_name.as_deref(), Some("Explore"));
+        assert_eq!(task.title.as_deref(), Some("Subagent Audit"));
+        let mut inner = Message::assistant(AgentKind::ClaudeCode, None);
+        let mut edit = ToolCall::new("e1", "Edit", serde_json::json!({"file_path": "a.rs", "old_string": "a", "new_string": "b"}));
+        edit.infer_diffs();
+        inner.parts.push(Part::Tool(edit));
+        inner.parts.push(Part::Tool(ToolCall::new("r1", "Read", serde_json::json!({"file_path": "b.rs"}))));
+        task.subagent.push(inner);
+        let mut bg = ToolCall::new("b1", "Bash", serde_json::json!({"command": "npm run dev", "run_in_background": true}));
+        bg.status = ToolStatus::Running;
+        assert!(bg.background);
+        let mut outer = Message::assistant(AgentKind::ClaudeCode, None);
+        outer.parts.push(Part::Tool(task));
+        outer.parts.push(Part::Tool(bg));
+        let mut msgs = vec![Message::user_text("go"), outer];
+        assert_eq!(find_tool_path(&msgs, "r1"), Some(vec![(1, 0), (0, 1)]));
+        find_tool_deep_mut(&mut msgs, "r1").unwrap().output = Some("x".into());
+        assert_eq!(active_tasks(&msgs).len(), 2);
+        close_active_tools(&mut msgs, ToolStatus::Completed);
+        assert!(active_tasks(&msgs).is_empty());
+        let t = msgs[1].tool_calls().next().unwrap();
+        assert_eq!(t.subagent_steps(), 2);
+        let mut s = Session::new(AgentKind::ClaudeCode, None);
+        s.messages = msgs.clone();
+        assert_eq!(s.diff_stats().2, 1, "subagent edits count");
+        let text = s.to_jsonl();
+        assert_eq!(Session::from_any(&text).unwrap().messages, msgs);
+    }
+
+    #[test]
+    fn slim_keeps_tail() {
+        let mut m = Message::assistant(AgentKind::ClaudeCode, None);
+        for i in 0..50 {
+            let mut t = ToolCall::new(format!("t{i}"), "Read", serde_json::json!({"file_path": "x"}));
+            t.output = Some("y".repeat(5000));
+            m.parts.push(Part::Tool(t));
+        }
+        let mut v = vec![m];
+        slim_transcript(&mut v, 10);
+        assert_eq!(v[0].parts.len(), 10);
+        match &v[0].parts[9] {
+            Part::Tool(t) => {
+                assert_eq!(t.id, "t49");
+                assert!(t.output.as_ref().unwrap().len() < 2000);
+            }
+            _ => panic!(),
+        }
     }
 
     #[test]

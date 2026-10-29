@@ -3,7 +3,7 @@
 //! the same event shapes: Amp (`amp -x --stream-json`) and Qwen Code
 //! (`qwen -p --output-format stream-json`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use larrier_core::{AgentKind, FileDiff, RunMode, ToolStatus};
 use serde_json::Value;
@@ -105,19 +105,33 @@ pub struct ClaudeStream {
     streamed: HashSet<String>,
     current_msg: Option<String>,
     seen_tools: HashSet<String>,
+    /// Background task id (shell id / async agent id) → tool call id.
+    bg_by_task: HashMap<String, String>,
+    /// Tool calls started with `run_in_background`.
+    bg_tools: HashSet<String>,
+    /// TaskStop / KillShell call id → task id it targets.
+    stop_calls: HashMap<String, String>,
+    /// BashOutput / TaskOutput call id → task id it reads.
+    output_calls: HashMap<String, String>,
+    /// Tool ids already seen inside subagents.
+    side_tools: HashSet<String>,
 }
 
 impl LineParser for ClaudeStream {
     fn handle(&mut self, line: &str, sink: &EventSink) {
         let Some(v) = json_line(line, sink) else { return };
-        // Subagent (Task) traffic carries parent_tool_use_id; keep the main
-        // transcript clean and surface it only through the Task tool result.
-        let is_side = v.get("parent_tool_use_id").map(|p| !p.is_null()).unwrap_or(false);
+        // Subagent (Task / Agent) traffic carries parent_tool_use_id: record
+        // it into the parent tool's nested transcript.
+        if let Some(parent) = s(&v, "parent_tool_use_id").filter(|p| !p.is_empty()) {
+            let parent = parent.to_string();
+            self.side(&v, &parent, sink);
+            return;
+        }
         match s(&v, "type").unwrap_or("") {
             "system" => self.system(&v, sink),
-            "stream_event" if !is_side => self.stream_event(&v["event"], sink),
-            "assistant" if !is_side => self.assistant(&v, sink),
-            "user" if !is_side => self.user(&v, sink),
+            "stream_event" => self.stream_event(&v["event"], sink),
+            "assistant" => self.assistant(&v, sink),
+            "user" => self.user(&v, sink),
             "result" => self.result(&v, sink),
             _ => {}
         }
@@ -225,6 +239,7 @@ impl ClaudeStream {
                                 sink.send(AgentEvent::Plan { entries });
                             }
                         }
+                        self.track_background(&id, name, &input);
                         sink.send(AgentEvent::ToolStart { tool: tool(id, name, input) });
                     }
                 }
@@ -235,23 +250,164 @@ impl ClaudeStream {
 
     fn user(&mut self, v: &Value, sink: &EventSink) {
         let meta = v.get("tool_use_result").cloned();
-        let Some(blocks) = v["message"].get("content").and_then(|c| c.as_array()) else { return };
+        let content = &v["message"]["content"];
+        // Background task notifications arrive as plain user text.
+        if let Some(t) = content.as_str() {
+            self.task_notifications(t, sink);
+            return;
+        }
+        let Some(blocks) = content.as_array() else { return };
         for b in blocks {
-            if s(b, "type") != Some("tool_result") {
-                continue;
+            match s(b, "type") {
+                Some("text") => self.task_notifications(s(b, "text").unwrap_or(""), sink),
+                Some("tool_result") => {
+                    let id = s(b, "tool_use_id").unwrap_or("").to_string();
+                    let is_error = b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
+                    let output = content_text(&b["content"]);
+                    let diffs = meta.as_ref().map(diffs_from_result).unwrap_or_default();
+                    self.tool_result(id, output, is_error, diffs, meta.as_ref(), sink);
+                }
+                _ => {}
             }
-            let id = s(b, "tool_use_id").unwrap_or("").to_string();
-            let is_error = b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
-            let output = content_text(&b["content"]);
-            let diffs = meta.as_ref().map(diffs_from_result).unwrap_or_default();
-            sink.send(AgentEvent::ToolUpdate {
-                id,
-                status: Some(if is_error { ToolStatus::Failed } else { ToolStatus::Completed }),
-                output: Some(output),
-                diffs,
-                is_error,
-                title: None,
-            });
+        }
+    }
+
+    fn tool_result(&mut self, id: String, output: String, is_error: bool, diffs: Vec<FileDiff>, meta: Option<&Value>, sink: &EventSink) {
+        // Subagent facts from the Agent / Task result.
+        if let Some(m) = meta.filter(|m| m.is_object()) {
+            let dur = m.get("totalDurationMs").and_then(|d| d.as_u64());
+            let agent_name = s(m, "agentType").map(|a| a.to_string());
+            let is_async = m.get("isAsync").and_then(|a| a.as_bool()).unwrap_or(false) || s(m, "status") == Some("async_launched");
+            if dur.is_some() || agent_name.is_some() || is_async {
+                sink.send(AgentEvent::ToolMeta { id: id.clone(), duration_ms: dur, background: is_async.then_some(true), agent_name });
+            }
+            if is_async && !is_error {
+                self.bg_tools.insert(id.clone());
+                if let Some(a) = s(m, "agentId") {
+                    self.bg_by_task.insert(a.to_string(), id.clone());
+                }
+            }
+            if let Some(t) = s(m, "backgroundTaskId") {
+                self.bg_by_task.insert(t.to_string(), id.clone());
+            }
+        }
+        if self.bg_tools.contains(&id) && !is_error {
+            // Launched in the background: keep it running until a
+            // notification / TaskStop / BashOutput says otherwise.
+            if let Some(task) = background_task_id(&output) {
+                self.bg_by_task.entry(task).or_insert_with(|| id.clone());
+            }
+            sink.send(AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Running), output: Some(output), diffs, is_error: false, title: None });
+            return;
+        }
+        if let Some(task) = self.stop_calls.remove(&id) {
+            if !is_error {
+                if let Some(target) = self.bg_by_task.get(&task).cloned() {
+                    sink.send(AgentEvent::ToolUpdate { id: target, status: Some(ToolStatus::Cancelled), output: None, diffs: Vec::new(), is_error: false, title: None });
+                }
+            }
+        }
+        if let Some(task) = self.output_calls.remove(&id) {
+            if let (Some(target), Some(state)) = (self.bg_by_task.get(&task).cloned(), output_status(&output)) {
+                sink.send(AgentEvent::ToolUpdate { id: target, status: Some(state), output: Some(output.clone()), diffs: Vec::new(), is_error: false, title: None });
+            }
+        }
+        sink.send(AgentEvent::ToolUpdate {
+            id,
+            status: Some(if is_error { ToolStatus::Failed } else { ToolStatus::Completed }),
+            output: Some(output),
+            diffs,
+            is_error,
+            title: None,
+        });
+    }
+
+    /// Remember calls that start, read or stop background work.
+    fn track_background(&mut self, id: &str, name: &str, input: &Value) {
+        if input.get("run_in_background").and_then(|b| b.as_bool()).unwrap_or(false) || name == "Monitor" {
+            self.bg_tools.insert(id.to_string());
+        }
+        let target = ["task_id", "shell_id", "bash_id", "agent_id", "id"].iter().find_map(|k| s(input, k)).map(|t| t.to_string());
+        if let Some(t) = target {
+            match name {
+                "TaskStop" | "KillShell" | "KillBash" => {
+                    self.stop_calls.insert(id.to_string(), t);
+                }
+                "BashOutput" | "TaskOutput" => {
+                    self.output_calls.insert(id.to_string(), t);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `<task-notification>` blocks report background work finishing.
+    fn task_notifications(&mut self, text: &str, sink: &EventSink) {
+        for n in parse_task_notifications(text) {
+            let target = n.tool_use_id.clone().or_else(|| n.task_id.as_ref().and_then(|t| self.bg_by_task.get(t).cloned()));
+            let Some(target) = target else { continue };
+            let status = match n.status.as_deref().unwrap_or("completed") {
+                "failed" | "error" => ToolStatus::Failed,
+                "killed" | "stopped" | "cancelled" | "canceled" => ToolStatus::Cancelled,
+                "running" => ToolStatus::Running,
+                _ => ToolStatus::Completed,
+            };
+            sink.send(AgentEvent::ToolUpdate { id: target, status: Some(status), output: n.summary.clone(), diffs: Vec::new(), is_error: false, title: None });
+        }
+    }
+
+    /// An event inside a subagent: wrap it for the parent tool.
+    fn side(&mut self, v: &Value, parent: &str, sink: &EventSink) {
+        let wrap = |e: AgentEvent| AgentEvent::Subagent { parent_tool_id: parent.to_string(), inner: Box::new(e) };
+        match s(v, "type").unwrap_or("") {
+            "assistant" => {
+                let msg = &v["message"];
+                let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else { return };
+                for b in blocks {
+                    match s(b, "type").unwrap_or("") {
+                        "text" => {
+                            if let Some(t) = b["text"].as_str().filter(|t| !t.trim().is_empty()) {
+                                sink.send(wrap(AgentEvent::Text { text: t.to_string() }));
+                            }
+                        }
+                        "thinking" => {
+                            if let Some(t) = b["thinking"].as_str().filter(|t| !t.trim().is_empty()) {
+                                sink.send(wrap(AgentEvent::Reasoning { text: t.to_string(), duration_ms: None }));
+                            }
+                        }
+                        "tool_use" | "server_tool_use" => {
+                            let id = s(b, "id").unwrap_or("").to_string();
+                            if self.side_tools.insert(id.clone()) {
+                                let name = s(b, "name").unwrap_or("tool");
+                                let input = b.get("input").cloned().unwrap_or(Value::Null);
+                                sink.send(wrap(AgentEvent::ToolStart { tool: tool(id, name, input) }));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "user" => {
+                let meta = v.get("tool_use_result").cloned();
+                let Some(blocks) = v["message"].get("content").and_then(|c| c.as_array()) else { return };
+                for b in blocks {
+                    if s(b, "type") != Some("tool_result") {
+                        continue;
+                    }
+                    let id = s(b, "tool_use_id").unwrap_or("").to_string();
+                    let is_error = b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
+                    let diffs = meta.as_ref().map(diffs_from_result).unwrap_or_default();
+                    sink.send(wrap(AgentEvent::ToolUpdate {
+                        id,
+                        status: Some(if is_error { ToolStatus::Failed } else { ToolStatus::Completed }),
+                        output: Some(content_text(&b["content"])),
+                        diffs,
+                        is_error,
+                        title: None,
+                    }));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -293,6 +449,65 @@ impl ClaudeStream {
             self.streamed.insert(id.clone());
         }
     }
+}
+
+/// One `<task-notification>` block.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct TaskNotification {
+    pub task_id: Option<String>,
+    pub tool_use_id: Option<String>,
+    pub status: Option<String>,
+    pub summary: Option<String>,
+}
+
+fn tag(block: &str, name: &str) -> Option<String> {
+    let open = format!("<{name}>");
+    let close = format!("</{name}>");
+    let i = block.find(&open)? + open.len();
+    let j = block[i..].find(&close)? + i;
+    Some(block[i..j].trim().to_string()).filter(|v| !v.is_empty())
+}
+
+/// Parse every `<task-notification>` in a message (Claude Code's report of a
+/// background shell / agent / monitor finishing).
+pub fn parse_task_notifications(text: &str) -> Vec<TaskNotification> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("<task-notification>") {
+        let after = &rest[i + "<task-notification>".len()..];
+        let end = after.find("</task-notification>").unwrap_or(after.len());
+        let block = &after[..end];
+        out.push(TaskNotification {
+            task_id: tag(block, "task-id"),
+            tool_use_id: tag(block, "tool-use-id"),
+            status: tag(block, "status").map(|s| s.to_lowercase()),
+            summary: tag(block, "summary").or_else(|| tag(block, "result")),
+        });
+        rest = &after[end..];
+    }
+    out
+}
+
+/// "Command running in background with ID: b8b97ntfm." → `b8b97ntfm`.
+pub fn background_task_id(output: &str) -> Option<String> {
+    let i = output.find("with ID:")? + "with ID:".len();
+    let id: String = output[i..].trim_start().chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    (!id.is_empty()).then_some(id)
+}
+
+/// Status reported by BashOutput / TaskOutput (`<status>completed</status>`).
+fn output_status(output: &str) -> Option<ToolStatus> {
+    let st = tag(output, "status").or_else(|| {
+        let i = output.to_ascii_lowercase().find("status:")? + "status:".len();
+        Some(output[i..].split_whitespace().next()?.trim_matches(|c: char| !c.is_ascii_alphanumeric()).to_lowercase())
+    })?;
+    Some(match st.as_str() {
+        "running" => ToolStatus::Running,
+        "failed" | "error" => ToolStatus::Failed,
+        "killed" | "stopped" | "cancelled" => ToolStatus::Cancelled,
+        "completed" | "done" | "exited" => ToolStatus::Completed,
+        _ => return None,
+    })
 }
 
 /// Kept for callers that used the old free function.
@@ -359,6 +574,9 @@ mod tests {
         ];
         let mut p = ClaudeStream::default();
         let ev = collect(&mut p, &lines);
+        // The subagent line is wrapped, not mixed into the main transcript.
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Subagent { parent_tool_id, inner } if parent_tool_id == "toolu_9" && matches!(&**inner, AgentEvent::Text { text } if text == "side"))));
+        let ev: Vec<AgentEvent> = ev.into_iter().filter(|e| !matches!(e, AgentEvent::Subagent { .. })).collect();
         assert!(matches!(&ev[0], AgentEvent::NativeSession { id, .. } if id == "s-1"));
         assert!(matches!(&ev[1], AgentEvent::Model { model } if model == "claude-opus-5-5"));
         assert!(matches!(&ev[2], AgentEvent::ReasoningDelta { text } if text == "hmm"));
@@ -387,6 +605,62 @@ mod tests {
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { is_error: true, .. })));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Error { message } if message.contains("max turns"))));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })));
+    }
+
+    #[test]
+    fn subagent_traffic_and_agent_result_meta() {
+        let lines = [
+            r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m1","content":[{"type":"tool_use","id":"agent_1","name":"Agent","input":{"description":"Audit","prompt":"look","subagent_type":"Explore"}}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":"agent_1","message":{"role":"user","content":"look"}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":"agent_1","message":{"id":"s1","content":[{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"t_read","name":"Read","input":{"file_path":"src/a.rs"}}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":"agent_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t_read","content":"fn a()"}]}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":"agent_1","message":{"id":"s2","content":[{"type":"text","text":"Found it"}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"agent_1","content":[{"type":"text","text":"Found it"}]}]},"tool_use_result":{"agentId":"a1","agentType":"Explore","status":"completed","totalDurationMs":5300,"totalTokens":900}}"#,
+        ];
+        let mut p = ClaudeStream::default();
+        let ev = collect(&mut p, &lines);
+        let side: Vec<&AgentEvent> = ev.iter().filter_map(|e| match e { AgentEvent::Subagent { parent_tool_id, inner } if parent_tool_id == "agent_1" => Some(&**inner), _ => None }).collect();
+        assert!(matches!(side[0], AgentEvent::Reasoning { text, .. } if text == "plan"));
+        assert!(matches!(side[1], AgentEvent::ToolStart { tool } if tool.id == "t_read"));
+        assert!(matches!(side[2], AgentEvent::ToolUpdate { id, output: Some(o), .. } if id == "t_read" && o == "fn a()"));
+        assert!(matches!(side[3], AgentEvent::Text { text } if text == "Found it"));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolMeta { id, duration_ms: Some(5300), agent_name: Some(n), .. } if id == "agent_1" && n == "Explore")));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), .. } if id == "agent_1")));
+    }
+
+    #[test]
+    fn background_shell_lifecycle() {
+        let lines = [
+            r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m1","content":[{"type":"tool_use","id":"bg1","name":"Bash","input":{"command":"npm run dev","run_in_background":true}}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bg1","content":"Command running in background with ID: b8b97ntfm. Output is being written to: /tmp/x.output"}]},"tool_use_result":{"stdout":"","stderr":"","backgroundTaskId":"b8b97ntfm","interrupted":false}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m2","content":[{"type":"tool_use","id":"bg2","name":"Bash","input":{"command":"cargo build","run_in_background":true}}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bg2","content":"Command running in background with ID: c2"}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":"<task-notification>\n<task-id>c2</task-id>\n<status>completed</status>\n<summary>Build finished</summary>\n</task-notification>"}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m3","content":[{"type":"tool_use","id":"stop1","name":"TaskStop","input":{"task_id":"b8b97ntfm"}}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"stop1","content":"stopped"}]}}"#,
+        ];
+        let mut p = ClaudeStream::default();
+        let ev = collect(&mut p, &lines);
+        let ups: Vec<(&str, ToolStatus)> = ev
+            .iter()
+            .filter_map(|e| match e { AgentEvent::ToolUpdate { id, status: Some(st), .. } => Some((id.as_str(), *st)), _ => None })
+            .collect();
+        assert_eq!(ups[0], ("bg1", ToolStatus::Running), "background launch stays running");
+        assert_eq!(ups[1], ("bg2", ToolStatus::Running));
+        assert!(ups.contains(&("bg2", ToolStatus::Completed)), "notification completes bg2");
+        assert!(ups.contains(&("bg1", ToolStatus::Cancelled)), "TaskStop cancels bg1");
+        assert!(matches!(ev.iter().find(|e| matches!(e, AgentEvent::ToolStart { tool } if tool.id == "bg1")), Some(AgentEvent::ToolStart { tool }) if tool.background));
+    }
+
+    #[test]
+    fn notification_and_output_parsing() {
+        let n = parse_task_notifications("x <task-notification><task-id>a</task-id><tool-use-id>toolu_1</tool-use-id><status>Failed</status><summary>boom</summary></task-notification> y");
+        assert_eq!(n.len(), 1);
+        assert_eq!(n[0].tool_use_id.as_deref(), Some("toolu_1"));
+        assert_eq!(n[0].status.as_deref(), Some("failed"));
+        assert_eq!(background_task_id("Command running in background with ID: b8b97ntfm. Output"), Some("b8b97ntfm".into()));
+        assert_eq!(output_status("<status>completed</status>\n<stdout>ok</stdout>"), Some(ToolStatus::Completed));
+        assert_eq!(output_status("Status: running"), Some(ToolStatus::Running));
     }
 
     #[test]

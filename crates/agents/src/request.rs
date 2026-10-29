@@ -464,7 +464,13 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         }
     });
     let last = session.messages.last().ok_or_else(|| anyhow!("session has no prompt"))?;
-    let prompt = last.text();
+    let mut prompt = last.text();
+    // Pasted text travels inline; agents only see plain prompts.
+    for p in &last.parts {
+        if let Part::File { path, text: Some(t), .. } = p {
+            prompt.push_str(&format!("\n\n<pasted_text name=\"{path}\">\n{t}\n</pasted_text>"));
+        }
+    }
     let attachments: Vec<Part> = last.parts.iter().filter(|p| matches!(p, Part::Image { .. } | Part::File { .. })).cloned().collect();
     let cwd = session
         .cwd()

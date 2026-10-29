@@ -31,6 +31,19 @@ pub enum AgentEvent {
         title: Option<String>,
     },
     Plan { entries: Vec<PlanEntry> },
+    /// Extra facts about a tool call: run time, background-ness, subagent type.
+    ToolMeta {
+        id: String,
+        #[serde(default)]
+        duration_ms: Option<u64>,
+        #[serde(default)]
+        background: Option<bool>,
+        #[serde(default)]
+        agent_name: Option<String>,
+    },
+    /// Something that happened inside the subagent spawned by tool
+    /// `parent_tool_id` (recorded into that tool's nested transcript).
+    Subagent { parent_tool_id: String, inner: Box<AgentEvent> },
     Permission { request: PermissionRequest },
     Usage { usage: Usage },
     Notice { text: String },

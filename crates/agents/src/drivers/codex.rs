@@ -64,11 +64,23 @@ pub struct CodexStream {
     /// Characters already emitted per streaming item (agent_message / reasoning).
     emitted: HashMap<String, usize>,
     started_tools: HashMap<String, ToolKind>,
+    /// Subagent thread id → the spawn_agent tool call that started it.
+    agent_threads: HashMap<String, String>,
+    /// Subagent threads whose final message was already recorded.
+    agent_done: HashMap<String, ToolStatus>,
 }
 
 impl CodexStream {
     pub fn new(cwd: PathBuf) -> Self {
-        CodexStream { cwd, done: false, failed: false, emitted: HashMap::new(), started_tools: HashMap::new() }
+        CodexStream {
+            cwd,
+            done: false,
+            failed: false,
+            emitted: HashMap::new(),
+            started_tools: HashMap::new(),
+            agent_threads: HashMap::new(),
+            agent_done: HashMap::new(),
+        }
     }
 
     /// Emit the not-yet-seen tail of a growing text item.
@@ -191,22 +203,7 @@ impl CodexStream {
                     sink.send(AgentEvent::Plan { entries });
                 }
             }
-            "collab_tool_call" => {
-                let prompt = s(item, "prompt").unwrap_or("").to_string();
-                let t_name = s(item, "tool").unwrap_or("spawn_agent").to_string();
-                self.start(&id, || tool_of_kind(id.clone(), &t_name, ToolKind::Task, json!({ "description": prompt, "tool": t_name })), sink);
-                if completed {
-                    let status = s(item, "status").unwrap_or("completed");
-                    sink.send(AgentEvent::ToolUpdate {
-                        id,
-                        status: Some(if status == "failed" { ToolStatus::Failed } else { ToolStatus::Completed }),
-                        output: None,
-                        diffs: Vec::new(),
-                        is_error: false,
-                        title: None,
-                    });
-                }
-            }
+            "collab_tool_call" => self.collab(&id, item, completed, sink),
             // Error *items* are Codex's non-fatal warnings (unsupported service
             // tier, missing model metadata…); fatal problems arrive as a
             // top-level `error` / `turn.failed` event instead.
@@ -217,6 +214,103 @@ impl CodexStream {
             }
             _ => {}
         }
+    }
+
+    /// Multi-agent calls (`spawn_agent`, `send_input`, `wait`, `close_agent`).
+    /// A spawned subagent keeps running after its spawn call returns, so the
+    /// spawn tool stays Running until a later call reports the agent's state.
+    fn collab(&mut self, id: &str, item: &Value, completed: bool, sink: &EventSink) {
+        let t_name = s(item, "tool").unwrap_or("spawn_agent").to_string();
+        let prompt = s(item, "prompt").unwrap_or("").to_string();
+        let receivers: Vec<String> = item
+            .get("receiver_thread_ids")
+            .and_then(|r| r.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        let spawn = t_name == "spawn_agent";
+        let n = receivers.len().max(1);
+        let plural = if n == 1 { "subagent" } else { "subagents" };
+        let title = match t_name.as_str() {
+            "spawn_agent" => None,
+            "send_input" => Some(format!("Messaged {plural}")),
+            "wait" => Some(format!("Waited for {n} {plural}")),
+            "close_agent" => Some(format!("Closed {n} {plural}")),
+            other => Some(other.replace('_', " ")),
+        };
+        let first = prompt.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+        let description: String = first.chars().take(80).collect();
+        let mut input = json!({ "description": description, "prompt": prompt, "tool": t_name, "receiver_thread_ids": receivers });
+        for k in ["agent_type", "role", "model"] {
+            if let Some(v) = s(item, k) {
+                input[k] = json!(v);
+            }
+        }
+        let kind = if spawn { ToolKind::Task } else { ToolKind::Other };
+        self.start(
+            id,
+            || {
+                let mut t = tool_of_kind(id.to_string(), &t_name, kind, input.clone());
+                if spawn {
+                    t.agent_name = s(item, "agent_type").or_else(|| s(item, "role")).map(|a| a.to_string());
+                    t.title = Some(t.describe());
+                } else {
+                    t.title = title.clone();
+                }
+                t
+            },
+            sink,
+        );
+        if spawn {
+            for r in &receivers {
+                self.agent_threads.entry(r.clone()).or_insert_with(|| id.to_string());
+            }
+        }
+        // Agent states reported by this call update the spawn tools.
+        let mut summary = Vec::new();
+        if let Some(states) = item.get("agents_states").and_then(|a| a.as_object()) {
+            for (thread, st) in states {
+                let state = s(st, "status").unwrap_or("running");
+                let message = s(st, "message").filter(|m| !m.trim().is_empty());
+                summary.push(match message {
+                    Some(m) => format!("{state}: {}", m.lines().next().unwrap_or("")),
+                    None => state.to_string(),
+                });
+                let Some(spawn_id) = self.agent_threads.get(thread).cloned() else { continue };
+                let status = collab_status(state);
+                if status == ToolStatus::Running || self.agent_done.get(thread) == Some(&status) {
+                    continue;
+                }
+                self.agent_done.insert(thread.clone(), status);
+                if let Some(m) = message {
+                    sink.send(AgentEvent::Subagent { parent_tool_id: spawn_id.clone(), inner: Box::new(AgentEvent::Text { text: m.to_string() }) });
+                }
+                sink.send(AgentEvent::ToolUpdate {
+                    id: spawn_id,
+                    status: Some(status),
+                    output: message.map(|m| m.to_string()),
+                    diffs: Vec::new(),
+                    is_error: status == ToolStatus::Failed,
+                    title: None,
+                });
+            }
+        }
+        if !completed {
+            return;
+        }
+        let failed = s(item, "status") == Some("failed");
+        // A successful spawn is only the launch; the agent is still working.
+        let status = if failed {
+            ToolStatus::Failed
+        } else if spawn {
+            if !receivers.is_empty() && receivers.iter().all(|r| self.agent_done.contains_key(r)) {
+                return; // already finished (reported above)
+            }
+            ToolStatus::Running
+        } else {
+            ToolStatus::Completed
+        };
+        let output = (!spawn && !summary.is_empty()).then(|| summary.join("\n"));
+        sink.send(AgentEvent::ToolUpdate { id: id.to_string(), status: Some(status), output, diffs: Vec::new(), is_error: failed, title: None });
     }
 
     fn start(&mut self, id: &str, make: impl FnOnce() -> larrier_core::ToolCall, sink: &EventSink) {
@@ -317,6 +411,16 @@ impl LineParser for CodexStream {
     }
 }
 
+/// Codex `CollabAgentStatus` → tool status.
+fn collab_status(state: &str) -> ToolStatus {
+    match state {
+        "completed" | "shutdown" => ToolStatus::Completed,
+        "errored" | "failed" | "not_found" => ToolStatus::Failed,
+        "interrupted" | "cancelled" => ToolStatus::Cancelled,
+        _ => ToolStatus::Running,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,5 +475,23 @@ mod tests {
         assert_eq!(sandbox(None, RunMode::Ask), "workspace-write");
         assert_eq!(sandbox(Some("read-only"), RunMode::FullAuto), "read-only");
         assert_eq!(sandbox(None, RunMode::FullAuto), "danger-full-access");
+    }
+
+    #[test]
+    fn maps_collab_subagents() {
+        let lines = [
+            r#"{"type":"item.started","item":{"id":"item_1","type":"collab_tool_call","tool":"spawn_agent","sender_thread_id":"t0","receiver_thread_ids":[],"prompt":"Audit the parser\nthoroughly","agents_states":{},"status":"in_progress"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_1","type":"collab_tool_call","tool":"spawn_agent","sender_thread_id":"t0","receiver_thread_ids":["t1"],"prompt":"Audit the parser\nthoroughly","agents_states":{"t1":{"status":"pending_init","message":null}},"status":"completed"}}"#,
+            r#"{"type":"item.started","item":{"id":"item_2","type":"collab_tool_call","tool":"wait","sender_thread_id":"t0","receiver_thread_ids":["t1"],"prompt":null,"agents_states":{},"status":"in_progress"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_2","type":"collab_tool_call","tool":"wait","sender_thread_id":"t0","receiver_thread_ids":["t1"],"prompt":null,"agents_states":{"t1":{"status":"completed","message":"Parser looks fine."}},"status":"completed"}}"#,
+        ];
+        let mut p = CodexStream::new(std::env::temp_dir());
+        let ev = collect(&mut p, &lines);
+        assert!(matches!(&ev[0], AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Task && tool.is_subagent() && tool.title.as_deref() == Some("Subagent Audit the parser")));
+        assert!(matches!(&ev[1], AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Running), .. } if id == "item_1"), "spawned agent keeps running");
+        assert!(matches!(&ev[2], AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Other && tool.title.as_deref() == Some("Waited for 1 subagent")));
+        assert!(matches!(&ev[3], AgentEvent::Subagent { parent_tool_id, inner } if parent_tool_id == "item_1" && matches!(&**inner, AgentEvent::Text { text } if text == "Parser looks fine.")));
+        assert!(matches!(&ev[4], AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), output: Some(o), .. } if id == "item_1" && o == "Parser looks fine."));
+        assert!(matches!(&ev[5], AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), .. } if id == "item_2"));
     }
 }

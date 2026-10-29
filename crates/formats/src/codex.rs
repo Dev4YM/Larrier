@@ -2,13 +2,21 @@
 //! (optionally `.jsonl.zst`). Model content comes from `response_item`
 //! records; real user prompts come from `user_message` / `UserMessage`
 //! events, because `response_item` user messages also carry injected context.
+//!
+//! Multi-agent runs: a `spawn_agent` call starts a child thread with its own
+//! rollout (`session_meta.source.subagent.thread_spawn.parent_thread_id`);
+//! the parent's `SubAgentActivity` items map the spawn `call_id` to the
+//! child's `agent_thread_id`, which names the child rollout file.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use larrier_core::{AgentKind, FileDiff, NativeLink, Part, Role, Session, ToolCall, Usage};
+use larrier_core::lsf::{close_active_tools, find_tool_path, slim_transcript, tool_at_path_mut};
+use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolStatus, Usage};
 use serde_json::{json, Value};
 
 use crate::util::{self, content_text, env_dir, finish, head_lines, json_lines, json_or_string, parse_ts, s, string, Conv, Meta};
@@ -113,10 +121,20 @@ fn norm(t: &str) -> String {
 pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
     let lines = json_lines(text);
     let mut meta = Meta { path: path.map(PathBuf::from), ..Default::default() };
+    let (conv, spawns) = convert(&lines, path, &mut meta);
+    let mut s = finish(conv, AGENT, meta)?;
+    attach_children(&mut s.messages, &spawns, path, 0);
+    Ok(s)
+}
+
+/// Convert rollout lines. Returns `(spawn call_id, child thread id)` pairs.
+fn convert(lines: &[Value], path: Option<&Path>, meta: &mut Meta) -> (Conv, Vec<(String, String)>) {
+    let mut spawns: Vec<(String, String)> = Vec::new();
+    let mut spawn_calls: HashSet<String> = HashSet::new();
 
     // Real user prompts from the event stream.
     let mut event_users: Vec<(String, Option<DateTime<Utc>>, Vec<Part>)> = Vec::new();
-    for v in &lines {
+    for v in lines {
         let pl = &v["payload"];
         if s(v, "type") != Some("event_msg") {
             continue;
@@ -154,7 +172,7 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
     let mut reasoning_gap = false;
     let mut seen_users: HashSet<String> = HashSet::new();
 
-    for v in &lines {
+    for v in lines {
         let ts = s(v, "timestamp").and_then(parse_ts);
         let pl = &v["payload"];
         match s(v, "type").unwrap_or("") {
@@ -220,7 +238,11 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                     } else {
                         pl.get("action").cloned().unwrap_or(Value::Null)
                     };
-                    let tool = ToolCall::new(id, name, input);
+                    if name == "spawn_agent" {
+                        spawn_calls.insert(id.to_string());
+                    }
+                    let mut tool = ToolCall::new(id, name, input);
+                    tool.started_at = ts;
                     conv.tool(tool, ts, model.as_deref());
                 }
                 "web_search_call" => {
@@ -266,6 +288,15 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                             conv.reasoning(&t, None, ts, model.as_deref());
                             reasoning_gap = false;
                         }
+                        "SubAgentActivity" => {
+                            // Activity is reported for every multi-agent call;
+                            // only the spawn links a call to its child thread.
+                            if let (Some(call), Some(thread)) = (s(item, "id"), s(item, "agent_thread_id")) {
+                                if spawn_calls.remove(call) {
+                                    spawns.push((call.to_string(), thread.to_string()));
+                                }
+                            }
+                        }
                         "FileChange" => {
                             // Enrich the latest apply_patch call with the real file content.
                             let diffs = file_change_diffs(&item["changes"]);
@@ -293,8 +324,106 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
         meta.native_id = path.and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     }
     meta.usage = usage_total;
-    let s = finish(conv, AGENT, meta)?;
-    Ok(s)
+    (conv, spawns)
+}
+
+/// Nesting levels of child threads inlined into a parent.
+const MAX_CHILD_DEPTH: usize = 3;
+/// Parts kept per inlined child transcript.
+const MAX_NESTED_PARTS: usize = 400;
+/// Child rollouts larger than this are not inlined.
+const MAX_CHILD_BYTES: u64 = 48 * 1024 * 1024;
+
+/// Inline child threads into their `spawn_agent` tool calls.
+fn attach_children(messages: &mut [Message], spawns: &[(String, String)], path: Option<&Path>, depth: usize) {
+    if spawns.is_empty() || depth >= MAX_CHILD_DEPTH {
+        return;
+    }
+    let root = path.and_then(codex_root_of).unwrap_or_else(|| root(None));
+    let mut seen = HashSet::new();
+    for (call, thread) in spawns {
+        if !seen.insert(thread) {
+            continue;
+        }
+        let Some(at) = find_tool_path(messages, call) else { continue };
+        if !tool_at_path_mut(messages, &at).map(|t| t.is_subagent() && t.subagent.is_empty()).unwrap_or(false) {
+            continue;
+        }
+        let Some(child) = rollout_path(&root, thread) else { continue };
+        let Some((msgs, role)) = child_transcript(&child, depth + 1) else { continue };
+        let Some(t) = tool_at_path_mut(messages, &at) else { continue };
+        if t.subagent.is_empty() {
+            t.subagent = msgs;
+            if t.agent_name.is_none() {
+                t.agent_name = role;
+            }
+        }
+    }
+}
+
+/// A child thread's messages (without the leading prompt) and its role or
+/// nickname.
+fn child_transcript(path: &Path, depth: usize) -> Option<(Vec<Message>, Option<String>)> {
+    if std::fs::metadata(path).map(|m| m.len() > MAX_CHILD_BYTES).unwrap_or(true) {
+        return None;
+    }
+    let text = util::read_text(path).ok()?;
+    let lines = json_lines(&text);
+    let head = lines.first().filter(|v| s(v, "type") == Some("session_meta")).map(|v| &v["payload"]);
+    let spawn = head.map(|pl| &pl["source"]["subagent"]["thread_spawn"]);
+    let role = [head.and_then(|pl| s(pl, "agent_role")), spawn.and_then(|t| s(t, "agent_role")), head.and_then(|pl| s(pl, "agent_nickname")), spawn.and_then(|t| s(t, "agent_nickname"))]
+        .into_iter()
+        .flatten()
+        .find(|r| !r.is_empty())
+        .map(|r| r.to_string());
+    let mut meta = Meta::default();
+    let (conv, spawns) = convert(&lines, Some(path), &mut meta);
+    let mut msgs = conv.messages;
+    attach_children(&mut msgs, &spawns, Some(path), depth);
+    let lead = msgs.iter().take_while(|m| m.role == Role::User).count();
+    msgs.drain(..lead);
+    msgs.retain(|m| !(m.role == Role::Assistant && m.parts.is_empty()));
+    for m in msgs.iter_mut() {
+        m.sidechain = true;
+    }
+    close_active_tools(&mut msgs, ToolStatus::Completed);
+    slim_transcript(&mut msgs, MAX_NESTED_PARTS);
+    (!msgs.is_empty()).then_some((msgs, role))
+}
+
+/// `<root>/sessions/YYYY/MM/DD/rollout-….jsonl` → `<root>`.
+fn codex_root_of(path: &Path) -> Option<PathBuf> {
+    path.ancestors().find(|a| matches!(a.file_name().and_then(|n| n.to_str()), Some("sessions" | "archived_sessions"))).and_then(|a| a.parent()).map(PathBuf::from)
+}
+
+/// Thread id → rollout path, rebuilt (from file names only) on a miss.
+static ROLLOUTS: Mutex<Option<(PathBuf, Instant, HashMap<String, PathBuf>)>> = Mutex::new(None);
+
+fn rollout_path(root: &Path, thread: &str) -> Option<PathBuf> {
+    let mut g = ROLLOUTS.lock().ok()?;
+    if let Some((r, built, map)) = g.as_ref() {
+        if r == root {
+            if let Some(p) = map.get(thread) {
+                return Some(p.clone());
+            }
+            if built.elapsed() < Duration::from_secs(10) {
+                return None;
+            }
+        }
+    }
+    let mut map = HashMap::new();
+    for sub in ["sessions", "archived_sessions"] {
+        for e in walkdir::WalkDir::new(root.join(sub)).into_iter().flatten() {
+            let name = e.file_name().to_string_lossy();
+            let Some(stem) = name.strip_prefix("rollout-").and_then(|n| n.strip_suffix(".jsonl.zst").or_else(|| n.strip_suffix(".jsonl"))) else { continue };
+            if stem.len() >= 36 && stem.is_char_boundary(stem.len() - 36) {
+                map.entry(stem[stem.len() - 36..].to_string()).or_insert_with(|| e.path().to_path_buf());
+            }
+        }
+    }
+    let found = map.get(thread).cloned();
+    *g = Some((root.to_path_buf(), Instant::now(), map));
+    found
 }
 
 fn emit_user(conv: &mut Conv, text: &str, ts: Option<DateTime<Utc>>, mut parts: Vec<Part>, seen: &mut HashSet<String>) {
@@ -484,6 +613,44 @@ mod tests {
         assert_eq!(s.messages[0].text(), "hi there");
         assert!(matches!(&s.messages[1].parts[0], Part::Reasoning { text, .. } if text == "thinking hard"));
         assert_eq!(s.messages[1].text(), "hello");
+    }
+
+    #[test]
+    fn links_spawned_child_threads() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("sessions").join("2026").join("01").join("02");
+        std::fs::create_dir_all(&day).unwrap();
+        let parent_id = "0199a213-81c0-7800-8aa1-bbab2a035a53";
+        let child_id = "0199a213-81c0-7800-8aa1-cccccccccccc";
+        let parent = [
+            r#"{"timestamp":"2026-01-02T00:00:00Z","type":"session_meta","payload":{"id":"0199a213-81c0-7800-8aa1-bbab2a035a53","cwd":"/r"}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"audit with a helper"}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"audit with a helper"}]}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:02Z","type":"response_item","payload":{"type":"function_call","name":"spawn_agent","arguments":"{\"task_name\":\"audit_parser\",\"message\":\"Audit the parser\"}","call_id":"call_spawn"}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_spawn","output":"spawned"}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:03Z","type":"event_msg","payload":{"type":"item_completed","item":{"type":"SubAgentActivity","id":"call_spawn","agent_thread_id":"0199a213-81c0-7800-8aa1-cccccccccccc","agent_path":"/root/audit_parser","kind":"spawned"}}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:09Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"All good"}]}}"#,
+        ];
+        let child = [
+            r#"{"timestamp":"2026-01-02T00:00:03Z","type":"session_meta","payload":{"id":"0199a213-81c0-7800-8aa1-cccccccccccc","cwd":"/r","parent_thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53","agent_role":"explorer","source":{"subagent":{"thread_spawn":{"parent_thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53","depth":1,"agent_role":"explorer"}}}}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:04Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Audit the parser"}]}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:05Z","type":"response_item","payload":{"type":"function_call","name":"shell_command","arguments":"{\"command\":\"rg parse\"}","call_id":"c_rg"}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:06Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c_rg","output":"src/parser.rs"}}"#,
+            r#"{"timestamp":"2026-01-02T00:00:07Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Parser is fine"}]}}"#,
+        ];
+        let parent_path = day.join(format!("rollout-2026-01-02T00-00-00-{parent_id}.jsonl"));
+        std::fs::write(&parent_path, parent.join("\n")).unwrap();
+        std::fs::write(day.join(format!("rollout-2026-01-02T00-00-03-{child_id}.jsonl")), child.join("\n")).unwrap();
+
+        let s = parse(&parent.join("\n"), Some(&parent_path)).unwrap();
+        let spawn = s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == "call_spawn").unwrap();
+        assert!(spawn.is_subagent());
+        assert_eq!(spawn.agent_name.as_deref(), Some("audit_parser"));
+        assert_eq!(spawn.subagent.len(), 1, "{:#?}", spawn.subagent);
+        assert_eq!(spawn.subagent_steps(), 1);
+        assert_eq!(spawn.subagent[0].text(), "Parser is fine");
+        assert!(spawn.subagent[0].sidechain);
+        assert_eq!(codex_root_of(&parent_path).as_deref(), Some(dir.path()));
     }
 
     #[test]

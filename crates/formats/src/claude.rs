@@ -4,13 +4,19 @@
 //! `message.id`); the visible conversation is the `parentUuid` chain from the
 //! newest message back to the root, continuing across compaction boundaries
 //! through `logicalParentUuid`.
+//!
+//! Subagents (Task / Agent tool) write their own transcript to
+//! `<project>/<sessionId>/subagents/agent-<agentId>.jsonl`, with
+//! `agent-<agentId>.meta.json` naming the spawning `toolUseId`; older
+//! versions wrote them inline as `isSidechain` lines.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::Utc;
-use larrier_core::{lsf::title_from_prompt, AgentKind, FileDiff, NativeLink, Part, Role, Session, ToolCall, Usage};
+use larrier_core::lsf::{close_active_tools, find_tool_deep_mut, slim_transcript, title_from_prompt};
+use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolStatus, Usage};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -213,8 +219,29 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
         }
     }
 
+    let (mut conv, agent_ids) = convert(&lines, active.as_ref(), false);
+    attach_inline_sidechains(&mut conv.messages, &lines);
+    if let Some(p) = path {
+        attach_subagent_files(&mut conv.messages, p, &agent_ids);
+    }
+    if let Some(p) = path {
+        meta.resume_path = Some(p.to_string_lossy().to_string());
+    }
+    finish(conv, AGENT, meta)
+}
+
+/// Result fields that describe subagents and background tasks.
+const TASK_KEYS: [&str; 7] = ["agentId", "agentType", "totalDurationMs", "isAsync", "backgroundTaskId", "taskId", "shellId"];
+
+/// Convert transcript lines (the active branch, or all lines of a subagent
+/// file when `sidechain`) into a conversation. Returns subagent `agentId` →
+/// spawning tool id.
+fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) -> (Conv, HashMap<String, String>) {
+    let is_msg = |v: &Value| matches!(s(v, "type"), Some("user") | Some("assistant")) && (sidechain || !v["isSidechain"].as_bool().unwrap_or(false));
     let mut conv = Conv::new(AGENT);
     let mut usage_by_msg: Vec<(String, Usage, usize)> = Vec::new();
+    let mut results: Vec<(String, Value)> = Vec::new();
+    let mut notes: Vec<TaskNote> = Vec::new();
     for (i, v) in lines.iter().enumerate() {
         let ty = s(v, "type").unwrap_or("");
         if ty == "system" {
@@ -226,7 +253,7 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
         if !is_msg(v) {
             continue;
         }
-        if let Some(a) = &active {
+        if let Some(a) = active {
             if !a.contains(&i) {
                 continue;
             }
@@ -244,6 +271,7 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
             let mut parts = Vec::new();
             match content {
                 Value::String(t) => {
+                    notes.extend(task_notes(t));
                     let t = clean_user_text(t);
                     if t.starts_with("[Request interrupted") {
                         conv.notice("Interrupted", ts);
@@ -255,6 +283,7 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
                     for b in blocks {
                         match s(b, "type") {
                             Some("text") => {
+                                notes.extend(task_notes(s(b, "text").unwrap_or("")));
                                 let t = clean_user_text(s(b, "text").unwrap_or(""));
                                 if t.starts_with("[Request interrupted") {
                                     conv.notice("Interrupted", ts);
@@ -274,6 +303,9 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
                                 let is_err = b["is_error"].as_bool().unwrap_or(false);
                                 let diffs = tool_meta.map(diffs_from_result).unwrap_or_default();
                                 conv.tool_result(id, Some(out), is_err, diffs);
+                                if let Some(m) = tool_meta.filter(|m| TASK_KEYS.iter().any(|k| m.get(*k).is_some())) {
+                                    results.push((id.to_string(), m.clone()));
+                                }
                             }
                             _ => {}
                         }
@@ -305,7 +337,8 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
                         conv.reasoning(s(b, "thinking").unwrap_or(""), dur, ts, model)
                     }
                     Some("tool_use") | Some("server_tool_use") => {
-                        let t = ToolCall::new(s(b, "id").unwrap_or(""), s(b, "name").unwrap_or("tool"), b.get("input").cloned().unwrap_or(Value::Null));
+                        let mut t = ToolCall::new(s(b, "id").unwrap_or(""), s(b, "name").unwrap_or("tool"), b.get("input").cloned().unwrap_or(Value::Null));
+                        t.started_at = ts;
                         conv.tool(t, ts, model);
                     }
                     _ => {}
@@ -341,10 +374,211 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
             }
         }
     }
-    if let Some(p) = path {
-        meta.resume_path = Some(p.to_string_lossy().to_string());
+    let agent_ids = link_tasks(&mut conv.messages, &results, &notes);
+    (conv, agent_ids)
+}
+
+/// Parts kept per imported subagent transcript.
+const MAX_NESTED_PARTS: usize = 400;
+/// Subagent transcripts larger than this are not inlined.
+const MAX_SUBAGENT_BYTES: u64 = 48 * 1024 * 1024;
+
+/// A `<task-notification>`: Claude Code reporting background work finishing.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct TaskNote {
+    task_id: Option<String>,
+    tool_use_id: Option<String>,
+    status: Option<String>,
+}
+
+fn task_notes(text: &str) -> Vec<TaskNote> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("<task-notification>") {
+        let after = &rest[i + "<task-notification>".len()..];
+        let end = after.find("</task-notification>").unwrap_or(after.len());
+        let block = &after[..end];
+        let tag = |name: &str| between(block, &format!("<{name}>"), &format!("</{name}>")).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        out.push(TaskNote { task_id: tag("task-id"), tool_use_id: tag("tool-use-id"), status: tag("status").map(|v| v.to_lowercase()) });
+        rest = &after[end..];
     }
-    finish(conv, AGENT, meta)
+    out
+}
+
+/// "Command running in background with ID: b8b97ntfm." → `b8b97ntfm`.
+fn background_id(output: &str) -> Option<String> {
+    let i = output.find("with ID:")? + "with ID:".len();
+    let id: String = output[i..].trim_start().chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    (!id.is_empty()).then_some(id)
+}
+
+fn walk_tools(messages: &mut [Message], f: &mut dyn FnMut(&mut ToolCall)) {
+    for m in messages.iter_mut() {
+        for t in m.tool_calls_mut() {
+            f(t);
+            walk_tools(&mut t.subagent, f);
+        }
+    }
+}
+
+/// Apply subagent facts (duration, type, async) from tool results and the
+/// final state of background tasks (TaskStop / KillShell, notifications).
+fn link_tasks(messages: &mut [Message], results: &[(String, Value)], notes: &[TaskNote]) -> HashMap<String, String> {
+    let mut agent_ids = HashMap::new();
+    let mut tasks: HashMap<String, String> = HashMap::new();
+    for (id, m) in results {
+        let Some(t) = find_tool_deep_mut(messages, id) else { continue };
+        if let Some(d) = m["totalDurationMs"].as_u64() {
+            t.duration_ms = Some(d);
+        }
+        if let Some(a) = s(m, "agentType").filter(|a| !a.is_empty()) {
+            t.agent_name = Some(a.to_string());
+        }
+        if m["isAsync"].as_bool().unwrap_or(false) || s(m, "status") == Some("async_launched") {
+            t.background = true;
+        }
+        if let Some(a) = s(m, "agentId") {
+            agent_ids.insert(a.to_string(), id.clone());
+            if t.background {
+                tasks.insert(a.to_string(), id.clone());
+            }
+        }
+        for k in ["backgroundTaskId", "taskId", "shellId"] {
+            if let Some(x) = s(m, k) {
+                tasks.insert(x.to_string(), id.clone());
+            }
+        }
+    }
+    let mut stops = Vec::new();
+    walk_tools(messages, &mut |t| {
+        if t.background {
+            if let Some(x) = t.output.as_deref().and_then(background_id) {
+                tasks.entry(x).or_insert_with(|| t.id.clone());
+            }
+        }
+        if matches!(t.name.as_str(), "TaskStop" | "KillShell" | "KillBash") && !t.is_error {
+            if let Some(x) = ["task_id", "shell_id", "bash_id"].iter().find_map(|k| t.input.get(*k).and_then(|v| v.as_str())) {
+                stops.push(x.to_string());
+            }
+        }
+    });
+    let mut finals: Vec<(String, ToolStatus)> = stops.into_iter().filter_map(|x| tasks.get(&x).map(|id| (id.clone(), ToolStatus::Cancelled))).collect();
+    for n in notes {
+        let Some(id) = n.tool_use_id.clone().or_else(|| n.task_id.as_ref().and_then(|x| tasks.get(x).cloned())) else { continue };
+        let status = match n.status.as_deref().unwrap_or("completed") {
+            "failed" | "error" => ToolStatus::Failed,
+            "killed" | "stopped" | "cancelled" | "canceled" => ToolStatus::Cancelled,
+            _ => ToolStatus::Completed,
+        };
+        finals.push((id, status));
+    }
+    for (id, status) in finals {
+        if let Some(t) = find_tool_deep_mut(messages, &id) {
+            t.status = status;
+        }
+    }
+    agent_ids
+}
+
+/// Shape an imported subagent transcript: the prompt already lives in the
+/// tool input, nothing is still running, and the size is bounded.
+fn nested(mut msgs: Vec<Message>) -> Vec<Message> {
+    let lead = msgs.iter().take_while(|m| m.role == Role::User).count();
+    msgs.drain(..lead);
+    msgs.retain(|m| !(m.role == Role::Assistant && m.parts.is_empty()));
+    for m in msgs.iter_mut() {
+        m.sidechain = true;
+    }
+    close_active_tools(&mut msgs, ToolStatus::Completed);
+    slim_transcript(&mut msgs, MAX_NESTED_PARTS);
+    msgs
+}
+
+/// Older Claude Code versions wrote subagent traffic into the main file as
+/// `isSidechain` chains; link each chain to the Task call with its prompt.
+fn attach_inline_sidechains(messages: &mut [Message], lines: &[Value]) {
+    let mut root_of: HashMap<&str, usize> = HashMap::new();
+    let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (i, v) in lines.iter().enumerate() {
+        if !v["isSidechain"].as_bool().unwrap_or(false) || !matches!(s(v, "type"), Some("user") | Some("assistant")) {
+            continue;
+        }
+        let root = s(v, "parentUuid").and_then(|p| root_of.get(p).copied()).unwrap_or(i);
+        if let Some(u) = s(v, "uuid") {
+            root_of.insert(u, root);
+        }
+        match groups.iter_mut().find(|(r, _)| *r == root) {
+            Some((_, g)) => g.push(i),
+            None => groups.push((root, vec![i])),
+        }
+    }
+    for (root, idxs) in groups {
+        if s(&lines[root], "type") != Some("user") {
+            continue;
+        }
+        let prompt = clean_user_text(&content_text(&lines[root]["message"]["content"]));
+        if prompt.is_empty() {
+            continue;
+        }
+        let matches = |t: &ToolCall| t.is_subagent() && t.subagent.is_empty() && t.input.get("prompt").and_then(|p| p.as_str()).map(|p| p.trim() == prompt.trim()).unwrap_or(false);
+        if !messages.iter().any(|m| m.tool_calls().any(matches)) {
+            continue;
+        }
+        let sub: Vec<Value> = idxs.iter().map(|&i| lines[i].clone()).collect();
+        let msgs = nested(convert(&sub, None, true).0.messages);
+        if let Some(t) = messages.iter_mut().flat_map(|m| m.tool_calls_mut()).find(|t| matches(t)) {
+            t.subagent = msgs;
+        }
+    }
+}
+
+/// Inline `<sessionId>/subagents/agent-*.jsonl` into their spawning tool calls.
+fn attach_subagent_files(messages: &mut [Message], session_path: &Path, agent_ids: &HashMap<String, String>) {
+    let dir = session_path.with_extension("").join("subagents");
+    let Ok(rd) = std::fs::read_dir(&dir) else { return };
+    struct Pending {
+        agent_id: String,
+        tool_use_id: Option<String>,
+        agent_type: Option<String>,
+        msgs: Vec<Message>,
+    }
+    let mut ids = agent_ids.clone();
+    let mut pending = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(agent_id) = name.strip_prefix("agent-").and_then(|n| n.strip_suffix(".jsonl")) else { continue };
+        let p = e.path();
+        if e.metadata().map(|m| m.len() > MAX_SUBAGENT_BYTES).unwrap_or(true) {
+            continue;
+        }
+        let meta: Value = std::fs::read_to_string(p.with_extension("meta.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+        let Ok(text) = util::read_text(&p) else { continue };
+        let (conv, inner_ids) = convert(&json_lines(&text), None, true);
+        ids.extend(inner_ids);
+        pending.push(Pending {
+            agent_id: agent_id.to_string(),
+            tool_use_id: string(&meta, "toolUseId"),
+            agent_type: string(&meta, "agentType").filter(|a| !a.is_empty()),
+            msgs: nested(conv.messages),
+        });
+    }
+    // Subagents can spawn subagents: attach until nothing more links.
+    loop {
+        let mut progress = false;
+        for p in pending.iter_mut().filter(|p| !p.msgs.is_empty()) {
+            let Some(tid) = p.tool_use_id.clone().or_else(|| ids.get(&p.agent_id).cloned()) else { continue };
+            if let Some(t) = find_tool_deep_mut(messages, &tid).filter(|t| t.subagent.is_empty()) {
+                t.subagent = std::mem::take(&mut p.msgs);
+                if t.agent_name.is_none() {
+                    t.agent_name = p.agent_type.clone();
+                }
+                progress = true;
+            }
+        }
+        if !progress {
+            break;
+        }
+    }
 }
 
 /// Claude's `toolUseResult` carries structured edit info.
@@ -480,6 +714,65 @@ mod tests {
         assert!(a.text().contains("Done."));
         assert_eq!(s.usage.output_tokens, 11);
         assert_eq!(s.workspace.as_ref().unwrap().branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn links_subagent_files_and_background_tasks() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("S.jsonl");
+        let main = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"audit and serve"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","timestamp":"2026-10-01T10:00:01Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"toolu_agent","name":"Agent","input":{"description":"Audit parser","prompt":"Audit the parser","subagent_type":"Explore"}}]}}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"S","timestamp":"2026-10-01T10:00:09Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_agent","content":[{"type":"text","text":"Parser is fine"}]}]},"toolUseResult":{"status":"completed","agentId":"abc123","agentType":"Explore","totalDurationMs":8000}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"u2","sessionId":"S","timestamp":"2026-10-01T10:00:10Z","message":{"id":"m2","role":"assistant","content":[{"type":"tool_use","id":"toolu_bg","name":"Bash","input":{"command":"npm run dev","run_in_background":true}}]}}"#,
+            r#"{"type":"user","uuid":"u3","parentUuid":"a2","sessionId":"S","timestamp":"2026-10-01T10:00:11Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_bg","content":"Command running in background with ID: bx1"}]},"toolUseResult":{"stdout":"","backgroundTaskId":"bx1"}}"#,
+            r#"{"type":"user","uuid":"u4","parentUuid":"u3","sessionId":"S","timestamp":"2026-10-01T10:00:30Z","message":{"role":"user","content":"<task-notification>\n<task-id>bx1</task-id>\n<status>failed</status>\n<summary>exit 1</summary>\n</task-notification>"}}"#,
+            r#"{"type":"assistant","uuid":"a3","parentUuid":"u4","sessionId":"S","timestamp":"2026-10-01T10:00:31Z","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"The dev server crashed."}]}}"#,
+        ];
+        std::fs::write(&session, main.join("\n")).unwrap();
+        let subs = dir.path().join("S").join("subagents");
+        std::fs::create_dir_all(&subs).unwrap();
+        let sub = [
+            r#"{"type":"user","uuid":"s1","parentUuid":null,"isSidechain":true,"agentId":"abc123","sessionId":"S","timestamp":"2026-10-01T10:00:02Z","message":{"role":"user","content":"Audit the parser"}}"#,
+            r#"{"type":"assistant","uuid":"s2","parentUuid":"s1","isSidechain":true,"agentId":"abc123","sessionId":"S","timestamp":"2026-10-01T10:00:03Z","message":{"id":"sm1","role":"assistant","content":[{"type":"tool_use","id":"toolu_read","name":"Read","input":{"file_path":"/r/parser.rs"}}]}}"#,
+            r#"{"type":"user","uuid":"s3","parentUuid":"s2","isSidechain":true,"agentId":"abc123","sessionId":"S","timestamp":"2026-10-01T10:00:04Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_read","content":"fn parse()"}]}}"#,
+            r#"{"type":"assistant","uuid":"s4","parentUuid":"s3","isSidechain":true,"agentId":"abc123","sessionId":"S","timestamp":"2026-10-01T10:00:05Z","message":{"id":"sm2","role":"assistant","content":[{"type":"text","text":"Parser is fine"}]}}"#,
+        ];
+        std::fs::write(subs.join("agent-abc123.jsonl"), sub.join("\n")).unwrap();
+        std::fs::write(subs.join("agent-abc123.meta.json"), r#"{"agentType":"Explore","description":"Audit parser","toolUseId":"toolu_agent"}"#).unwrap();
+
+        let s = import(&util::info(AGENT, "S", &session)).unwrap();
+        let tools: Vec<&ToolCall> = s.messages.iter().flat_map(|m| m.tool_calls()).collect();
+        let agent = tools.iter().find(|t| t.id == "toolu_agent").unwrap();
+        assert!(agent.is_subagent());
+        assert_eq!(agent.agent_name.as_deref(), Some("Explore"));
+        assert_eq!(agent.duration_ms, Some(8000));
+        assert_eq!(agent.subagent.len(), 1, "prompt dropped, one assistant message: {:#?}", agent.subagent);
+        assert!(agent.subagent[0].sidechain);
+        assert_eq!(agent.subagent_steps(), 1);
+        let read = agent.subagent[0].tool_calls().next().unwrap();
+        assert_eq!((read.output.as_deref(), read.status), (Some("fn parse()"), ToolStatus::Completed));
+        assert_eq!(agent.subagent[0].text(), "Parser is fine");
+        let bg = tools.iter().find(|t| t.id == "toolu_bg").unwrap();
+        assert!(bg.background);
+        assert_eq!(bg.status, ToolStatus::Failed, "notification status wins");
+        assert!(!s.messages.iter().any(|m| m.text().contains("task-notification")));
+    }
+
+    #[test]
+    fn links_inline_sidechains_by_prompt() {
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"look around"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","timestamp":"2026-10-01T10:00:01Z","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t_task","name":"Task","input":{"description":"Scan","prompt":"Scan the repo"}}]}}"#,
+            r#"{"type":"user","uuid":"x1","parentUuid":null,"isSidechain":true,"sessionId":"S","timestamp":"2026-10-01T10:00:02Z","message":{"role":"user","content":"Scan the repo"}}"#,
+            r#"{"type":"assistant","uuid":"x2","parentUuid":"x1","isSidechain":true,"sessionId":"S","timestamp":"2026-10-01T10:00:03Z","message":{"id":"sx","role":"assistant","content":[{"type":"text","text":"3 crates"}]}}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"a1","sessionId":"S","timestamp":"2026-10-01T10:00:04Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t_task","content":"3 crates"}]}}"#,
+        ];
+        let s = parse(&lines.join("\n"), None, "S").unwrap();
+        let t = s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == "t_task").unwrap();
+        assert_eq!(t.subagent.len(), 1);
+        assert_eq!(t.subagent[0].text(), "3 crates");
+        assert_eq!(s.messages.len(), 2, "sidechain lines stay out of the main transcript");
     }
 
     #[test]

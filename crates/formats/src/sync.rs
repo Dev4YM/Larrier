@@ -34,6 +34,11 @@ pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
 /// Import new and changed sessions among `infos`. `skip(session_id)` leaves
 /// an existing Larrier session alone (for example while Larrier itself is
 /// running it, since its agent writes the same native file).
+/// Bump when an importer changes what it produces: sessions imported by an
+/// older version are imported again on the next sync, keeping what the user
+/// changed in Larrier.
+pub const IMPORTER_VERSION: u32 = 2;
+
 pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(&str) -> bool) -> SyncReport {
     let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut report = SyncReport::default();
@@ -44,9 +49,9 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
             Some(r) if r.linked || r.deleted => report.skipped += 1,
             Some(r) if !r.session_id.is_empty() && skip(&r.session_id) => report.skipped += 1,
             // Known-empty source that hasn't changed.
-            Some(r) if r.session_id.is_empty() && r.source_mtime == info.mtime_ms && r.source_len == info.size => report.skipped += 1,
+            Some(r) if r.session_id.is_empty() && r.source_mtime == info.mtime_ms && r.source_len == info.size && r.importer >= IMPORTER_VERSION => report.skipped += 1,
             Some(r) if !r.session_id.is_empty() && store.exists(&r.session_id) => {
-                if r.source_mtime == info.mtime_ms && r.source_len == info.size {
+                if r.source_mtime == info.mtime_ms && r.source_len == info.size && r.importer >= IMPORTER_VERSION {
                     report.skipped += 1;
                 } else {
                     todo.push((info, Plan::Update(r.session_id), key));
@@ -74,14 +79,14 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
                         }
                         Plan::New => report.imported += 1,
                     }
-                    store.set_import_record(key, ImportRecord { session_id: s.id.clone(), source_mtime: info.mtime_ms, source_len: info.size, ..Default::default() });
+                    store.set_import_record(key, ImportRecord { session_id: s.id.clone(), source_mtime: info.mtime_ms, source_len: info.size, importer: IMPORTER_VERSION, ..Default::default() });
                     report.changed.push(s.id.clone());
                     batch.push(s);
                 }
                 Err(e) if e.downcast_ref::<ImportSkip>().is_some() => {
                     // Remember empty sessions so they aren't re-parsed every run.
                     if matches!(plan, Plan::New) {
-                        store.set_import_record(key, ImportRecord { session_id: String::new(), source_mtime: info.mtime_ms, source_len: info.size, ..Default::default() });
+                        store.set_import_record(key, ImportRecord { session_id: String::new(), source_mtime: info.mtime_ms, source_len: info.size, importer: IMPORTER_VERSION, ..Default::default() });
                     }
                     report.skipped += 1;
                 }

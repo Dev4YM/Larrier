@@ -52,6 +52,10 @@ pub struct ImportRecord {
     /// again (its own files are left untouched).
     #[serde(default)]
     pub deleted: bool,
+    /// Version of the importer that produced the session; sessions from an
+    /// older one are imported again (see `larrier_formats::IMPORTER_VERSION`).
+    #[serde(default)]
+    pub importer: u32,
 }
 
 impl ImportRecord {

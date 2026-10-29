@@ -5,6 +5,7 @@ mod automations;
 mod highlight;
 mod icons;
 mod live;
+mod logo;
 mod logos;
 mod markdown;
 mod models_sync;
@@ -92,33 +93,8 @@ fn main() {
     dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(ui::Root);
 }
 
-/// The Larrier mark — a dark rounded square with a light "L" — rasterized at
-/// runtime so no image assets are needed.
+/// The Larrier mark as the window icon, drawn at runtime (no image files).
 fn app_icon() -> dioxus::desktop::tao::window::Icon {
     const N: u32 = 64;
-    let mut px = vec![0u8; (N * N * 4) as usize];
-    let radius = 14.0f32;
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            // Rounded-rect coverage with a 1px antialiased edge.
-            let cx = fx.clamp(radius, N as f32 - radius);
-            let cy = fy.clamp(radius, N as f32 - radius);
-            let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
-            let cover = (radius - d + 0.5).clamp(0.0, 1.0);
-            if cover <= 0.0 {
-                continue;
-            }
-            // "L": vertical stem + foot.
-            let stem = (21.0..30.0).contains(&fx) && (15.0..49.0).contains(&fy);
-            let foot = (21.0..45.0).contains(&fx) && (40.0..49.0).contains(&fy);
-            let (r, g, b) = if stem || foot { (247u8, 247u8, 244u8) } else { (38u8, 37u8, 30u8) };
-            let i = ((y * N + x) * 4) as usize;
-            px[i] = r;
-            px[i + 1] = g;
-            px[i + 2] = b;
-            px[i + 3] = (cover * 255.0) as u8;
-        }
-    }
-    dioxus::desktop::tao::window::Icon::from_rgba(px, N, N).expect("valid icon")
+    dioxus::desktop::tao::window::Icon::from_rgba(logo::mark_rgba(N), N, N).expect("valid icon")
 }

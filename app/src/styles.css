@@ -553,7 +553,10 @@ select.input { cursor: pointer; padding-right: 4px; }
 /* menu bar */
 .menubar { height: 30px; flex-shrink: 0; display: flex; align-items: stretch; background: var(--win); padding-left: 8px; position: relative; z-index: 60; }
 .menubar .app-mark { width: 26px; display: flex; align-items: center; justify-content: center; }
-.menubar .app-mark .mark { width: 13px; height: 13px; border-radius: 3px; background: var(--fg); color: var(--win); font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.menubar .app-mark .mark { width: 16px; height: 16px; display: flex; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .12)); }
+.menubar .app-mark .mark svg { width: 100%; height: 100%; display: block; }
+/* The ink mark in the dark theme, the paper one in the light theme. */
+.app[data-theme="light"] .menubar .app-mark .mark.ink, .app[data-theme="dark"] .menubar .app-mark .mark.paper { display: none; }
 .menubar .mb-item { padding: 0 8px; font-size: 12px; color: var(--fg); display: flex; align-items: center; border-radius: 4px; margin: 3px 0; }
 .menubar .mb-item:hover, .menubar .mb-item.open { background: var(--hover); }
 .menubar .win-controls { margin-right: 0; }

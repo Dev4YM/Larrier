@@ -130,7 +130,7 @@ pub fn windows_app_id() -> &'static str {
 fn icon_png_path() -> Option<PathBuf> {
     static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
     PATH.get_or_init(|| {
-        let p = crate::state::store().root().join("larrier-icon.png");
+        let p = crate::state::store().root().join("larrier-mark.png");
         if !p.exists() {
             let n = 128;
             std::fs::write(&p, png_rgba(n, n, &app_icon_rgba(n))).ok()?;
@@ -564,31 +564,7 @@ pub fn mark_interrupted_in(store: &Store, ids: &[String]) -> usize {
 
 /// The Larrier mark (dark rounded square with a light "L") as RGBA pixels.
 pub fn app_icon_rgba(n: u32) -> Vec<u8> {
-    let mut px = vec![0u8; (n * n * 4) as usize];
-    let k = n as f32 / 64.0;
-    let radius = 14.0 * k;
-    for y in 0..n {
-        for x in 0..n {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let cx = fx.clamp(radius, n as f32 - radius);
-            let cy = fy.clamp(radius, n as f32 - radius);
-            let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
-            let cover = (radius - d + 0.5).clamp(0.0, 1.0);
-            if cover <= 0.0 {
-                continue;
-            }
-            let (ux, uy) = (fx / k, fy / k);
-            let stem = (21.0..30.0).contains(&ux) && (15.0..49.0).contains(&uy);
-            let foot = (21.0..45.0).contains(&ux) && (40.0..49.0).contains(&uy);
-            let (r, g, b) = if stem || foot { (247u8, 247u8, 244u8) } else { (38u8, 37u8, 30u8) };
-            let i = ((y * n + x) * 4) as usize;
-            px[i] = r;
-            px[i + 1] = g;
-            px[i + 2] = b;
-            px[i + 3] = (cover * 255.0) as u8;
-        }
-    }
-    px
+    crate::logo::mark_rgba(n)
 }
 
 /// Minimal PNG encoder (RGBA8, uncompressed deflate blocks).

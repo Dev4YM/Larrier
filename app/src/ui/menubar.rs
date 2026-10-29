@@ -181,7 +181,10 @@ pub fn MenuBar() -> Element {
     let names = ["File", "Edit", "View", "Help"];
     rsx! {
         div { class: "menubar",
-            div { class: "app-mark", span { class: "mark", "L" } }
+            div { class: "app-mark", title: "Larrier",
+                span { class: "mark ink", dangerous_inner_html: crate::logo::MARK_SVG }
+                span { class: "mark paper", dangerous_inner_html: crate::logo::MARK_LIGHT_SVG }
+            }
             for (i, n) in names.into_iter().enumerate() {
                 div { key: "{n}", style: "position: relative; display: flex;",
                     button {

@@ -25,12 +25,26 @@ impl ProcessOutcome {
         let tail = self.stderr_tail.iter().rev().take(6).rev().cloned().collect::<Vec<_>>().join("\n");
         if self.cancelled {
             "Stopped".to_string()
+        } else if let Some(reason) = stderr_reason(&self.stderr_tail) {
+            format!("{agent}: {reason}")
         } else if tail.trim().is_empty() {
             format!("{agent} exited with code {}", self.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into()))
         } else {
             format!("{agent} exited with code {}:\n{tail}", self.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "?".into()))
         }
     }
+}
+
+/// The reason a CLI gives on stderr for failing, without the wrapper:
+/// "ActionRequiredError: You've hit your usage limit …" followed by
+/// "Error: command failed unexpectedly." reads "You've hit your usage
+/// limit …". None when no line names a specific error.
+fn stderr_reason(lines: &[String]) -> Option<String> {
+    lines.iter().map(|l| l.trim()).filter(|l| !l.is_empty() && !l.starts_with("at ")).find_map(|l| {
+        let (name, msg) = l.split_once(": ")?;
+        let specific = name.len() > "Error".len() && name.ends_with("Error") && name.chars().all(|c| c.is_ascii_alphanumeric());
+        (specific && !msg.trim().is_empty()).then(|| msg.trim().to_string())
+    })
 }
 
 /// Spawn `cmd`, optionally feed `stdin_data`, and call `on_line` for every
@@ -122,4 +136,18 @@ pub fn strip_ansi(s: &str) -> String {
         out.push(c);
     }
     out
+}
+
+#[cfg(test)]
+mod reason_tests {
+    use super::*;
+
+    #[test]
+    fn names_the_specific_error() {
+        let out = |lines: &[&str]| ProcessOutcome { exit_code: Some(1), cancelled: false, stderr_tail: lines.iter().map(|l| l.to_string()).collect() };
+        let limit = out(&["ActionRequiredError: You've hit your usage limit for Grok 4.7.", "    at run (index.js:1:1)", "Error: command failed unexpectedly."]);
+        assert_eq!(limit.error_message("Cursor Agent"), "Cursor Agent: You've hit your usage limit for Grok 4.7.");
+        let plain = out(&["Error: command failed unexpectedly."]);
+        assert_eq!(plain.error_message("Cursor Agent"), "Cursor Agent exited with code 1:\nError: command failed unexpectedly.");
+    }
 }

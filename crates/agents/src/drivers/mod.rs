@@ -202,7 +202,9 @@ pub fn plan_entries(items: &Value) -> Option<Vec<PlanEntry>> {
                 let status = if t.get("completed").and_then(|c| c.as_bool()) == Some(true) {
                     PlanStatus::Completed
                 } else {
-                    match t.get("status").and_then(|s| s.as_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+                    // Cursor uses `TODO_STATUS_COMPLETED` etc.
+                    let st = t.get("status").and_then(|s| s.as_str()).unwrap_or("").to_ascii_lowercase();
+                    match st.strip_prefix("todo_status_").unwrap_or(&st) {
                         "completed" | "done" | "complete" => PlanStatus::Completed,
                         "in_progress" | "in-progress" | "active" | "inprogress" | "running" => PlanStatus::InProgress,
                         "cancelled" | "canceled" => PlanStatus::Cancelled,

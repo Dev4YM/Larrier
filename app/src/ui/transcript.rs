@@ -790,7 +790,7 @@ pub fn AssistantMessage(session_id: String, msg: Message, streaming: bool, show_
                 }
             }
             if streaming && !last_is_live(&msg) {
-                div { class: "thinking-row", span { class: "shimmer", "Generating" } }
+                div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
             }
             if let Some(m) = meta.filter(|m| !m.is_empty() && !streaming && skip_final) {
                 div { class: "turn-meta", "{m}" }
@@ -903,7 +903,7 @@ pub fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool
 fn Reasoning(text: String, duration_ms: Option<u64>, live: bool) -> Element {
     let mut open = use_signal(|| false);
     let (verb, rest) = match duration_ms {
-        Some(ms) if ms >= 1500 => ("Thought".to_string(), format!("for {}s", (ms + 500) / 1000)),
+        Some(ms) if ms >= 1500 => ("Thought".to_string(), format!("{}s", (ms + 500) / 1000)),
         Some(_) => ("Thought".to_string(), "briefly".to_string()),
         None if live => ("Thinking".to_string(), String::new()),
         None => ("Thought".to_string(), String::new()),
@@ -958,8 +958,10 @@ fn verb_target(t: &ToolCall) -> (&'static str, String) {
         "TeamCreate" | "TeamDelete" => Some((pick("Updating team", "Updated team"), arg(&["name", "team_name"]))),
         "WebFetch" | "web_fetch" | "fetch" => Some((pick("Fetching", "Fetched"), arg(&["url"]))),
         "WebSearch" | "web_search" | "google_web_search" => Some((pick("Searching web", "Searched web"), arg(&["query"]))),
-        "Glob" => Some((pick("Finding", "Found"), arg(&["pattern"]))),
-        "Grep" => Some((pick("Searching", "Searched"), arg(&["pattern"]))),
+        "Glob" | "glob" | "find_files" => Some((pick("Listing", "Listed"), arg(&["pattern", "glob"]))),
+        "Grep" | "grep" | "grep_search" | "ripgrep" | "search_file_content" => Some((pick("Grepping", "Grepped"), arg(&["pattern", "query", "regex"]))),
+        "LS" | "ls" | "list_dir" | "list_directory" => Some((pick("Listing", "Listed"), arg(&["path", "relative_workspace_path", "dir_path"]))),
+        "codebase_search" | "semantic_search" => Some((pick("Searching", "Searched"), arg(&["query"]))),
         _ => None,
     };
     if let Some(v) = named {
@@ -1057,6 +1059,18 @@ pub fn running_label(t: &ToolCall) -> String {
     format!("{v} {target}").trim().to_string()
 }
 
+/// File (or folder) name a read / list call looked at.
+fn read_target(t: &ToolCall) -> Option<String> {
+    let path = ["file_path", "path", "target_file", "filePath", "notebook_path", "relative_workspace_path", "dir_path"]
+        .iter()
+        .find_map(|k| t.input.get(*k).and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+        .or_else(|| t.locations.first().cloned())?;
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let name = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 #[component]
 fn ExploreGroup(tools: Vec<ToolCall>) -> Element {
     let mut open = use_signal(|| false);
@@ -1064,11 +1078,24 @@ fn ExploreGroup(tools: Vec<ToolCall>) -> Element {
     if tools.len() == 1 {
         return rsx! { Step { tool: tools[0].clone() } };
     }
-    let files = tools.iter().filter(|t| t.kind == ToolKind::Read).count();
-    let searches = tools.len() - files;
+    // "internet.rs, state.rs, 2 searches" (Cursor's wording).
+    let mut names: Vec<String> = Vec::new();
+    let mut reads = 0;
+    for t in tools.iter().filter(|t| t.kind == ToolKind::Read) {
+        reads += 1;
+        if let Some(n) = read_target(t) {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+    }
+    let searches = tools.len() - reads;
     let mut bits = Vec::new();
-    if files > 0 {
-        bits.push(format!("{files} file{}", if files == 1 { "" } else { "s" }));
+    match names.len() {
+        0 if reads > 0 => bits.push(format!("{reads} file{}", if reads == 1 { "" } else { "s" })),
+        0 => {}
+        1..=3 => bits.push(names.join(", ")),
+        n => bits.push(format!("{}, +{} files", names[..2].join(", "), n - 2)),
     }
     if searches > 0 {
         bits.push(format!("{searches} search{}", if searches == 1 { "" } else { "es" }));

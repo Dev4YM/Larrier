@@ -737,10 +737,10 @@ fn mentioned_files(text: &str) -> Option<(String, Vec<String>)> {
     Some((request, files))
 }
 
-/// Codex app directives at the end of a reply (`::git-stage{cwd="…"}
-/// ::git-commit{…} ::git-push{… branch="main"}`), which the Codex app
-/// shows as action chips: the text without them, and their names
-/// ("stage", "commit", "push").
+/// Codex app directives in a reply (`::git-stage{cwd="…"} ::git-commit{…}
+/// ::git-push{… branch="main"}`, `::codex-inline-vis{…}`), which the Codex
+/// app turns into widgets: the text without them, and the git actions
+/// among them ("stage", "commit", "push").
 pub fn app_directives(text: &str) -> (String, Vec<String>) {
     let mut out = String::with_capacity(text.len());
     let mut names = Vec::new();
@@ -755,7 +755,9 @@ pub fn app_directives(text: &str) -> (String, Vec<String>) {
         match (!starts_word || name.is_empty() || !name.starts_with(|c: char| c.is_ascii_lowercase()), body.starts_with('{').then(|| body.find('}')).flatten()) {
             (false, Some(end)) => {
                 out.push_str(&rest[..i]);
-                names.push(name.strip_prefix("git-").unwrap_or(name).replace('-', " "));
+                if let Some(action) = name.strip_prefix("git-") {
+                    names.push(action.replace('-', " "));
+                }
                 rest = &body[end + 1..];
             }
             _ => {
@@ -765,7 +767,7 @@ pub fn app_directives(text: &str) -> (String, Vec<String>) {
         }
     }
     out.push_str(rest);
-    if names.is_empty() {
+    if out.len() == text.len() {
         return (text.to_string(), names);
     }
     (out.trim_end().to_string(), names)
@@ -1582,6 +1584,8 @@ mod tests {
         let (text, names) = app_directives("Pushed.\n\n::git-stage{cwd=\"D:\\r\"} ::git-commit{cwd=\"D:\\r\"} ::git-push{cwd=\"D:\\r\" branch=\"main\"}");
         assert_eq!(text, "Pushed.");
         assert_eq!(names, ["stage", "commit", "push"]);
+        // Other widgets go without a notice.
+        assert_eq!(app_directives("Here it is.\n::codex-inline-vis{path=\"a.html\"}"), ("Here it is.".to_string(), Vec::new()));
         // Rust paths and C++ scopes stay as they are.
         assert_eq!(app_directives("use std::fs; a::b{}").0, "use std::fs; a::b{}");
     }

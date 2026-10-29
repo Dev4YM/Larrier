@@ -37,7 +37,7 @@ pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
 /// Bump when an importer changes what it produces: sessions imported by an
 /// older version are imported again on the next sync, keeping what the user
 /// changed in Larrier.
-pub const IMPORTER_VERSION: u32 = 4;
+pub const IMPORTER_VERSION: u32 = 5;
 
 pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(&str) -> bool) -> SyncReport {
     let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());

@@ -82,6 +82,7 @@ pub fn AgentView(id: String) -> Element {
         div { class: if split.is_some() { "agent-body split" } else { "agent-body" },
             div {
                 class: if right_open && split.is_none() { "chat-col primary fixed" } else { "chat-col primary" },
+                "data-session": "{id}",
                 ChatHeader { id: id.clone() }
                 ChatColumn { id: id.clone(), input_id: "composer-input" }
                 if right_open && split.is_none() {
@@ -92,7 +93,7 @@ pub fn AgentView(id: String) -> Element {
                 }
             }
             if let Some(other) = split.clone() {
-                div { key: "split-{other}", class: "chat-col secondary",
+                div { key: "split-{other}", class: "chat-col secondary", "data-session": "{other}",
                     SplitHeader { id: other.clone() }
                     ChatColumn { id: other.clone(), input_id: "composer-input-2" }
                 }
@@ -525,8 +526,10 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
 
 // ------------------------------------------------------------------ drop targets
 
-/// Where a chat dragged from the sidebar or a tab can go. Shown while one
-/// is being dragged; the hovered card lights up.
+/// Where a chat dragged from the sidebar or a tab will land, shown while
+/// one is dragged over the window. Nothing to aim at: the drag engine reads
+/// where the pointer is (an edge: side by side; near a composer: attach as
+/// context; elsewhere: open here) and lights up that area.
 #[component]
 pub fn DropZones(target: Option<String>) -> Element {
     let app = use_app();
@@ -535,31 +538,15 @@ pub fn DropZones(target: Option<String>) -> Element {
     if target.as_deref() == Some(dragged.as_str()) {
         return rsx! {};
     }
-    let title = app.sessions.read().iter().find(|s| s.id == dragged).map(|s| s.title.clone()).unwrap_or_else(|| "this chat".into());
     let t = target.clone().unwrap_or_default();
+    let here = if target.is_some() { "Open here" } else { "Open this chat" };
+    let context = if target.is_some() { "Attach as context" } else { "Start a new agent with it" };
     rsx! {
-        div { class: "drop-overlay",
-            div { class: "drop-panel",
-                div { class: "drop-title", span { class: "ellipsis", "“{title}”" } }
-                div { class: "drop-grid",
-                    if target.is_some() {
-                        DropCard { zone: "split", target: t.clone(), icon: I::Columns, label: "Side by side", sub: "Work in both chats at once".to_string() }
-                    }
-                    DropCard { zone: "here", target: t.clone(), icon: I::AppWindow, label: "Open here", sub: if target.is_some() { "Replace this chat".to_string() } else { "Show this chat".to_string() } }
-                    DropCard { zone: "context", target: t.clone(), icon: I::Link, label: "Add as context", sub: if target.is_some() { "Reference it in your next message".to_string() } else { "Start a new agent with it".to_string() } }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn DropCard(zone: &'static str, target: String, icon: I, label: &'static str, sub: String) -> Element {
-    rsx! {
-        div { class: "drop-card", "data-drop": "{zone}", "data-drop-target": "{target}",
-            span { class: "ic", Icon { i: icon, size: 20, stroke: 1.5 } }
-            span { class: "lb", "{label}" }
-            span { class: "sub", "{sub}" }
+        div { class: if target.is_some() { "drop-overlay can-split" } else { "drop-overlay" }, "data-drop-target": "{t}",
+            div { class: "drop-preview p-left", span { class: "drop-label", Icon { i: I::Columns, size: 14, stroke: 1.6 } "Open side by side" } }
+            div { class: "drop-preview p-right", span { class: "drop-label", Icon { i: I::Columns, size: 14, stroke: 1.6 } "Open side by side" } }
+            div { class: "drop-preview p-here", span { class: "drop-label", Icon { i: I::AppWindow, size: 14, stroke: 1.6 } "{here}" } }
+            div { class: "drop-preview p-context", span { class: "drop-label", Icon { i: I::Link, size: 14, stroke: 1.6 } "{context}" } }
         }
     }
 }

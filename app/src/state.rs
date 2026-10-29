@@ -772,6 +772,19 @@ impl App {
         self.split.set(Some(id.to_string()));
     }
 
+    /// Show `id` side by side, on the left: the open session moves right.
+    pub fn open_split_left(mut self, id: &str) {
+        if !self.ensure_loaded(id) {
+            return;
+        }
+        let Some(cur) = self.current_id() else { return self.open_session(id) };
+        if cur == id {
+            return;
+        }
+        self.split.set(Some(cur));
+        self.open_session(id);
+    }
+
     pub fn new_agent(mut self) {
         self.navigate(View::Home);
         self.ui.write().focus_composer += 1;

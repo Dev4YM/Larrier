@@ -184,6 +184,49 @@ pub fn Root() -> Element {
                 if (btn && btn !== src && src.contains(btn)) return;
                 st = { id: src.getAttribute('data-drag-session'), title: src.getAttribute('data-drag-title') || '', x0: e.clientX, y0: e.clientY, active: false, zone: null, ghost: null };
               }, true);
+              // Where a drop at (x, y) lands. Over a chat window the pointer's
+              // place decides: near a composer attaches as context, an edge
+              // opens side by side, anywhere else opens it here.
+              const inside = (b, x, y, mx, my) => x >= b.left - mx && x <= b.right + mx && y >= b.top - my && y <= b.bottom + my;
+              const zoneAt = (x, y) => {
+                const ov = [...document.querySelectorAll('.drop-overlay')].find(o => inside(o.getBoundingClientRect(), x, y, 0, 0));
+                if (!ov) {
+                  const under = document.elementFromPoint(x, y);
+                  const z = under && under.closest('[data-drop]');
+                  return z ? { el: z, zone: z.getAttribute('data-drop'), target: z.getAttribute('data-drop-target') || '' } : null;
+                }
+                const r = ov.getBoundingClientRect();
+                const scope = ov.parentElement || document;
+                const comp = [...scope.querySelectorAll('.composer')].find(c => inside(c.getBoundingClientRect(), x, y, 28, 40));
+                if (comp) {
+                  const b = comp.getBoundingClientRect();
+                  ov.style.setProperty('--cx', (b.left - r.left - 8) + 'px');
+                  ov.style.setProperty('--cy', (b.top - r.top - 8) + 'px');
+                  ov.style.setProperty('--cw', (b.width + 16) + 'px');
+                  ov.style.setProperty('--ch', (b.height + 16) + 'px');
+                  const col = comp.closest('[data-session]');
+                  return { el: ov, zone: 'context', target: col ? col.getAttribute('data-session') : (ov.getAttribute('data-drop-target') || '') };
+                }
+                let zone = 'here';
+                if (ov.classList.contains('can-split')) {
+                  const edge = Math.min(Math.max(120, r.width * 0.26), r.width * 0.4);
+                  if (x < r.left + edge) zone = 'split-left';
+                  else if (x > r.right - edge) zone = 'split';
+                }
+                return { el: ov, zone, target: ov.getAttribute('data-drop-target') || '' };
+              };
+              const mark = (z) => {
+                const prev = st.zone;
+                if (prev && (!z || prev.el !== z.el)) {
+                  prev.el.classList.remove('over');
+                  prev.el.removeAttribute('data-zone');
+                }
+                if (z) {
+                  z.el.classList.add('over');
+                  z.el.setAttribute('data-zone', z.zone);
+                }
+                st.zone = z;
+              };
               window.addEventListener('pointermove', (e) => {
                 if (!st) return;
                 if (!st.active) {
@@ -197,9 +240,7 @@ pub fn Root() -> Element {
                   dioxus.send({ t: 'drag', id: st.id });
                 }
                 st.ghost.style.transform = 'translate(' + (e.clientX + 14) + 'px,' + (e.clientY + 12) + 'px)';
-                const under = document.elementFromPoint(e.clientX, e.clientY);
-                const z = under && under.closest('[data-drop]');
-                if (z !== st.zone) { st.zone && st.zone.classList.remove('over'); z && z.classList.add('over'); st.zone = z; }
+                mark(zoneAt(e.clientX, e.clientY));
               }, true);
               const end = (cancel) => {
                 if (!st) return;
@@ -207,9 +248,9 @@ pub fn Root() -> Element {
                 if (!s.active) return;
                 s.ghost && s.ghost.remove();
                 document.documentElement.classList.remove('dragging-chat');
-                s.zone && s.zone.classList.remove('over');
+                if (s.zone) { s.zone.el.classList.remove('over'); s.zone.el.removeAttribute('data-zone'); }
                 const z = cancel ? null : s.zone;
-                dioxus.send({ t: 'drop', id: s.id, zone: z ? z.getAttribute('data-drop') : null, target: z ? (z.getAttribute('data-drop-target') || '') : '' });
+                dioxus.send({ t: 'drop', id: s.id, zone: z ? z.zone : null, target: z ? z.target : '' });
                 // Swallow the click that ends a drag.
                 const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
                 window.addEventListener('click', swallow, { capture: true, once: true });
@@ -409,6 +450,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                 Some("here") => app.open_session(&id),
                 // Onto the tab bar: next to the open chat, never inside it.
                 Some("split") | Some("tabstrip") => app.open_split(&id),
+                Some("split-left") => app.open_split_left(&id),
                 Some("context") => {
                     let short = id[id.len().saturating_sub(8)..].to_string();
                     app.ui.write().compose_inbox.push((target, format!("@agent:{short}")));

@@ -162,6 +162,8 @@ struct HeadInfo {
     pinned: bool,
     archived: bool,
     has_cwd: bool,
+    /// The latest pull request the agent opened: (number, url, repository).
+    pr: Option<(u64, String, String)>,
 }
 
 fn head_info(s: &Session) -> HeadInfo {
@@ -176,6 +178,10 @@ fn head_info(s: &Session) -> HeadInfo {
         pinned: s.pinned,
         archived: s.archived,
         has_cwd: s.cwd().is_some(),
+        pr: s.extra.get("pull_requests").and_then(|p| p.as_array()).and_then(|p| p.last()).and_then(|p| {
+            let url = p["url"].as_str()?.to_string();
+            Some((p["number"].as_u64().unwrap_or(0), url, p["repository"].as_str().unwrap_or_default().to_string()))
+        }),
     }
 }
 
@@ -202,6 +208,12 @@ fn ChatHeader(id: String) -> Element {
             }
             TabStrip {}
             DragRegion {}
+            if let Some((number, url, repo)) = h.pr.clone() {
+                button { class: "head-link", title: "{repo} · {url}", onclick: move |_| { let _ = open::that(&url); },
+                    Icon { i: I::PullRequest, size: 13 }
+                    if number > 0 { "PR #{number}" } else { "Pull request" }
+                }
+            }
             if h.has_cwd {
                 button { class: "head-link", title: "Open the folder in Cursor / VS Code", onclick: move |_| app.open_in_ide(&id_c),
                     "IDE" Icon { i: I::ArrowUpRight, size: 12 }

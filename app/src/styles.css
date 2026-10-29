@@ -987,3 +987,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 
 /* The prompt being edited scrolls with the conversation (not sticky). */
 .user-msg.editing { position: relative; top: auto; }
+
+/* Scroll-to-bottom floats at the transcript's bottom edge, above the composer. */
+.transcript > .scroll-bottom { position: sticky; bottom: 10px; left: auto; right: auto; transform: none; height: 0; display: flex; justify-content: center; overflow: visible; z-index: 6; pointer-events: none; }
+.transcript > .scroll-bottom .round-btn { pointer-events: auto; transform: translateY(-100%); box-shadow: var(--shadow-pop); }

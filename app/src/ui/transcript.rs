@@ -245,12 +245,17 @@ pub fn Transcript(id: String) -> Element {
                     div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
                 }
             }
-        }
-        if !at_bottom() {
-            div { class: "scroll-bottom",
-                button { class: "round-btn", title: "Scroll to bottom",
-                    onclick: move |_| { document::eval(&format!("const el = document.getElementById('{tid3}'); el && el.scrollTo({{top: el.scrollHeight, behavior: 'smooth'}});")); },
-                    Icon { i: I::ArrowDown, size: 15 }
+            // Sticky inside the scroller: always just above the composer,
+            // however tall the composer grows.
+            if !at_bottom() {
+                div { class: "scroll-bottom",
+                    button { class: "round-btn", title: "Scroll to bottom",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            document::eval(&format!("const el = document.getElementById('{tid3}'); el && el.scrollTo({{top: el.scrollHeight, behavior: 'smooth'}});"));
+                        },
+                        Icon { i: I::ArrowDown, size: 15 }
+                    }
                 }
             }
         }

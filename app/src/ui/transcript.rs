@@ -533,7 +533,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
     // and context blocks that were sent to the agent.
     let (body, chips) = super::mentions::split_mentions(&body);
     let mid = msg.id.clone();
-    let attachments: Vec<String> = msg
+    let mut attachments: Vec<String> = msg
         .parts
         .iter()
         .filter_map(|p| match p {
@@ -542,7 +542,15 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
             _ => None,
         })
         .collect();
-    let images: Vec<String> = msg.parts.iter().filter(|p| matches!(p, Part::Image { .. })).filter_map(crate::state::image_src).collect();
+    let mut images: Vec<String> = Vec::new();
+    for p in msg.parts.iter().filter(|p| matches!(p, Part::Image { .. })) {
+        match (crate::state::image_src(p), p) {
+            (Some(src), _) => images.push(src),
+            // A pasted image whose file is gone (temp files) still shows by name.
+            (None, Part::Image { source: MediaSource::Path { path }, .. }) => attachments.push(short_path(path)),
+            _ => {}
+        }
+    }
     let short = body.lines().count() <= 4 && body.len() < 360;
     let text2 = text.clone();
     let (sid_e, mid_e) = (session_id.clone(), mid.clone());

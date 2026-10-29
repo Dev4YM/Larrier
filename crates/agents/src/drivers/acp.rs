@@ -550,9 +550,14 @@ impl Acp {
                 }
             }
             "tool_call" => {
-                let t = acp_tool(u);
+                let mut t = acp_tool(u);
+                if let Some(o) = self.terminal_text(u) {
+                    t.output = Some(o);
+                }
                 self.known_tools.insert(t.id.clone());
+                let id = t.id.clone();
                 self.sink.send(AgentEvent::ToolStart { tool: t });
+                self.send_images(&id, u);
             }
             "tool_call_update" => {
                 let id = s(u, "toolCallId").unwrap_or("").to_string();
@@ -563,15 +568,19 @@ impl Acp {
                 }
                 let status = s(u, "status").map(map_status);
                 let (output, diffs) = tool_content(u);
-                let output = output.or_else(|| u.get("rawOutput").filter(|r| !r.is_null()).map(content_text));
+                let output = self.terminal_text(u).or(output).or_else(|| u.get("rawOutput").filter(|r| !r.is_null()).map(content_text));
+                // Agents refine a call's title as they learn more ("Read
+                // src/main.rs" after "Read file").
+                let title = s(u, "title").filter(|t| !t.trim().is_empty()).and_then(|_| acp_tool(u).title);
                 self.sink.send(AgentEvent::ToolUpdate {
-                    id,
+                    id: id.clone(),
                     is_error: status == Some(ToolStatus::Failed),
                     status,
                     output,
                     diffs,
-                    title: None,
+                    title,
                 });
+                self.send_images(&id, u);
             }
             "plan" => {
                 if let Some(entries) = u.get("entries").and_then(plan_entries) {
@@ -599,6 +608,48 @@ impl Acp {
                 self.sink.log(u.to_string());
             }
             _ => self.sink.log(u.to_string()),
+        }
+    }
+
+    /// A tool's text with each embedded terminal replaced by what that
+    /// terminal printed (Larrier runs the agent's terminals itself).
+    fn terminal_text(&self, u: &Value) -> Option<String> {
+        let items = u["content"].as_array()?;
+        if !items.iter().any(|c| s(c, "type") == Some("terminal")) {
+            return None;
+        }
+        let parts: Vec<String> = items
+            .iter()
+            .filter_map(|c| match s(c, "type") {
+                Some("terminal") => {
+                    let tid = s(c, "terminalId").unwrap_or("");
+                    self.terminals.get(tid).map(|t| t.output.lock().unwrap().buf.clone()).or_else(|| Some(format!("[terminal {tid}]")))
+                }
+                Some("content") => Some(content_text(&json!([c["content"].clone()]))).filter(|t| !t.is_empty()),
+                _ => None,
+            })
+            .collect();
+        Some(parts.join("\n"))
+    }
+
+    /// Images inside a tool's content (screenshots, image reads).
+    fn send_images(&self, id: &str, u: &Value) {
+        let images: Vec<Part> = u["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|c| s(c, "type") == Some("content"))
+            .filter_map(|c| {
+                let img = &c["content"];
+                if s(img, "type") != Some("image") {
+                    return None;
+                }
+                let data = s(img, "data")?.to_string();
+                Some(Part::Image { mime: s(img, "mimeType").map(String::from), source: MediaSource::Base64 { data } })
+            })
+            .collect();
+        if !images.is_empty() {
+            self.sink.send(AgentEvent::ToolImages { id: id.to_string(), images });
         }
     }
 
@@ -974,6 +1025,8 @@ mod tests {
                         }
                     }
                     let _ = to_client.send(upd(json!({"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed","content":[{"type":"diff","path":"src/a.rs","oldText":"a\n","newText":"a\nb\n"}]})));
+                    let _ = to_client.send(upd(json!({"sessionUpdate":"tool_call","toolCallId":"t2","title":"Read file","kind":"read","status":"in_progress"})));
+                    let _ = to_client.send(upd(json!({"sessionUpdate":"tool_call_update","toolCallId":"t2","title":"Read shot.png","status":"completed","content":[{"type":"content","content":{"type":"image","mimeType":"image/png","data":"iVBORw0KGgo="}}]})));
                     let _ = to_client.send(upd(json!({"sessionUpdate":"plan","entries":[{"content":"step","priority":"high","status":"completed"}]})));
                     let _ = to_client.send(upd(json!({"sessionUpdate":"usage_update","used":10,"size":100,"cost":{"amount":0.5,"currency":"USD"}})));
                     let _ = to_client.send(json!({"jsonrpc":"2.0","id":id,"result":{"stopReason":"end_turn"}}));
@@ -1035,6 +1088,9 @@ mod tests {
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { diffs, .. } if diffs.first().map(|d| d.added) == Some(1))));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Plan { .. })));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Usage { usage } if usage.cost_usd == Some(0.5))));
+        // A refined title and the image a tool returned.
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, title: Some(t), .. } if id == "t2" && t.contains("shot.png"))), "{ev:?}");
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolImages { id, images } if id == "t2" && images.len() == 1)));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
         // The model was selected through the config option, the missing file read failed cleanly,
         // and the permission answer carried the chosen option.

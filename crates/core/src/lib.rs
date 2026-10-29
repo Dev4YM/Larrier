@@ -5,6 +5,7 @@ pub mod agent;
 pub mod automation;
 pub mod config;
 pub mod lsf;
+pub mod models;
 pub mod secrets;
 pub mod store;
 

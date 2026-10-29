@@ -42,9 +42,14 @@ pub struct Session {
     pub agent: AgentKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Agent mode, e.g. `agent`, `plan`, `ask`.
+    /// The agent's mode: an option id of its first mode group, e.g. Claude
+    /// Code `plan`, Codex `plan`, Cursor `ask` (see `AgentSpec::mode_groups`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// An option id of the agent's second mode group (Codex / Cursor
+    /// permissions, Droid autonomy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -840,6 +845,7 @@ impl Session {
             agent: agent.clone(),
             model: None,
             mode: None,
+            permission: None,
             account_id: None,
             workspace,
             environment: Environment::Local,

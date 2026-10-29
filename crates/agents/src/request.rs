@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 use larrier_core::{
     config::CustomAgent, secrets, Account, AccountAuth, AgentKind, Config, Message, Part, Protocol, ProviderKind,
-    RunMode, Session,
+    ModeSelection, RunMode, Session,
 };
 
 use crate::detect;
@@ -25,7 +25,11 @@ pub struct TurnRequest {
     /// replays it; CLI agents use `resume_id` instead).
     pub history: Vec<Message>,
     pub model: Option<String>,
+    /// Chosen option of the agent's first mode group (also the ACP mode id).
     pub mode: Option<String>,
+    /// Every mode group resolved: the CLI arguments to add and, for modes
+    /// without a CLI flag, an instruction to put before the prompt.
+    pub modes: ModeSelection,
     pub cwd: PathBuf,
     pub run_mode: RunMode,
     /// Agent-native session to resume.
@@ -42,13 +46,16 @@ pub struct TurnRequest {
 impl TurnRequest {
     /// Prompt including the handoff preamble, for agents that only accept text.
     pub fn full_prompt(&self) -> String {
+        let prompt = match &self.modes.prompt_prefix {
+            Some(p) => format!("{p}\n\n{}", self.prompt),
+            None => self.prompt.clone(),
+        };
         match &self.handoff {
             Some(h) if !h.trim().is_empty() => format!(
                 "<conversation_history>\nThis conversation was started with another agent and has been handed to you. \
-                 The transcript so far:\n\n{h}\n</conversation_history>\n\nContinue from here. The user's new message:\n\n{}",
-                self.prompt
+                 The transcript so far:\n\n{h}\n</conversation_history>\n\nContinue from here. The user's new message:\n\n{prompt}"
             ),
-            _ => self.prompt.clone(),
+            _ => prompt,
         }
     }
 
@@ -490,7 +497,15 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         None
     };
     let model = session.model.clone().or(ac.default_model.clone()).filter(|m| m != "default" && !m.is_empty());
-    let mode = session.mode.clone().or(ac.default_mode.clone());
+    // The agent's own modes (Claude Code permission modes, Codex plan +
+    // permissions, …): session pick, else the agent's default, else the
+    // global autonomy level.
+    let modes = spec.resolve_modes(
+        [session.mode.as_deref(), session.permission.as_deref()],
+        [ac.default_mode.as_deref(), ac.default_permission.as_deref()],
+        cfg.settings.run_mode,
+    );
+    let mode = modes.ids.first().cloned().or_else(|| session.mode.clone().or(ac.default_mode.clone()));
 
     let (launch, chat) = match protocol {
         Protocol::HttpChat => (Launch::default(), Some(resolve_chat(cfg, session)?)),
@@ -507,6 +522,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         history: session.messages.clone(),
         model,
         mode,
+        modes,
         cwd,
         run_mode: cfg.settings.run_mode,
         resume_id,

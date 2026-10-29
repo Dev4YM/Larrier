@@ -1,7 +1,7 @@
 //! OpenCode: `opencode run --format json --thinking --dir <cwd> [-s ses_…]
 //! [-m provider/model] [--agent build|plan] [--auto] <message>`.
 
-use larrier_core::{FileDiff, RunMode, ToolKind, ToolStatus};
+use larrier_core::{FileDiff, ToolKind, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -20,14 +20,10 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     if let Some(m) = &req.model {
         cmd.args(["-m", m]);
     }
-    if let Some(agent) = req.mode.as_deref().filter(|m| *m == "build" || *m == "plan") {
-        cmd.args(["--agent", agent]);
-    }
-    // In json mode OpenCode rejects permission prompts unless --auto is set;
-    // tools its config already allows still run.
-    if req.run_mode == RunMode::FullAuto {
-        cmd.arg("--auto");
-    }
+    // --agent build|plan and --auto from the chosen modes. In json mode
+    // OpenCode refuses permission prompts unless --auto is set; tools its
+    // config already allows still run.
+    cmd.args(&req.modes.args);
     for f in req.file_paths().into_iter().chain(req.image_paths()) {
         cmd.args(["-f", &f]);
     }

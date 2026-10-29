@@ -18,15 +18,7 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         if let Some(m) = &req.model {
             cmd.args(["--model", m]);
         }
-        match req.mode.as_deref() {
-            Some("architect") => {
-                cmd.args(["--chat-mode", "architect"]);
-            }
-            Some("ask") => {
-                cmd.args(["--chat-mode", "ask"]);
-            }
-            _ => {}
-        }
+        cmd.args(&req.modes.args);
         cmd.args(&req.launch.extra_args);
         // Attached files join the chat as editable files.
         for f in req.file_paths() {

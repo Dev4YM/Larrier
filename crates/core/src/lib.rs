@@ -9,7 +9,7 @@ pub mod models;
 pub mod secrets;
 pub mod store;
 
-pub use agent::{AgentKind, AgentSpec, Protocol};
+pub use agent::{AgentKind, AgentSpec, ModeGroup, ModeOption, ModeSelection, Protocol};
 pub use config::{Account, AccountAuth, Config, Density, Provider, ProviderKind, RunMode, Settings, SidebarGroup, SidebarSort, Theme, Workspace};
 pub use lsf::Environment;
 pub use lsf::{

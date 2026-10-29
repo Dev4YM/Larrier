@@ -238,7 +238,10 @@ pub struct Toast {
 pub struct Draft {
     pub agent: AgentKind,
     pub model: Option<String>,
+    /// Option of the agent's first mode group (see `AgentSpec::mode_groups`).
     pub mode: Option<String>,
+    /// Option of its second group (permissions / autonomy).
+    pub permission: Option<String>,
     pub account_id: Option<String>,
     pub workspace: Option<String>,
     pub worktree: bool,
@@ -298,6 +301,7 @@ impl App {
             agent: cfg.settings.default_agent.clone(),
             model: None,
             mode: None,
+            permission: None,
             account_id: None,
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
             worktree: cfg.settings.use_worktrees,
@@ -1022,6 +1026,7 @@ impl App {
         let mut s = Session::new(d.agent.clone(), ws.clone());
         s.model = d.model.clone();
         s.mode = d.mode.clone();
+        s.permission = d.permission.clone();
         s.account_id = d.account_id.clone();
         if d.worktree {
             if let Some(w) = &ws {
@@ -1163,6 +1168,7 @@ impl App {
             s.agent = target2.clone();
             s.model = None;
             s.mode = None;
+            s.permission = None;
             s.account_id = None;
             s.push(Message::new(Role::System, vec![Part::Notice { text: note.clone() }]));
         });
@@ -1177,6 +1183,11 @@ impl App {
 
     pub fn set_session_mode(self, id: &str, mode: Option<String>) {
         self.update_session(id, |s| s.mode = mode);
+    }
+
+    /// Option of the agent's second mode group (permissions / autonomy).
+    pub fn set_session_permission(self, id: &str, permission: Option<String>) {
+        self.update_session(id, |s| s.permission = permission);
     }
 
     pub fn set_session_account(self, id: &str, account: Option<String>) {

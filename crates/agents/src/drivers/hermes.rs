@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use larrier_core::{RunMode, ToolStatus};
+use larrier_core::ToolStatus;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -22,9 +22,7 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     if let Some(m) = &req.model {
         cmd.args(["-m", m]);
     }
-    if req.run_mode == RunMode::FullAuto {
-        cmd.arg("--yolo");
-    }
+    cmd.args(&req.modes.args);
     if let Some(img) = req.image_paths().first() {
         cmd.args(["--image", img]);
     }

@@ -336,6 +336,10 @@ pub struct AgentConfig {
     pub default_model: Option<String>,
     #[serde(default)]
     pub default_mode: Option<String>,
+    /// Default option of the agent's second mode group (permissions /
+    /// autonomy), when it has one.
+    #[serde(default)]
+    pub default_permission: Option<String>,
     /// Prefer ACP even when a native stream protocol is available.
     #[serde(default)]
     pub prefer_acp: bool,
@@ -356,6 +360,7 @@ impl AgentConfig {
             env: Vec::new(),
             default_model: None,
             default_mode: None,
+            default_permission: None,
             prefer_acp: false,
             extra_models: Vec::new(),
             import: true,

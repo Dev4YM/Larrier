@@ -149,6 +149,7 @@ fn launch(mut app: App, a: &Automation) -> Option<String> {
         d.agent = a.agent.clone();
         d.model = a.model.clone().filter(|m| !m.trim().is_empty());
         d.mode = None;
+        d.permission = None;
         d.account_id = None;
         d.workspace = a.workspace.clone();
         d.worktree = a.worktree;

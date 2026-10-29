@@ -1,21 +1,12 @@
 //! Gemini CLI: `gemini -o stream-json [-m] [--approval-mode] [-r id] -p <prompt>`.
 
-use larrier_core::{RunMode, ToolKind, ToolStatus};
+use larrier_core::{ToolKind, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{content_text, json_line, plan_entries, run_stream, s, tool, u, usage_from, with_file_mentions, LineParser};
 use crate::events::{AgentEvent, EventSink, TurnCommand};
 use crate::request::TurnRequest;
-
-pub fn approval_mode(mode: Option<&str>, run_mode: RunMode) -> &'static str {
-    match (mode, run_mode) {
-        (Some("plan"), _) => "plan",
-        (Some("yolo"), _) | (_, RunMode::FullAuto) => "yolo",
-        (Some("auto-edit"), _) | (_, RunMode::AutoEdit) => "auto_edit",
-        _ => "default",
-    }
-}
 
 pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
     let mut cmd = req.launch.command();
@@ -24,7 +15,7 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     if let Some(m) = &req.model {
         cmd.args(["-m", m]);
     }
-    cmd.args(["--approval-mode", approval_mode(req.mode.as_deref(), req.run_mode)]);
+    cmd.args(&req.modes.args);
     if let Some(id) = &req.resume_id {
         cmd.args(["-r", id]);
     }
@@ -160,6 +151,5 @@ mod tests {
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { is_error: true, output: Some(o), .. } if o == "exit 101")));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Usage { usage } if usage.input_tokens == 20 && usage.cache_read_tokens == 5)));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
-        assert_eq!(approval_mode(None, RunMode::AutoEdit), "auto_edit");
     }
 }

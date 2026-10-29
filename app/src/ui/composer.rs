@@ -38,22 +38,63 @@ pub fn model_options(app: &App, agent: &AgentKind) -> Vec<String> {
     v
 }
 
-pub fn mode_label(mode: &str) -> String {
-    match mode {
-        "agent" => "Agent".into(),
-        "plan" => "Plan".into(),
-        "ask" => "Ask".into(),
-        "auto" => "Auto".into(),
-        "bypass" => "Bypass permissions".into(),
-        "read-only" => "Read only".into(),
-        "auto-edit" => "Auto edit".into(),
-        "yolo" => "YOLO".into(),
-        "build" => "Build".into(),
-        other => {
-            let mut c = other.chars();
-            c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
-        }
+/// One option of an agent mode group, as the composer shows it.
+#[derive(Clone, PartialEq)]
+pub struct ModeOptView {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+}
+
+/// An agent mode group ("Mode", "Permissions", …) with the chosen option and
+/// the one used when nothing is picked.
+#[derive(Clone, PartialEq)]
+pub struct ModeGroupView {
+    pub label: &'static str,
+    pub options: Vec<ModeOptView>,
+    pub chosen: usize,
+    pub default: usize,
+}
+
+/// The agent's own mode groups (Claude Code permission modes, Codex plan +
+/// permissions, …) with the current picks resolved against the agent's
+/// default and the global autonomy level.
+pub fn mode_view(app: &App, agent: &AgentKind, picks: [Option<String>; 2]) -> Vec<ModeGroupView> {
+    let spec = agent.spec();
+    let cfg = app.config.read();
+    let ac = cfg.agent(agent);
+    let defaults = [ac.default_mode.clone(), ac.default_permission.clone()];
+    let run_mode = cfg.settings.run_mode;
+    spec.mode_groups
+        .iter()
+        .enumerate()
+        .map(|(gi, g)| {
+            let pos = |id: Option<&str>| id.and_then(|id| g.options.iter().position(|o| o.id == id)).unwrap_or(0);
+            let default = pos(spec.mode_option(gi, None, defaults.get(gi).and_then(|d| d.as_deref()), run_mode).map(|o| o.id));
+            let chosen = pos(spec.mode_option(gi, picks.get(gi).and_then(|p| p.as_deref()), defaults.get(gi).and_then(|d| d.as_deref()), run_mode).map(|o| o.id));
+            ModeGroupView {
+                label: g.label,
+                options: g.options.iter().map(|o| ModeOptView { id: o.id, label: o.label, description: o.description }).collect(),
+                chosen,
+                default,
+            }
+        })
+        .collect()
+}
+
+/// The value stored for picking option `oi` of a group: `None` for the
+/// group's default, so the session keeps following the agent's settings.
+fn pick_value(g: &ModeGroupView, oi: usize) -> Option<String> {
+    if oi == g.default {
+        None
+    } else {
+        g.options.get(oi).map(|o| o.id.to_string())
     }
+}
+
+/// The plan-like option of the first group (Plan, or Droid's Spec).
+fn plan_option(agent: &AgentKind) -> Option<&'static str> {
+    agent.spec().mode_groups.first().and_then(|g| g.find("plan")).map(|o| o.id)
 }
 
 /// Short model name for the composer button ("Opus 5.5", "GPT-6.1 Sol").
@@ -135,6 +176,7 @@ struct SessInfo {
     agent: AgentKind,
     model: Option<String>,
     mode: Option<String>,
+    permission: Option<String>,
     worktree: bool,
     usage: larrier_core::Usage,
     cwd: Option<String>,
@@ -236,6 +278,7 @@ pub fn Composer(
             agent: s.agent.clone(),
             model: s.model.clone(),
             mode: s.mode.clone(),
+            permission: s.permission.clone(),
             worktree: matches!(s.environment, larrier_core::Environment::Worktree { .. }),
             usage: s.usage.clone(),
             cwd: s.cwd(),
@@ -271,8 +314,14 @@ pub fn Composer(
         }
     };
     let running = session_id.as_ref().map(|id| app.is_running(id)).unwrap_or(false);
-    let modes: Vec<String> = agent.spec().modes.iter().map(|s| s.to_string()).collect();
-    let mode_now = mode.clone().or_else(|| modes.first().cloned()).unwrap_or_else(|| "agent".into());
+    let permission = match &session_id {
+        Some(_) => sess.read().as_ref().and_then(|s| s.permission.clone()),
+        None => app.draft.read().permission.clone(),
+    };
+    // The agent's own modes, e.g. Claude Code Auto / Manual / Plan …
+    let groups = mode_view(&app, &agent, [mode.clone(), permission.clone()]);
+    let plan_id = plan_option(&agent);
+    let in_plan = plan_id.is_some() && groups.first().map(|g| Some(g.options[g.chosen].id) == plan_id).unwrap_or(false);
     let ctrl_enter = app.config.read().settings.send_with_ctrl_enter;
     let queue_ok = app.config.read().settings.queue_followups;
     let placeholder = if home { "Plan, Build, / for commands, @ for context" } else { "Send follow-up" };
@@ -299,19 +348,27 @@ pub fn Composer(
     let queued: Vec<crate::state::Queued> = session_id.as_ref().and_then(|id| app.queue.read().get(id).cloned()).unwrap_or_default();
 
     // Copy-able helpers so every menu row and key handler can hold one.
-    let set_mode = move |m: Option<String>, sid: Option<String>| {
+    // Store a pick for mode group 0 (Session.mode) or 1 (Session.permission).
+    let set_pick = move |group: usize, v: Option<String>, sid: Option<String>| {
         let mut app = app;
-        match &sid {
-            Some(id) => app.set_session_mode(id, m),
-            None => app.draft.write().mode = m,
+        match (&sid, group) {
+            (Some(id), 0) => app.set_session_mode(id, v),
+            (Some(id), _) => app.set_session_permission(id, v),
+            (None, 0) => app.draft.write().mode = v,
+            (None, _) => app.draft.write().permission = v,
         }
     };
+    let set_mode = move |m: Option<String>, sid: Option<String>| set_pick(0, m, sid);
+    let plan_k = plan_id;
+    let agent_k: &'static larrier_core::AgentSpec = agent.spec();
     let run_slash = move |cmd: &str, sid: Option<String>| {
         let mut app = app;
         let mut text = text;
         text.set(String::new());
         match cmd {
-            "/plan" | "/agent" | "/ask" => set_mode(Some(cmd[1..].to_string()), sid),
+            "/plan" => if let Some(p) = plan_k { set_mode(Some(p.to_string()), sid) },
+            "/agent" => set_mode(None, sid),
+            "/ask" => if agent_k.mode_groups.first().and_then(|g| g.find("ask")).is_some() { set_mode(Some("ask".into()), sid) },
             "/new" => app.new_agent(),
             "/fork" => if let Some(id) = &sid { app.fork(id, None) },
             "/export" => if let Some(id) = &sid { app.export(id, larrier_formats::ExportFormat::LsfJsonl) },
@@ -355,6 +412,7 @@ pub fn Composer(
                 let mut d = app.draft.write();
                 if d.agent != k {
                     d.mode = None;
+                    d.permission = None;
                     d.account_id = None;
                 }
                 d.agent = k;
@@ -394,6 +452,7 @@ pub fn Composer(
                     d.agent = k;
                     d.model = None;
                     d.mode = keep.mode.clone();
+                    d.permission = keep.permission.clone();
                 }
                 app.send(None, t.clone(), a.clone());
             }
@@ -405,7 +464,7 @@ pub fn Composer(
     };
     let sid_send = session_id.clone();
     let sid_key = session_id.clone();
-    let (modes_k, mode_k) = (modes.clone(), mode_now.clone());
+    let first_group = groups.first().cloned();
     let suggs_k = suggs.clone();
     let sid_stop = session_id.clone();
 
@@ -577,7 +636,8 @@ pub fn Composer(
                 // (and never loses focus) when the composer grows.
                 div { class: "composer-row cgrid",
                     div { class: "c-plus",
-                        PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), modes: modes.clone(), mode_now: mode_now.clone(), text, input_id }
+                        PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), groups: groups.clone(), text, input_id,
+                            onpick: { let sid = session_id.clone(); move |(g, v): (usize, Option<String>)| set_pick(g, v, sid.clone()) } }
                     }
                     textarea {
                         id: "{input_id}",
@@ -636,11 +696,10 @@ pub fn Composer(
                                     _ => {}
                                 }
                             }
-                            if e.key() == Key::Tab && e.modifiers().shift() && !modes_k.is_empty() {
-                                // Shift+Tab cycles the agent's modes (Agent → Plan → …).
+                            if let Some(g) = first_group.as_ref().filter(|g| g.options.len() > 1 && e.key() == Key::Tab && e.modifiers().shift()) {
+                                // Shift+Tab cycles the agent's modes (Auto → Manual → …).
                                 e.prevent_default();
-                                let i = modes_k.iter().position(|m| *m == mode_k).unwrap_or(0);
-                                set_mode(Some(modes_k[(i + 1) % modes_k.len()].clone()), sid_key.clone());
+                                set_mode(pick_value(g, (g.chosen + 1) % g.options.len()), sid_key.clone());
                                 return;
                             }
                             if e.key() == Key::Enter {
@@ -653,10 +712,12 @@ pub fn Composer(
                             }
                         },
                     }
-                    if mode_now != "agent" && mode_now != "build" && !modes.is_empty() {
-                        span { class: "picker c-mode", style: "color: var(--blue); cursor: default;", title: "Shift+Tab to change mode",
-                            Icon { i: if mode_now == "plan" { I::List } else { I::Message }, size: 13 }
-                            "{mode_label(&mode_now)}"
+                    // Shown only when a group is off its default.
+                    for (gi, g) in groups.iter().enumerate().filter(|(_, g)| g.chosen != g.default) {
+                        span { key: "{gi}", class: "picker c-mode", style: "color: var(--blue); cursor: default;",
+                            title: if gi == 0 { "{g.label} · Shift+Tab to change" } else { "{g.label}" },
+                            Icon { i: if Some(g.options[g.chosen].id) == plan_id && gi == 0 { I::List } else if gi == 0 { I::Infinity } else { I::Lock }, size: 13 }
+                            "{g.options[g.chosen].label}"
                         }
                     }
                     div { class: "menu-anchor c-model",
@@ -685,8 +746,10 @@ pub fn Composer(
             if home {
                 div { class: "row", style: "gap: 6px; margin: 10px 0 0 2px; flex-wrap: wrap;",
                     button {
-                        class: if mode_now == "plan" { "pill-btn active-blue" } else { "pill-btn" },
-                        onclick: move |_| set_mode(Some(if mode_now == "plan" { "agent".into() } else { "plan".into() }), None),
+                        class: if in_plan { "pill-btn active-blue" } else { "pill-btn" },
+                        disabled: plan_id.is_none(),
+                        title: if plan_id.is_none() { "This agent has no plan mode" } else { "" },
+                        onclick: move |_| set_mode(if in_plan { None } else { plan_id.map(String::from) }, None),
                         "Plan New Idea"
                         span { class: "faint", style: "font-size: 11px;", "⇧Tab" }
                     }
@@ -977,8 +1040,16 @@ fn ChatUsage(usage: larrier_core::Usage) -> Element {
 
 /// The "+" menu: attachments, mentions, mode, commands.
 #[component]
-fn PlusMenu(open: Signal<bool>, attachments: Signal<Vec<Part>>, session_id: Option<String>, modes: Vec<String>, mode_now: String, text: Signal<String>, input_id: &'static str) -> Element {
-    let mut app = use_app();
+fn PlusMenu(
+    open: Signal<bool>,
+    attachments: Signal<Vec<Part>>,
+    session_id: Option<String>,
+    groups: Vec<ModeGroupView>,
+    text: Signal<String>,
+    input_id: &'static str,
+    onpick: EventHandler<(usize, Option<String>)>,
+) -> Element {
+    let app = use_app();
     let mut open = open;
     let mut text = text;
     rsx! {
@@ -994,23 +1065,40 @@ fn PlusMenu(open: Signal<bool>, attachments: Signal<Vec<Part>>, session_id: Opti
                     text.set(if t.is_empty() || t.ends_with(' ') { format!("{t}@") } else { format!("{t} @") });
                     document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
                 } }
-                if modes.len() > 1 {
-                    div { class: "menu-sep" }
-                    div { class: "menu-label", "Mode" }
-                    for m in modes.clone() {
-                        {
-                            let sid = session_id.clone();
-                            let m2 = m.clone();
-                            rsx! {
-                                MenuItem { key: "{m}", label: mode_label(&m), checked: m == mode_now,
-                                    icon: Some(if m == "plan" { I::List } else if m == "ask" { I::Message } else { I::Infinity }),
-                                    onclick: move |_| {
-                                        open.set(false);
-                                        match &sid {
-                                            Some(id) => app.set_session_mode(id, Some(m2.clone())),
-                                            None => app.draft.write().mode = Some(m2.clone()),
+                // The agent's own mode groups, numbered 1–9 across groups.
+                {
+                    let numbered: Vec<(usize, Option<String>)> = groups.iter().enumerate().flat_map(|(gi, g)| (0..g.options.len()).map(move |oi| (gi, pick_value(g, oi)))).collect();
+                    let mut n = 0usize;
+                    rsx! {
+                        div {
+                            onkeydown: move |e| {
+                                if let Key::Character(c) = e.key() {
+                                    if let Some(i) = c.parse::<usize>().ok().filter(|i| (1..=9).contains(i)) {
+                                        if let Some((g, v)) = numbered.get(i - 1).cloned() {
+                                            e.prevent_default();
+                                            open.set(false);
+                                            onpick.call((g, v));
                                         }
-                                    } }
+                                    }
+                                }
+                            },
+                            for (gi, g) in groups.iter().enumerate() {
+                                div { key: "g{gi}",
+                                    div { class: "menu-sep" }
+                                    div { class: "menu-label", "{g.label}" }
+                                    for (oi, o) in g.options.iter().enumerate() {
+                                        {
+                                            n += 1;
+                                            let num = n;
+                                            let v = pick_value(g, oi);
+                                            rsx! {
+                                                ModeRow { key: "{o.id}", label: o.label, description: o.description, is_default: oi == g.default, checked: oi == g.chosen,
+                                                    number: if num <= 9 { Some(num) } else { None },
+                                                    onclick: move |_| { open.set(false); onpick.call((gi, v.clone())); } }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1027,6 +1115,25 @@ fn PlusMenu(open: Signal<bool>, attachments: Signal<Vec<Part>>, session_id: Opti
                     }
                 }
             }
+        }
+    }
+}
+
+/// A mode option: label with "Default" badge, description, check and key.
+#[component]
+fn ModeRow(label: &'static str, description: &'static str, is_default: bool, checked: bool, number: Option<usize>, onclick: EventHandler<()>) -> Element {
+    rsx! {
+        button { class: if checked { "menu-item mode-row checked" } else { "menu-item mode-row" },
+            onclick: move |e| { e.stop_propagation(); onclick.call(()); },
+            div { class: "mo-main",
+                div { class: "mo-top",
+                    span { class: "mo-label", "{label}" }
+                    if is_default { span { class: "mo-default", "Default" } }
+                }
+                if !description.is_empty() { div { class: "mo-desc", "{description}" } }
+            }
+            span { class: "mo-check", if checked { Icon { i: I::Check, size: 14 } } }
+            if let Some(n) = number { span { class: "mo-num", "{n}" } }
         }
     }
 }

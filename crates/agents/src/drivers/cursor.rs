@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use larrier_core::{FileDiff, RunMode, ToolKind, ToolStatus};
+use larrier_core::{FileDiff, ToolKind, ToolStatus};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -23,20 +23,9 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     if let Some(m) = &req.model {
         cmd.args(["--model", m]);
     }
-    match req.mode.as_deref() {
-        Some("plan") => {
-            cmd.args(["--mode", "plan"]);
-        }
-        Some("ask") => {
-            cmd.args(["--mode", "ask"]);
-        }
-        _ => {}
-    }
-    // Print mode can already write files; --force additionally runs shell
-    // commands without confirmation.
-    if req.run_mode == RunMode::FullAuto {
-        cmd.arg("--force");
-    }
+    // --mode plan|ask and --force / --auto-review from the chosen modes.
+    // Print mode can already write files; --force also runs shell commands.
+    cmd.args(&req.modes.args);
     cmd.args(&req.launch.extra_args);
     cmd.arg(with_file_mentions(&req, req.prompt_for_arg(24_000)));
     let mut parser = CursorStream::default();

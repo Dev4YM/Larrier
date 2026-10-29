@@ -308,6 +308,27 @@ fn Agents() -> Element {
                                             value: "{ac.default_model.clone().unwrap_or_default()}",
                                             onchange: move |e| { let v = e.value(); app.update_config(|c| c.agent_mut(&k2).default_model = if v.trim().is_empty() { None } else { Some(v) }); },
                                         }
+                                        // The agent's own mode groups (Claude Code modes, Codex
+                                        // plan + permissions, …): default for new agents.
+                                        for (gi, g) in spec.mode_groups.iter().enumerate() {
+                                            {
+                                                let kk = spec.kind.clone();
+                                                let current = if gi == 0 { ac.default_mode.clone() } else { ac.default_permission.clone() };
+                                                let auto_label = format!("{} (from Autonomy)", g.default_for(app.config.read().settings.run_mode).label);
+                                                let options: Vec<(String, String)> = std::iter::once((String::new(), auto_label))
+                                                    .chain(g.options.iter().map(|o| (o.id.to_string(), o.label.to_string())))
+                                                    .collect();
+                                                rsx! {
+                                                    span { key: "k{gi}", class: "k", "Default {g.label.to_lowercase()}" }
+                                                    super::Select { key: "s{gi}", value: current.unwrap_or_default(), options, wide: true,
+                                                        onchange: move |v: String| {
+                                                            let v = if v.is_empty() { None } else { Some(v) };
+                                                            let k = kk.clone();
+                                                            app.update_config(move |c| if gi == 0 { c.agent_mut(&k).default_mode = v } else { c.agent_mut(&k).default_permission = v });
+                                                        } }
+                                                }
+                                            }
+                                        }
                                         span { class: "k", "Extra models" }
                                         input { class: "input full", placeholder: "comma separated model ids",
                                             value: "{ac.extra_models.join(\", \")}",

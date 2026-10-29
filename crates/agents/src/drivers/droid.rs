@@ -2,7 +2,7 @@
 //! [--auto medium|high] (-f prompt.md | <prompt>)`.
 //! Event shapes are taken from the droid 0.156 binary.
 
-use larrier_core::{RunMode, ToolStatus};
+use larrier_core::ToolStatus;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -21,18 +21,9 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     if let Some(m) = &req.model {
         cmd.args(["-m", m]);
     }
-    match req.run_mode {
-        RunMode::Ask => {}
-        RunMode::AutoEdit => {
-            cmd.args(["--auto", "medium"]);
-        }
-        RunMode::FullAuto => {
-            cmd.args(["--auto", "high"]);
-        }
-    }
-    if req.mode.as_deref() == Some("spec") {
-        cmd.arg("--use-spec");
-    }
+    // --auto level / --skip-permissions-unsafe and --use-spec from the
+    // chosen modes (read-only when no autonomy flag is given).
+    cmd.args(&req.modes.args);
     cmd.args(&req.launch.extra_args);
     let prompt = with_file_mentions(&req, req.full_prompt());
     if prompt.chars().count() > 24_000 {

@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use larrier_core::{AgentKind, FileDiff, RunMode, ToolStatus};
+use larrier_core::{AgentKind, FileDiff, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -27,7 +27,8 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         if let Some(m) = &req.model {
             cmd.args(["--model", m]);
         }
-        cmd.args(["--permission-mode", claude_permission_mode(req.mode.as_deref(), req.run_mode)]);
+        // --permission-mode from the chosen mode (Auto unless picked otherwise).
+        cmd.args(&req.modes.args);
         // Claude Code refuses to start nested inside another Claude Code session.
         cmd.env_remove("CLAUDECODE");
     }
@@ -35,22 +36,6 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     let prompt = with_file_mentions(&req, req.full_prompt());
     let mut parser = ClaudeStream::default();
     run_stream("Claude Code", cmd, Some(prompt), &sink, &mut control, &mut parser).await;
-}
-
-/// Since v2.1.302 `-p` runs default to manual approval, which denies any
-/// tool that would prompt. Larrier's "Ask" therefore maps to acceptEdits
-/// (switch the agent to ACP in Settings for interactive approvals).
-pub fn claude_permission_mode(mode: Option<&str>, run_mode: RunMode) -> &'static str {
-    match mode {
-        Some("plan") => "plan",
-        Some("bypass") => "bypassPermissions",
-        Some("auto") => "auto",
-        Some("accept-edits") => "acceptEdits",
-        _ => match run_mode {
-            RunMode::FullAuto => "bypassPermissions",
-            RunMode::Ask | RunMode::AutoEdit => "acceptEdits",
-        },
-    }
 }
 
 pub async fn run_amp(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
@@ -61,12 +46,7 @@ pub async fn run_amp(req: TurnRequest, sink: EventSink, mut control: UnboundedRe
     }
     let prompt = with_file_mentions(&req, req.prompt_for_arg(24_000));
     cmd.args(["-x", &prompt, "--stream-json"]);
-    if req.run_mode == RunMode::FullAuto {
-        cmd.arg("--dangerously-allow-all");
-    }
-    if let Some(m) = req.mode.as_deref().filter(|m| *m != "smart") {
-        cmd.args(["--mode", m]);
-    }
+    cmd.args(&req.modes.args);
     cmd.args(&req.launch.extra_args);
     let mut parser = ClaudeStream::default();
     run_stream("Amp", cmd, None, &sink, &mut control, &mut parser).await;
@@ -83,13 +63,7 @@ pub async fn run_qwen(req: TurnRequest, sink: EventSink, mut control: UnboundedR
     if let Some(m) = &req.model {
         cmd.args(["--model", m]);
     }
-    let approval = match (req.mode.as_deref(), req.run_mode) {
-        (Some("plan"), _) => "plan",
-        (Some("yolo"), _) | (_, RunMode::FullAuto) => "yolo",
-        (Some("auto-edit"), _) | (_, RunMode::AutoEdit) => "auto-edit",
-        _ => "default",
-    };
-    cmd.args(["--approval-mode", approval]);
+    cmd.args(&req.modes.args);
     cmd.args(&req.launch.extra_args);
     cmd.args(["-p", &prompt]);
     let mut parser = ClaudeStream::default();
@@ -663,10 +637,4 @@ mod tests {
         assert_eq!(output_status("Status: running"), Some(ToolStatus::Running));
     }
 
-    #[test]
-    fn permission_modes() {
-        assert_eq!(claude_permission_mode(None, RunMode::Ask), "acceptEdits");
-        assert_eq!(claude_permission_mode(None, RunMode::FullAuto), "bypassPermissions");
-        assert_eq!(claude_permission_mode(Some("plan"), RunMode::FullAuto), "plan");
-    }
 }

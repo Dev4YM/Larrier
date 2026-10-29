@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use larrier_core::{FileDiff, RunMode, ToolKind, ToolStatus};
+use larrier_core::{FileDiff, ToolKind, ToolStatus};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -12,29 +12,21 @@ use super::{content_text, json_line, numstat, plan_entries, run_stream, s, tool,
 use crate::events::{AgentEvent, EventSink, TurnCommand};
 use crate::request::TurnRequest;
 
-pub fn sandbox(mode: Option<&str>, run_mode: RunMode) -> &'static str {
-    match (mode, run_mode) {
-        (Some("read-only"), _) => "read-only",
-        (_, RunMode::FullAuto) => "danger-full-access",
-        _ => "workspace-write",
-    }
-}
-
 pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
     let mut cmd = req.launch.command();
     cmd.current_dir(&req.cwd);
-    let sb = sandbox(req.mode.as_deref(), req.run_mode);
     cmd.arg("exec");
     match &req.resume_id {
         Some(id) => {
             cmd.args(["resume", id]);
-            cmd.args(["-c", &format!("sandbox_mode=\"{sb}\"")]);
         }
         None => {
-            cmd.args(["-s", sb]);
             cmd.arg("-C").arg(&req.cwd);
         }
     }
+    // Sandbox / approval / plan from the chosen modes, as config overrides
+    // (they work for new runs and `exec resume` alike).
+    cmd.args(&req.modes.args);
     cmd.args(["--json", "--skip-git-repo-check"]);
     if let Some(m) = &req.model {
         cmd.args(["-m", m]);
@@ -468,13 +460,6 @@ mod tests {
         assert!(matches!(&ev[1], AgentEvent::TextDelta { text } if text == "lo"));
         assert!(matches!(&ev[2], AgentEvent::Error { message } if message.contains("usage limit")));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })));
-    }
-
-    #[test]
-    fn sandbox_mapping() {
-        assert_eq!(sandbox(None, RunMode::Ask), "workspace-write");
-        assert_eq!(sandbox(Some("read-only"), RunMode::FullAuto), "read-only");
-        assert_eq!(sandbox(None, RunMode::FullAuto), "danger-full-access");
     }
 
     #[test]

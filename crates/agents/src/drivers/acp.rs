@@ -931,6 +931,7 @@ mod tests {
             history: vec![Message::user_text("fix it")],
             model: Some("gemini-3-pro-preview".into()),
             mode: None,
+            modes: Default::default(),
             cwd: std::env::temp_dir(),
             run_mode,
             resume_id: None,

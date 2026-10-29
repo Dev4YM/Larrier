@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use dioxus::prelude::*;
-use larrier_core::{config::SidebarGroup, Density, Settings, Theme};
+use larrier_core::{config::SidebarGroup, Density, Settings, TextSizes, Theme};
 
 use super::{Dropdown, Toggle};
 use crate::icons::{Icon, Lucide, I};
@@ -296,6 +296,25 @@ fn valid_css_color(v: &str) -> bool {
 
 /// CSS variables for a nested themed scope (preview / theme cards), the
 /// same way the window root applies the user's settings.
+
+/// One text size: what it changes, a sample at that size and − / +.
+#[component]
+fn SizeRow(title: &'static str, desc: &'static str, value: u32, min: u32, max: u32, sample: &'static str, onchange: EventHandler<u32>) -> Element {
+    let (font, text) = match sample {
+        "code" | "term" => ("var(--mono)", "let x = 42;"),
+        _ => ("var(--font)", "Aa"),
+    };
+    rsx! {
+        div { class: "set-row",
+            div { class: "lbl", div { class: "t", "{title}" } div { class: "d", "{desc}" } }
+            div { class: "ap-size",
+                span { class: "ap-size-sample", style: "font-family: {font}; font-size: {value}px;", "{text}" }
+                super::Stepper { value, min, max, onchange: move |v| onchange.call(v) }
+            }
+        }
+    }
+}
+
 /// Key that changes with an inline style, so Dioxus re-creates the element
 /// instead of patching it (patching keeps properties the new style dropped).
 fn style_key(style: &str) -> u64 {
@@ -307,7 +326,7 @@ fn style_key(style: &str) -> u64 {
 
 fn scope_style(s: &Settings, dark: bool) -> String {
     let theme = if dark { "dark" } else { "light" };
-    let mut style = format!("--fs: {}px;", s.font_size);
+    let mut style = super::text_size_vars(s);
     if !s.accent.trim().is_empty() && valid_css_color(&s.accent) {
         style.push_str(&format!(" --accent-c: {};", s.accent.trim()));
     }
@@ -621,22 +640,29 @@ pub fn AppearancePage() -> Element {
                         div { class: "ap-sample mono", style: "font-family: var(--mono);",
                             "fn main() {{ let ok = 0O1lI != \"{{}}[]\"; }} => -> != <="
                         }
-                        div { class: "set-row",
-                            div { class: "lbl", div { class: "t", "Text Size" } div { class: "d", "Transcript and composer text." } }
-                            div { class: "ap-range",
-                                span { class: "ap-range-min", "A" }
-                                input { r#type: "range", min: "11", max: "18", step: "1", value: "{s.font_size}",
-                                    oninput: move |e| {
-                                        if let Ok(n) = e.value().parse::<u32>() {
-                                            app.config.write().settings.font_size = n;
-                                        }
-                                    },
-                                    onchange: move |_| app.save_config(),
-                                }
-                                span { class: "ap-range-max", "A" }
-                                span { class: "ap-range-val", "{s.font_size}px" }
-                            }
+                    }
+
+                    // ---------------------------------------------------- text sizes
+                    div { class: "set-group-title", Lucide { name: "a-large-small", size: 13 } "Text Sizes"
+                        if s.font_size != 14 || s.text_sizes != TextSizes::default() {
+                            button { class: "set-link", onclick: move |_| app.update_config(|c| { c.settings.font_size = 14; c.settings.text_sizes = TextSizes::default(); }), "Reset" }
                         }
+                    }
+                    div { class: "set-card",
+                        SizeRow { title: "Replies", desc: "The agent's answers in the chat.", value: s.font_size, min: 11, max: 22,
+                            sample: "fs", onchange: move |v| app.update_config(|c| c.settings.font_size = v) }
+                        SizeRow { title: "Prompts", desc: "Your messages in the chat.", value: s.text_sizes.prompts, min: 11, max: 22,
+                            sample: "prompt", onchange: move |v| app.update_config(|c| c.settings.text_sizes.prompts = v) }
+                        SizeRow { title: "Composer", desc: "What you type before sending.", value: s.text_sizes.composer, min: 11, max: 22,
+                            sample: "composer", onchange: move |v| app.update_config(|c| c.settings.text_sizes.composer = v) }
+                        SizeRow { title: "Steps & Tools", desc: "Tool steps, commands and cards.", value: s.text_sizes.steps, min: 10, max: 20,
+                            sample: "steps", onchange: move |v| app.update_config(|c| c.settings.text_sizes.steps = v) }
+                        SizeRow { title: "Code", desc: "Code blocks, diffs and tool output.", value: s.text_sizes.code, min: 10, max: 20,
+                            sample: "code", onchange: move |v| app.update_config(|c| c.settings.text_sizes.code = v) }
+                        SizeRow { title: "Sidebar", desc: "Chat and repository names.", value: s.text_sizes.sidebar, min: 11, max: 18,
+                            sample: "side", onchange: move |v| app.update_config(|c| c.settings.text_sizes.sidebar = v) }
+                        SizeRow { title: "Terminal", desc: "The built-in terminal (new terminals).", value: s.text_sizes.terminal, min: 10, max: 22,
+                            sample: "term", onchange: move |v| app.update_config(|c| c.settings.text_sizes.terminal = v) }
                         div { class: "set-row",
                             div { class: "lbl", div { class: "t", "Zoom" } div { class: "d", "Scale the whole window — Ctrl + / Ctrl − / Ctrl 0." } }
                             div { class: "seg",
@@ -675,15 +701,8 @@ pub fn AppearancePage() -> Element {
                             div { class: "lbl", div { class: "t", "Transcript Width" } div { class: "d", "Widest the conversation column gets." } }
                             div { class: "ap-range wide",
                                 div { class: "ap-tw", div { class: "ap-tw-col", style: "width: {((s.transcript_width.clamp(560, 1600) - 480) as f64 / 11.2).round()}%;" } }
-                                input { r#type: "range", min: "560", max: "1600", step: "20", value: "{s.transcript_width}",
-                                    oninput: move |e| {
-                                        if let Ok(n) = e.value().parse::<u32>() {
-                                            app.config.write().settings.transcript_width = n;
-                                        }
-                                    },
-                                    onchange: move |_| app.save_config(),
-                                }
-                                span { class: "ap-range-val", if s.transcript_width >= 1600 { "Full" } else { "{s.transcript_width}px" } }
+                                super::Stepper { value: s.transcript_width.clamp(560, 1600), min: 560, max: 1600, step: 40,
+                                    onchange: move |v| app.update_config(|c| c.settings.transcript_width = v) }
                             }
                         }
                         div { class: "set-row",

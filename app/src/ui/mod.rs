@@ -278,10 +278,7 @@ pub fn Root() -> Element {
     let cfg = app.config.read();
     let st = &cfg.settings;
     let theme = if ui.dark { "dark" } else { "light" };
-    let mut style = format!(
-        "--sidebar-w: {}px; --chat-w: {}px; --fs: {}px; --tw: {}px;",
-        st.sidebar_width, st.chat_width, st.font_size, st.transcript_width.clamp(560, 1600)
-    );
+    let mut style = format!("--sidebar-w: {}px; --chat-w: {}px; --tw: {}px; {}", st.sidebar_width, st.chat_width, st.transcript_width.clamp(560, 1600), text_size_vars(st));
     if !st.accent.trim().is_empty() {
         style.push_str(&format!(" --accent-c: {};", st.accent.trim()));
     }
@@ -511,6 +508,54 @@ fn CodeStyles(light: Option<String>, dark: Option<String>) -> Element {
         format!("{}\n{}", crate::highlight::css_for(light.as_deref(), dark.as_deref()), crate::markdown::CSS)
     }));
     rsx! { style { "{css}" } }
+}
+
+/// A number with − / + buttons. It can also be typed (Enter or leaving the
+/// field applies it) or nudged with the arrow keys; it stays within
+/// `min`..=`max`.
+#[component]
+pub fn Stepper(value: u32, min: u32, max: u32, #[props(default = 1)] step: u32, #[props(default = "px")] unit: &'static str, onchange: EventHandler<u32>) -> Element {
+    let set = move |v: i64| onchange.call(v.clamp(min as i64, max as i64) as u32);
+    let (v, s) = (value as i64, step as i64);
+    rsx! {
+        div { class: "stepper",
+            button { class: "st-btn", disabled: value <= min, title: "Smaller", "aria-label": "Decrease",
+                onclick: move |_| set(v - s),
+                crate::icons::Lucide { name: "minus".to_string(), size: 13, stroke: 2.0 }
+            }
+            label { class: "st-val",
+                input {
+                    r#type: "text",
+                    inputmode: "numeric",
+                    value: "{value}",
+                    onchange: move |e| {
+                        if let Ok(n) = e.value().trim().trim_end_matches(unit).trim().parse::<i64>() {
+                            set(n);
+                        }
+                    },
+                    onkeydown: move |e| match e.key() {
+                        Key::ArrowUp => { e.prevent_default(); set(v + s) }
+                        Key::ArrowDown => { e.prevent_default(); set(v - s) }
+                        _ => {}
+                    },
+                }
+                if !unit.is_empty() { span { class: "st-unit", "{unit}" } }
+            }
+            button { class: "st-btn", disabled: value >= max, title: "Larger", "aria-label": "Increase",
+                onclick: move |_| set(v + s),
+                crate::icons::Lucide { name: "plus".to_string(), size: 13, stroke: 2.0 }
+            }
+        }
+    }
+}
+
+/// CSS variables for the text sizes (Settings → Appearance → Text).
+pub fn text_size_vars(s: &larrier_core::Settings) -> String {
+    let t = &s.text_sizes;
+    format!(
+        "--fs: {}px; --fs-prompt: {}px; --fs-composer: {}px; --fs-steps: {}px; --fs-code: {}px; --fs-side: {}px; --fs-term: {}px;",
+        s.font_size, t.prompts, t.composer, t.steps, t.code, t.sidebar, t.terminal
+    )
 }
 
 /// Below this window width the sidebar floats over the content.

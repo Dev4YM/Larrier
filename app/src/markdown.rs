@@ -15,7 +15,7 @@ pub const CSS: &str = r#"
 .code-block:hover .code-copy { opacity: 1; }
 .code-block .code-copy:hover { background: var(--hover); color: var(--fg-2); }
 .md .code-block pre { margin: 0; border: none; border-radius: 0; background: transparent; padding: 8px 12px; overflow-x: auto; }
-.md .code-block pre code { font-family: var(--mono); font-size: 12px; line-height: 1.6; background: none; padding: 0; white-space: pre; }
+.md .code-block pre code { font-family: var(--mono); font-size: var(--fs-code, 12px); line-height: 1.6; background: none; padding: 0; white-space: pre; }
 "#;
 
 const COPY_JS: &str = "(function(b){var c=b.closest('.code-block').querySelector('code');navigator.clipboard.writeText(c.innerText);var u=b.querySelector('use');if(u){u.setAttribute('href','#lucide-check');b.classList.add('done');clearTimeout(b.__t);b.__t=setTimeout(function(){u.setAttribute('href','#lucide-copy');b.classList.remove('done')},1400)}})(this)";

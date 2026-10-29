@@ -1225,3 +1225,28 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 /* A tool call that never ran (rejected, or the turn stopped). */
 .step.skipped .verb, .step.skipped .target { color: var(--fg-3); text-decoration: line-through; text-decoration-color: var(--border-2); }
 .step .skip-tag, .tool-card-head .skip-tag { flex-shrink: 0; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: var(--chip); color: var(--fg-2); }
+
+/* Text sizes (Settings → Appearance → Text). Headings and inline code
+   scale with the reply text; secondary text sits a step below its kind. */
+.a-text { font-size: var(--fs, 14px); line-height: 1.7; }
+.md h1 { font-size: 1.43em; } .md h2 { font-size: 1.29em; } .md h3 { font-size: 1.14em; } .md h4 { font-size: 1em; }
+.md table { font-size: .86em; }
+.md pre code { font-size: var(--fs-code, 12px); }
+.user-card { font-size: var(--fs-prompt, 14px); line-height: 1.57; }
+.composer textarea, .composer-row textarea { font-size: var(--fs-composer, 14px); line-height: 1.43; }
+.step { font-size: var(--fs-steps, 13px); }
+.tool-card-head { font-size: calc(var(--fs-steps, 13px) - 1px); }
+.tool-card pre { font-size: calc(var(--fs-code, 12px) - 1px); }
+.diff-body { font-size: calc(var(--fs-code, 12px) - .5px); }
+.chat-row, .repo-row { font-size: var(--fs-side, 13px); }
+.chat-row .tm { font-size: calc(var(--fs-side, 13px) - 1px); }
+
+/* − value + stepper. */
+.stepper { display: inline-flex; align-items: center; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); overflow: hidden; flex-shrink: 0; }
+.stepper:focus-within { border-color: var(--accent-c, var(--blue)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c, var(--blue)) 14%, transparent); }
+.stepper .st-btn { width: 30px; height: 100%; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-2); background: none; border: none; }
+.stepper .st-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.stepper .st-btn:disabled { color: var(--fg-4); }
+.stepper .st-val { display: inline-flex; align-items: baseline; justify-content: center; gap: 1px; min-width: 52px; height: 100%; padding: 0 2px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); cursor: text; }
+.stepper .st-val input { width: 4ch; border: none; outline: none; background: transparent; text-align: right; font: inherit; font-size: 12.5px; color: var(--fg); font-variant-numeric: tabular-nums; padding: 0; line-height: 28px; }
+.stepper .st-unit { font-size: 11.5px; color: var(--fg-3); line-height: 28px; }

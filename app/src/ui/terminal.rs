@@ -559,7 +559,7 @@ const theme = (dark) => Object.assign({{
 }}, palette(dark));
 const term = new Terminal({{
   fontFamily: v('--mono', 'Cascadia Mono, Consolas, monospace'),
-  fontSize: 12.5,
+  fontSize: parseFloat(getComputedStyle(document.querySelector('.app') || document.documentElement).getPropertyValue('--fs-term')) || 13,
   lineHeight: 1.15,
   cursorBlink: true,
   scrollback: 5000,

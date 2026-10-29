@@ -137,8 +137,12 @@ pub struct Settings {
     pub worktrees_dir: Option<String>,
     #[serde(default)]
     pub send_with_ctrl_enter: bool,
+    /// Size of the agent's replies in the chat, px.
     #[serde(default = "default_font_size")]
     pub font_size: u32,
+    /// Sizes of the other kinds of text, px.
+    #[serde(default)]
+    pub text_sizes: TextSizes,
     #[serde(default = "yes")]
     pub show_reasoning: bool,
     #[serde(default)]
@@ -227,7 +231,47 @@ fn default_chat_width() -> u32 {
     560
 }
 fn default_font_size() -> u32 {
+    14
+}
+
+/// Text sizes in px for each kind of text (replies use
+/// [`Settings::font_size`]).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextSizes {
+    /// The user's messages in the chat.
+    #[serde(default = "size_14")]
+    pub prompts: u32,
+    /// What is typed in the composer.
+    #[serde(default = "size_14")]
+    pub composer: u32,
+    /// Tool steps, commands and cards.
+    #[serde(default = "size_13")]
+    pub steps: u32,
+    /// Code blocks, diffs and tool output.
+    #[serde(default = "size_12")]
+    pub code: u32,
+    /// Chat and repository names in the sidebar.
+    #[serde(default = "size_13")]
+    pub sidebar: u32,
+    /// The integrated terminal.
+    #[serde(default = "size_13")]
+    pub terminal: u32,
+}
+
+fn size_12() -> u32 {
+    12
+}
+fn size_13() -> u32 {
     13
+}
+fn size_14() -> u32 {
+    14
+}
+
+impl Default for TextSizes {
+    fn default() -> Self {
+        TextSizes { prompts: 14, composer: 14, steps: 13, code: 12, sidebar: 13, terminal: 13 }
+    }
 }
 
 impl Default for Settings {
@@ -247,6 +291,7 @@ impl Default for Settings {
             worktrees_dir: None,
             send_with_ctrl_enter: false,
             font_size: default_font_size(),
+            text_sizes: TextSizes::default(),
             show_reasoning: true,
             sidebar_group: SidebarGroup::default(),
             sidebar_sort: SidebarSort::default(),

@@ -586,16 +586,14 @@ pub fn Composer(
             if home {
                 div { class: "row", style: "gap: 6px; margin: 10px 0 0 2px; flex-wrap: wrap;",
                     button {
-                        class: "pill-btn",
-                        style: if mode_now == "plan" { "border-color: var(--blue); color: var(--blue);" } else { "" },
+                        class: if mode_now == "plan" { "pill-btn active-blue" } else { "pill-btn" },
                         onclick: move |_| set_mode(Some(if mode_now == "plan" { "agent".into() } else { "plan".into() }), None),
                         "Plan New Idea"
                         span { class: "faint", style: "font-size: 11px;", "⇧Tab" }
                     }
                     div { class: "menu-anchor",
                         button {
-                            class: "pill-btn",
-                            style: if multi_now.len() > 1 { "border-color: var(--blue); color: var(--blue);" } else { "" },
+                            class: if multi_now.len() > 1 { "pill-btn active-blue" } else { "pill-btn" },
                             onclick: move |_| multi_menu.set(true),
                             "Multitask"
                             if multi_now.len() > 1 { span { "· {multi_now.len()} agents" } }

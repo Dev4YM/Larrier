@@ -132,8 +132,8 @@ const LARRIER_DARK: Base = Base {
 const PRESETS: &[Preset] = &[
     Preset { name: "Larrier", note: "Warm paper and ink", light: LARRIER_LIGHT, dark: LARRIER_DARK, contrast: false },
     Preset {
-        name: "Cursor",
-        note: "Neutral and crisp",
+        name: "Neutral",
+        note: "Clean grays, crisp white cards",
         light: Base { win: "#f3f3f3", pane: "#f8f8f8", card: "#ffffff", card2: "#ffffff", selected: "#e8e8e8", chip: "#e4e4e4", chip2: "#dcdcdc", fg: "#1f1f1f", blue: "#2f6fdc", green: "#1e8a5a", red: "#d0364f", amber: "#b97d18" },
         dark: Base { win: "#141414", pane: "#181818", card: "#1e1e1e", card2: "#222222", selected: "#2a2a2a", chip: "#2c2c2c", chip2: "#353535", fg: "#e6e6e6", blue: "#6ea8fe", green: "#4ec98f", red: "#f2718a", amber: "#e2a93b" },
         contrast: false,
@@ -296,6 +296,15 @@ fn valid_css_color(v: &str) -> bool {
 
 /// CSS variables for a nested themed scope (preview / theme cards), the
 /// same way the window root applies the user's settings.
+/// Key that changes with an inline style, so Dioxus re-creates the element
+/// instead of patching it (patching keeps properties the new style dropped).
+fn style_key(style: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    style.hash(&mut h);
+    h.finish()
+}
+
 fn scope_style(s: &Settings, dark: bool) -> String {
     let theme = if dark { "dark" } else { "light" };
     let mut style = format!("--fs: {}px;", s.font_size);
@@ -525,7 +534,7 @@ pub fn AppearancePage() -> Element {
                                         if hex.is_empty() { span { class: "ap-dot-a", "A" } }
                                     }
                                 }
-                                label { class: if custom_accent { "ap-dot custom on" } else { "ap-dot custom" },
+                                label { key: "{custom_accent}", class: if custom_accent { "ap-dot custom on" } else { "ap-dot custom" },
                                     title: "Custom color",
                                     style: if custom_accent { format!("background: {};", s.accent) } else { String::new() },
                                     Lucide { name: "plus", size: 12 }
@@ -786,7 +795,7 @@ fn MiniWindow(dark: bool) -> Element {
     let app = use_app();
     let style = scope_style(&app.config.read().settings, dark);
     rsx! {
-        div { class: "app ap-swatch", "data-theme": if dark { "dark" } else { "light" }, style: "{style}",
+        div { key: "{style_key(&style)}", class: "app ap-swatch", "data-theme": if dark { "dark" } else { "light" }, style: "{style}",
             div { class: "ap-sw-side",
                 div { class: "ap-sw-line w60" }
                 div { class: "ap-sw-line sel" }
@@ -874,7 +883,7 @@ fn ColorRow(
                 },
             }
             button { class: "icon-btn sm ap-reset", title: "Reset to the theme color", disabled: !is_set,
-                style: if is_set { "" } else { "visibility: hidden;" },
+                style: if is_set { "visibility: visible;" } else { "visibility: hidden;" },
                 onclick: move |_| {
                     let k = k3.clone();
                     app.update_config(move |c| { c.settings.custom_colors.remove(&k); });
@@ -979,7 +988,7 @@ fn PreviewPane(dark: bool) -> Element {
     rsx! {
         style { "{code_css}" }
         div { class: "ap-frame",
-            div { class: "{cls}", "data-theme": "{theme}", style: "{style}",
+            div { key: "{style_key(&style)}", class: "{cls}", "data-theme": "{theme}", style: "{style}",
                 div { class: if s.sidebar_right { "ap-m-body rev" } else { "ap-m-body" },
                     div { class: "ap-m-side",
                         div { class: "ap-m-top",

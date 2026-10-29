@@ -275,8 +275,12 @@ pub fn Root() -> Element {
     drop(cfg);
 
     let in_settings = matches!(&*app.view.read(), View::Settings(_));
+    // Not an inline `style`: Dioxus restores inline properties a new value
+    // leaves out, so removed colors (the Larrier preset, Reset) would stick.
+    let root_css = format!(".app.larrier-root[data-theme] {{ {style} }}");
     rsx! {
-        div { class: "{class}", "data-theme": "{theme}", style: "{style}",
+        div { class: "{class} larrier-root", "data-theme": "{theme}",
+            style { "{root_css}" }
             crate::icons::IconSprite {}
             CodeStyles { light: code_themes.0.clone(), dark: code_themes.1.clone() }
             menubar::MenuBar {}

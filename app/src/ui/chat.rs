@@ -83,8 +83,7 @@ pub fn AgentView(id: String) -> Element {
     rsx! {
         div { class: if split.is_some() { "agent-body split" } else { "agent-body" },
             div {
-                class: "chat-col primary",
-                style: if right_open && split.is_none() { "flex: 0 0 var(--chat-w, 760px); max-width: 70%;" } else { "" },
+                class: if right_open && split.is_none() { "chat-col primary fixed" } else { "chat-col primary" },
                 ChatHeader { id: id.clone() }
                 ChatColumn { id: id.clone(), input_id: "composer-input" }
                 if right_open && split.is_none() {

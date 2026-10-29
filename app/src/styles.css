@@ -990,6 +990,11 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .transcript > .scroll-bottom { position: sticky; bottom: 10px; left: auto; right: auto; transform: none; height: 0; display: flex; justify-content: center; overflow: visible; z-index: 6; pointer-events: none; }
 .transcript > .scroll-bottom .round-btn { pointer-events: auto; transform: translateY(-100%); box-shadow: var(--shadow-pop); }
 
+/* Classes for states that used conditional inline styles (Dioxus keeps
+   inline properties a new style value drops, so those never reset). */
+.chat-col.fixed { flex: 0 0 var(--chat-w, 760px); max-width: 70%; }
+.pill-btn.active-blue { border-color: var(--blue); color: var(--blue); }
+
 /* Live sessions: another app (a terminal CLI, an IDE) is writing this session. */
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; display: inline-block; box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); animation: live-pulse 1.8s ease-out infinite; }
 @keyframes live-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }

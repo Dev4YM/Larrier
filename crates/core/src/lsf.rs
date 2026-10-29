@@ -711,7 +711,7 @@ impl ToolKind {
             "move" | "rename" | "mv" => ToolKind::Move,
             "grep" | "glob" | "search" | "find" | "codebase_search" | "grep_search" | "file_search" | "search_file_content" | "find_files" | "semantic_search" | "ripgrep" => ToolKind::Search,
             "bash" | "shell" | "run_terminal_cmd" | "run_shell_command" | "exec" | "exec_command" | "local_shell" | "terminal" | "command" | "powershell" | "bashoutput" | "killshell" | "command_execution" => ToolKind::Shell,
-            "webfetch" | "web_fetch" | "fetch" | "curl" => ToolKind::Fetch,
+            "webfetch" | "web_fetch" | "fetch" | "fetchurl" | "fetch_url" | "curl" => ToolKind::Fetch,
             "websearch" | "web_search" | "google_web_search" => ToolKind::WebSearch,
             "think" | "thinking" => ToolKind::Think,
             "task" | "agent" | "subagent" | "dispatch_agent" | "spawn_agent" => ToolKind::Task,

@@ -112,6 +112,9 @@ fn merge_user_state(new: &mut Session, old: &Session) {
     let old_import_mode = old.extra.get("import_mode").and_then(|m| m.as_str());
     if old.mode.as_deref() != old_import_mode {
         new.mode = old.mode.clone();
+    }
+    let old_import_permission = old.extra.get("import_permission").and_then(|m| m.as_str());
+    if old.permission.as_deref() != old_import_permission {
         new.permission = old.permission.clone();
     }
     let old_import_title = old.extra.get("import_title").and_then(|t| t.as_str());

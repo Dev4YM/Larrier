@@ -352,8 +352,10 @@ pub fn image_parts(v: &Value) -> Vec<Part> {
         .iter()
         .filter_map(|i| match i.get("type").and_then(|t| t.as_str()) {
             Some("image") => {
-                let src = &i["source"];
-                let mime = src.get("media_type").and_then(|m| m.as_str()).map(String::from);
+                // Anthropic nests the payload in `source`; MCP puts
+                // `data` / `mimeType` on the block itself.
+                let src = i.get("source").filter(|s| s.is_object()).unwrap_or(i);
+                let mime = ["media_type", "mimeType", "mime_type"].iter().find_map(|k| src.get(*k).and_then(|m| m.as_str())).map(String::from);
                 image_part(mime, src.get("data").and_then(|d| d.as_str()), src.get("url").and_then(|u| u.as_str()))
             }
             Some("input_image") | Some("image_url") => {
@@ -378,12 +380,7 @@ pub fn image_refs(text: &str) -> (String, Vec<Part>) {
         let path = after[..end].trim();
         out.push_str(&rest[..i]);
         if std::path::Path::new(path).is_file() {
-            let lower = path.to_lowercase();
-            let mime = [("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("gif", "image/gif"), ("webp", "image/webp")]
-                .iter()
-                .find(|(e, _)| lower.ends_with(&format!(".{e}")))
-                .map(|(_, m)| m.to_string());
-            parts.push(Part::Image { mime, source: MediaSource::Path { path: path.to_string() } });
+            parts.push(Part::Image { mime: image_mime(path), source: MediaSource::Path { path: path.to_string() } });
         } else {
             out.push_str(&rest[i..i + 16 + end + 1]);
         }
@@ -391,6 +388,28 @@ pub fn image_refs(text: &str) -> (String, Vec<Part>) {
     }
     out.push_str(rest);
     (out.trim().to_string(), parts)
+}
+
+/// MIME type of an image file, from its extension.
+pub fn image_mime(path: &str) -> Option<String> {
+    let lower = path.to_lowercase();
+    [("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("gif", "image/gif"), ("webp", "image/webp")]
+        .iter()
+        .find(|(e, _)| lower.ends_with(&format!(".{e}")))
+        .map(|(_, m)| m.to_string())
+}
+
+/// `file:///C:/x.png` → `C:/x.png`, `file:///home/x.png` → `/home/x.png`;
+/// anything else is returned unchanged.
+pub fn file_url_path(u: &str) -> String {
+    let Some(rest) = u.strip_prefix("file://") else { return u.to_string() };
+    let b = rest.as_bytes();
+    // `/C:/…` — a Windows drive after the URL's leading slash.
+    if b.len() > 2 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
+        rest[1..].to_string()
+    } else {
+        rest.to_string()
+    }
 }
 
 pub fn content_text(v: &Value) -> String {
@@ -431,6 +450,9 @@ pub fn plan_from(v: &Value) -> Option<Vec<PlanEntry>> {
         .or_else(|| v.get("plan"))
         .or_else(|| v.get("items"))
         .unwrap_or(v);
+    if let Some(text) = list.as_str() {
+        return plan_from_text(text);
+    }
     let arr = list.as_array()?;
     let entries: Vec<PlanEntry> = arr
         .iter()
@@ -460,6 +482,30 @@ pub fn plan_from(v: &Value) -> Option<Vec<PlanEntry>> {
     } else {
         Some(entries)
     }
+}
+
+/// A to-do list written as text, one item per line: Droid's
+/// `1. [in_progress] Set up` or Markdown's `- [x] Done`.
+pub fn plan_from_text(text: &str) -> Option<Vec<PlanEntry>> {
+    let entries: Vec<PlanEntry> = text
+        .lines()
+        .filter_map(|line| {
+            let l = line.trim();
+            let l = l.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['.', ')']);
+            let l = l.trim_start().trim_start_matches(['-', '*']).trim_start();
+            let rest = l.strip_prefix('[')?;
+            let (mark, content) = rest.split_once(']')?;
+            let status = match mark.trim().to_ascii_lowercase().as_str() {
+                "x" | "completed" | "done" | "complete" => PlanStatus::Completed,
+                "in_progress" | "in-progress" | "active" | "~" => PlanStatus::InProgress,
+                "cancelled" | "canceled" | "-" => PlanStatus::Cancelled,
+                _ => PlanStatus::Pending,
+            };
+            let content = content.trim();
+            (!content.is_empty()).then(|| PlanEntry { content: content.to_string(), status, priority: None })
+        })
+        .collect();
+    (!entries.is_empty()).then_some(entries)
 }
 
 // ---------------------------------------------------------------- builder
@@ -583,6 +629,15 @@ impl Conv {
 
     pub fn has_tool(&self, id: &str) -> bool {
         self.tools.contains_key(id)
+    }
+
+    /// A previously added tool call, for updates beyond [`Conv::tool_result`].
+    pub fn tool_mut(&mut self, id: &str) -> Option<&mut ToolCall> {
+        let &(mi, pi) = self.tools.get(id)?;
+        match self.messages.get_mut(mi).and_then(|m| m.parts.get_mut(pi)) {
+            Some(Part::Tool(t)) => Some(t),
+            _ => None,
+        }
     }
 
     /// Attach a result to a previously seen tool call. Returns false when the
@@ -852,7 +907,7 @@ pub fn image_part(mime: Option<String>, data: Option<&str>, url: Option<&str>) -
         } else if u.starts_with("http") {
             MediaSource::Url { url: u.to_string() }
         } else {
-            MediaSource::Path { path: u.trim_start_matches("file://").to_string() }
+            MediaSource::Path { path: file_url_path(u) }
         };
         Part::Image { mime, source }
     })

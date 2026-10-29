@@ -78,11 +78,14 @@ impl LineParser for HermesStream {
                 let pos = self.pending.iter().position(|(n, _)| n == name).or(if self.pending.is_empty() { None } else { Some(0) });
                 let Some(pos) = pos else { return };
                 let (_, id) = self.pending.remove(pos).unwrap();
-                let is_error = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false);
+                // Tools answer with JSON ({"output": …, "exit_code": …}); show
+                // the readable part, as imported sessions do.
+                let (output, failed) = larrier_formats::hermes::tool_output(&content_text(&v["output"]));
+                let is_error = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false) || failed;
                 sink.send(AgentEvent::ToolUpdate {
                     id,
                     status: Some(if is_error { ToolStatus::Failed } else { ToolStatus::Completed }),
-                    output: Some(content_text(&v["output"])),
+                    output: Some(output),
                     diffs: Vec::new(),
                     is_error,
                     title: None,

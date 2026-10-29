@@ -1516,7 +1516,7 @@ pub fn external_active(s: &SessionSummary, live_recent: bool) -> bool {
     if s.external_turn {
         return chrono::Utc::now() - s.updated_at < chrono::Duration::minutes(45);
     }
-    live_recent && !matches!(s.origin, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::OpenCode)
+    live_recent && !matches!(s.origin, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::OpenCode | AgentKind::Hermes)
 }
 
 /// Save a pasted / dropped image (a `data:` URL) as an attachment file.

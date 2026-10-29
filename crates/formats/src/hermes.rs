@@ -88,6 +88,36 @@ fn decode_content(raw: &str) -> String {
     }
 }
 
+/// Hermes tools answer with a JSON object (`{"output": …, "exit_code": 0}`,
+/// `{"content": …, "total_lines": …}`, `{"success": false, "error": …}`):
+/// the readable part and whether the call failed.
+pub fn tool_output(raw: &str) -> (String, bool) {
+    let Ok(Value::Object(o)) = serde_json::from_str::<Value>(raw.trim()) else { return (raw.to_string(), false) };
+    let text = |k: &str| o.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|t| !t.is_empty()).map(String::from);
+    let error = text("error");
+    let failed = o.get("success").and_then(|v| v.as_bool()) == Some(false)
+        || text("status").as_deref() == Some("error")
+        || o.get("exit_code").and_then(|v| v.as_i64()).is_some_and(|c| c != 0);
+    let body = ["output", "content", "matches_text", "diff", "message", "result"].iter().find_map(|k| text(k)).or_else(|| {
+        if let Some(n) = o.get("bytes_written").and_then(|v| v.as_u64()) {
+            return Some(format!("Wrote {n} bytes"));
+        }
+        match o.get("total_count").and_then(|v| v.as_u64()) {
+            Some(0) if error.is_none() => Some("No matches".to_string()),
+            _ => None,
+        }
+    });
+    let out = match (body, &error) {
+        (Some(b), Some(e)) => format!("{b}\n{e}"),
+        (Some(b), None) => b,
+        (None, Some(e)) => e.clone(),
+        (None, None) => raw.to_string(),
+    };
+    // A tool that only reports an error failed, whatever else it says.
+    let failed = failed || (error.is_some() && ["output", "content", "matches_text", "diff"].iter().all(|k| text(k).is_none()));
+    (out, failed)
+}
+
 pub fn import(info: &NativeSessionInfo) -> Result<Session> {
     let con = open_sqlite(&info.path)?;
     let scols = util::table_columns(&con, "sessions");
@@ -104,6 +134,34 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
     } else {
         None
     };
+    let ended = has_s("ended_at") && con.query_row("SELECT ended_at IS NOT NULL FROM sessions WHERE id = ?1", [&info.native_id], |r| r.get::<_, bool>(0)).unwrap_or(true);
+    // Session totals, kept by Hermes per API call.
+    let scol = |c: &str| if has_s(c) { format!("COALESCE({c}, 0)") } else { "0".to_string() };
+    let totals = con
+        .query_row(
+            &format!(
+                "SELECT {}, {}, {}, {}, {}, {}, {} FROM sessions WHERE id = ?1",
+                scol("input_tokens"),
+                scol("output_tokens"),
+                scol("cache_read_tokens"),
+                scol("cache_write_tokens"),
+                scol("reasoning_tokens"),
+                scol("actual_cost_usd"),
+                scol("estimated_cost_usd"),
+            ),
+            [&info.native_id],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, f64>(5)?, r.get::<_, f64>(6)?)),
+        )
+        .ok()
+        .filter(|t| t.0 + t.1 > 0)
+        .map(|(i, o, cr, cw, r, actual, est)| Usage {
+            input_tokens: i as u64,
+            output_tokens: o as u64,
+            cache_read_tokens: cr as u64,
+            cache_write_tokens: cw as u64,
+            reasoning_tokens: r as u64,
+            cost_usd: Some(if actual > 0.0 { actual } else { est }).filter(|c| *c > 0.0),
+        });
     let col = |c: &str| if has_m(c) { c.to_string() } else { format!("NULL AS {c}") };
     let active = if has_m("active") { "AND (active IS NULL OR active = 1)" } else { "" };
     let sql = format!(
@@ -129,7 +187,15 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
     })?;
     let mut conv = Conv::new(AGENT);
     conv.model = model.clone();
+    // Whether Hermes is still mid-turn: the last record is a prompt, a tool
+    // result or a reply that asked for tools.
+    let mut open = false;
     for (role, content, tool_call_id, tool_calls, tool_name, ts, reasoning, tokens) in rows.flatten() {
+        open = match role.as_str() {
+            "user" | "tool" => true,
+            "assistant" => tool_calls.as_deref().is_some_and(|t| !t.trim().is_empty() && t != "null" && t != "[]"),
+            _ => open,
+        };
         let ts = ts.and_then(ts_from_secs);
         let text = content.as_deref().map(decode_content).unwrap_or_default();
         match role.as_str() {
@@ -147,16 +213,20 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
                     }
                 }
                 conv.text(&text, ts, None);
-                if let Some(n) = tokens.filter(|n| *n > 0) {
-                    conv.add_usage(&Usage { output_tokens: n as u64, ..Default::default() });
+                if totals.is_none() {
+                    if let Some(n) = tokens.filter(|n| *n > 0) {
+                        conv.add_usage(&Usage { output_tokens: n as u64, ..Default::default() });
+                    }
                 }
             }
             "tool" => {
                 let id = tool_call_id.unwrap_or_default();
-                if !conv.tool_result(&id, Some(text.clone()), false, Vec::new()) {
+                let (out, failed) = tool_output(&text);
+                if !conv.tool_result(&id, Some(out.clone()), failed, Vec::new()) {
                     // Orphan tool output: keep it visible as a completed call.
                     let mut t = ToolCall::new(id.clone(), tool_name.unwrap_or_else(|| "tool".into()), Value::Null);
-                    t.output = Some(util::trim_output(&text));
+                    t.output = Some(util::trim_output(&out));
+                    t.is_error = failed;
                     conv.tool(t, ts, None);
                 }
             }
@@ -170,9 +240,12 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
         cwd: info.cwd.clone(),
         branch,
         updated: info.updated_at,
+        usage: totals,
         ..Default::default()
     };
-    finish(conv, AGENT, meta)
+    let mut session = finish(conv, AGENT, meta)?;
+    session.external_turn = open && !ended;
+    Ok(session)
 }
 
 #[cfg(test)]
@@ -181,5 +254,18 @@ mod tests {
     fn decodes_json_content() {
         assert_eq!(super::decode_content("\u{0}json:[{\"type\":\"text\",\"text\":\"hi\"}]"), "hi");
         assert_eq!(super::decode_content("plain"), "plain");
+    }
+
+    #[test]
+    fn reads_tool_answers() {
+        use super::tool_output;
+        assert_eq!(tool_output(r#"{"output": "ok", "exit_code": 0, "error": null}"#), ("ok".to_string(), false));
+        assert_eq!(tool_output(r#"{"output": "", "exit_code": 2, "error": "boom"}"#), ("boom".to_string(), true));
+        assert_eq!(tool_output(r#"{"content": "1|fn main", "total_lines": 1}"#), ("1|fn main".to_string(), false));
+        assert_eq!(tool_output(r#"{"total_count": 0, "error": "Path not found: src"}"#), ("Path not found: src".to_string(), true));
+        assert_eq!(tool_output(r#"{"total_count": 0}"#), ("No matches".to_string(), false));
+        assert_eq!(tool_output(r#"{"bytes_written": 12, "dirs_created": true}"#), ("Wrote 12 bytes".to_string(), false));
+        assert_eq!(tool_output(r#"{"success": false, "error": "denied"}"#), ("denied".to_string(), true));
+        assert_eq!(tool_output("plain text"), ("plain text".to_string(), false));
     }
 }

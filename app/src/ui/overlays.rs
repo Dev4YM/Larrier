@@ -200,6 +200,56 @@ pub fn Palette() -> Element {
     }
 }
 
+/// Right-click menu of a chat tab.
+#[component]
+pub fn TabMenu() -> Element {
+    let mut app = use_app();
+    let Some(c) = app.ui.read().tab_ctx.clone() else { return rsx! {} };
+    let preview = app.tabs.read().iter().find(|t| t.view == c.view).map(|t| t.preview).unwrap_or(false);
+    let n = app.tabs.read().len();
+    let is_last = app.tabs.read().last().map(|t| t.view == c.view).unwrap_or(true);
+    let session = c.view.session_id().map(|s| s.to_string());
+    let is_agent = matches!(c.view, crate::state::View::Agent(_));
+    let active = *app.view.read() == c.view;
+    let close = move || app.ui.write().tab_ctx = None;
+    let item = |label: &'static str, icon: I, kb: &'static str, enabled: bool, f: Box<dyn Fn()>| {
+        let mut close = close;
+        rsx! {
+            button { class: if enabled { "menu-item" } else { "menu-item disabled" },
+                onclick: move |_| { if enabled { close(); f(); } },
+                span { class: "muted", Icon { i: icon, size: 14 } }
+                span { "{label}" }
+                if !kb.is_empty() { span { class: "kb", "{kb}" } }
+            }
+        }
+    };
+    let (v1, v2, v3, v4, v5) = (c.view.clone(), c.view.clone(), c.view.clone(), c.view.clone(), c.view.clone());
+    let (s1, s2, s3) = (session.clone().unwrap_or_default(), session.clone().unwrap_or_default(), session.clone().unwrap_or_default());
+    rsx! {
+        div { class: "menu-backdrop", style: "z-index: 399;",
+            onclick: move |_| app.ui.write().tab_ctx = None,
+            oncontextmenu: move |e| { e.prevent_default(); app.ui.write().tab_ctx = None; },
+        }
+        div { class: "menu ctx-menu", style: "left: {c.x}px; top: {c.y}px;",
+            {item("Close", I::X, "Ctrl+W", true, Box::new(move || app.close_tab(&v1)))}
+            {item("Close Others", I::X, "", n > 1, Box::new(move || app.close_tabs(&v2, "others")))}
+            {item("Close to the Right", I::X, "", !is_last, Box::new(move || app.close_tabs(&v3, "right")))}
+            {item("Close All", I::X, "", true, Box::new(move || app.close_tabs(&v4, "all")))}
+            div { class: "menu-sep" }
+            if preview {
+                {item("Keep Open", I::Pin, "Double-click", true, Box::new(move || app.keep_tab(&v5)))}
+            }
+            if is_agent && !active {
+                {item("Open Side by Side", I::Columns, "", true, Box::new(move || app.open_split(&s1)))}
+            }
+            if is_agent {
+                {item("Rename…", I::Pencil, "", true, Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::Rename(s2.clone())); }))}
+                {item("Fork", I::Fork, "", true, Box::new(move || app.fork(&s3, None)))}
+            }
+        }
+    }
+}
+
 /// Right-click menu for a session row.
 #[component]
 pub fn ContextMenu() -> Element {
@@ -230,6 +280,17 @@ pub fn ContextMenu() -> Element {
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().ctx = None; } }
         div { class: "menu", style: "position: fixed; left: {x}px; top: {y}px; max-height: 80vh;",
             {item("Open", I::Message, Box::new(move || app.open_session(&i1)))}
+            {item("Open in New Tab", I::CopyPlus, { let i = id.clone(); Box::new(move || app.open_session_tab(&i)) })}
+            if app.current_id().is_some_and(|c| c != id) {
+                {item("Open Side by Side", I::Columns, { let i = id.clone(); Box::new(move || app.open_split(&i)) })}
+            }
+            {item("Add as Context", I::Link, { let i = id.clone(); Box::new(move || {
+                let mut a = app;
+                let short = i[i.len().saturating_sub(8)..].to_string();
+                let target = a.current_id();
+                a.ui.write().compose_inbox.push((target, format!("@agent:{short}")));
+            }) })}
+            div { class: "menu-sep" }
             {item("Rename", I::Pencil, Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::Rename(i2.clone())); }))}
             {item(if s.pinned { "Unpin" } else { "Pin" }, I::Pin, Box::new(move || app.toggle_pin(&i3)))}
             {item(if s.unread { "Mark as Read" } else { "Mark as Unread" }, I::Circle, { let u = !s.unread; Box::new(move || app.set_unread(&i4, u)) })}
@@ -440,8 +501,10 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                 }
                 if auth() == AuthKind::Key {
                     span { class: "k", "Variable" }
-                    select { class: "input", value: "{env_var}", onchange: move |e| env_var.set(e.value()),
-                        for v in spec.key_env.iter() { option { value: "{v}", "{v}" } }
+                    super::Select {
+                        value: env_var(),
+                        options: spec.key_env.iter().map(|v| (v.to_string(), v.to_string())).collect::<Vec<_>>(),
+                        onchange: move |v: String| env_var.set(v),
                     }
                     span { class: "k", "API key" }
                     input { class: "input full", r#type: "password", placeholder: "sk-…", value: "{key}", oninput: move |e| key.set(e.value()) }
@@ -584,7 +647,7 @@ pub fn GlobalMenu() -> Element {
                     div { class: "menu-sep" }
                 }
                 if c.code.is_some() {
-                    {item("Copy Code", I::Copy, "", true, Box::new(move || { app.copy_text(&code); app.toast("Code copied"); }))}
+                    {item("Copy Code", I::Copy, "", true, Box::new(move || { app.copy_text(&code); }))}
                     div { class: "menu-sep" }
                 }
                 if c.path.is_some() {

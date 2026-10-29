@@ -49,6 +49,12 @@ macro_rules! icons {
 
 icons! {
     Plus => "plus",
+    Columns => "columns-2",
+    AppWindow => "app-window",
+    Link => "link-2",
+    Merge => "git-merge",
+    PinOff => "pin-off",
+    CopyPlus => "copy-plus",
     Search => "search",
     PanelLeft => "panel-left",
     PanelRight => "panel-right",

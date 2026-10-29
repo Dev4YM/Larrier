@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use dioxus::prelude::*;
@@ -28,17 +28,47 @@ pub fn store() -> &'static Store {
 pub enum View {
     Home,
     Agent(String),
+    /// A subagent's transcript (a Task tool call inside a session).
+    Subagent { session: String, tool: String },
     Settings(SettingsTab),
     Automations,
     Customize,
 }
 
+impl View {
+    /// Views that live in the chat tab strip.
+    pub fn is_tab(&self) -> bool {
+        matches!(self, View::Agent(_) | View::Subagent { .. })
+    }
+
+    /// The session a tab belongs to.
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            View::Agent(id) => Some(id),
+            View::Subagent { session, .. } => Some(session),
+            _ => None,
+        }
+    }
+}
+
+/// A chat tab. Like VS Code: a single click opens a preview tab (italic)
+/// that the next single click replaces; double-click, sending a message or
+/// "Open in New Tab" keeps it.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ChatTab {
+    pub view: View,
+    pub preview: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsTab {
     General,
+    Appearance,
+    Usage,
     Agents,
     Accounts,
     Models,
+    SourceControl,
     Sessions,
     Workspaces,
     Shortcuts,
@@ -46,11 +76,14 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 8] = [
+    pub const ALL: [SettingsTab; 11] = [
         SettingsTab::General,
+        SettingsTab::Appearance,
+        SettingsTab::Usage,
         SettingsTab::Agents,
         SettingsTab::Accounts,
         SettingsTab::Models,
+        SettingsTab::SourceControl,
         SettingsTab::Sessions,
         SettingsTab::Workspaces,
         SettingsTab::Shortcuts,
@@ -59,6 +92,9 @@ impl SettingsTab {
     pub fn label(self) -> &'static str {
         match self {
             SettingsTab::General => "General",
+            SettingsTab::Appearance => "Appearance",
+            SettingsTab::Usage => "Plan & Usage",
+            SettingsTab::SourceControl => "Source Control",
             SettingsTab::Agents => "Agents",
             SettingsTab::Accounts => "Accounts",
             SettingsTab::Models => "Models & API Keys",
@@ -121,6 +157,53 @@ pub struct Ui {
     pub repo_closed: BTreeSet<String>,
     /// Open top-level menu in the menu bar.
     pub menubar: Option<&'static str>,
+    /// Window width in CSS px (for the narrow layout).
+    pub win_w: f64,
+    /// Image shown full-size.
+    pub lightbox: Option<String>,
+    /// Attachments produced outside the composer (paste, drop, menus) that
+    /// the visible composer picks up.
+    pub attach_inbox: Vec<Part>,
+    /// Agents that were interrupted when Larrier last closed.
+    pub interrupted: Vec<String>,
+    /// Text to insert into a composer: (session, text); `None` is the new
+    /// agent composer.
+    pub compose_inbox: Vec<(Option<String>, String)>,
+    /// Right-click menu of a chat tab.
+    pub tab_ctx: Option<TabCtx>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct TabCtx {
+    pub view: View,
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Editing a past prompt. Only one prompt is edited at a time; switching
+/// away from changed text asks to keep editing or discard first.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct EditState {
+    pub msg: Option<String>,
+    pub original: String,
+    pub draft: String,
+    /// A switch waiting for "Discard": the prompt to edit next (id, text),
+    /// or `None` to just stop editing.
+    pub confirm: Option<Option<(String, String)>>,
+}
+
+impl EditState {
+    pub fn dirty(&self) -> bool {
+        self.msg.is_some() && self.draft.trim() != self.original.trim()
+    }
+}
+
+/// A follow-up waiting for the agent to finish its current turn.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Queued {
+    pub id: u64,
+    pub text: String,
+    pub attachments: Vec<Part>,
 }
 
 /// What was under the pointer when the user right-clicked.
@@ -165,7 +248,9 @@ pub struct Draft {
 pub struct App {
     pub config: Signal<Config>,
     pub sessions: Signal<Vec<SessionSummary>>,
-    pub open: Signal<HashMap<String, Session>>,
+    /// Loaded sessions, one signal each so a streaming agent only re-renders
+    /// the views showing that session.
+    pub open: Signal<HashMap<String, Signal<Session>>>,
     pub view: Signal<View>,
     pub running: Signal<HashMap<String, TurnControl>>,
     pub permissions: Signal<HashMap<String, PermissionRequest>>,
@@ -174,6 +259,16 @@ pub struct App {
     pub toasts: Signal<Vec<Toast>>,
     pub sync_status: Signal<String>,
     pub draft: Signal<Draft>,
+    /// Follow-ups queued per session while its agent is working.
+    pub queue: Signal<HashMap<String, Vec<Queued>>>,
+    /// Chat tabs in the header.
+    pub tabs: Signal<Vec<ChatTab>>,
+    /// Session shown side by side with the current one.
+    pub split: Signal<Option<String>>,
+    /// The prompt being edited in place (one at a time).
+    pub editing: Signal<EditState>,
+    /// Session being dragged (sidebar row or tab), for the drop targets.
+    pub drag: Signal<Option<String>>,
 }
 
 /// Signals owned by the root scope so background tasks can use them for the
@@ -184,6 +279,13 @@ fn root_signal<T: 'static>(v: T) -> Signal<T> {
 
 pub fn use_app() -> App {
     use_context::<App>()
+}
+
+/// Subscribe to one piece of the UI state: the component re-renders only
+/// when that piece changes, not on every UI update.
+pub fn use_ui<T: PartialEq + 'static>(f: impl Fn(&Ui) -> T + 'static) -> Memo<T> {
+    let app = use_app();
+    use_memo(move || f(&app.ui.read()))
 }
 
 impl App {
@@ -221,6 +323,12 @@ impl App {
             repo_open: BTreeSet::new(),
             repo_closed: BTreeSet::new(),
             menubar: None,
+            win_w: 1400.0,
+            lightbox: None,
+            attach_inbox: Vec::new(),
+            interrupted: Vec::new(),
+            compose_inbox: Vec::new(),
+            tab_ctx: None,
         };
         App {
             sessions: root_signal(store().list()),
@@ -234,6 +342,11 @@ impl App {
             toasts: root_signal(Vec::new()),
             sync_status: root_signal(String::new()),
             draft: root_signal(draft),
+            queue: root_signal(HashMap::new()),
+            tabs: root_signal(Vec::new()),
+            split: root_signal(None),
+            editing: root_signal(EditState::default()),
+            drag: root_signal(None),
         }
     }
 
@@ -295,14 +408,82 @@ impl App {
 
     pub fn current_session(&self) -> Option<Session> {
         let id = self.current_id()?;
-        self.open.read().get(&id).cloned()
+        self.peek_session(&id, |s| s.clone())
+    }
+
+    /// The signal of a loaded session. Reading it in a component subscribes
+    /// that component to this session only.
+    pub fn session_sig(&self, id: &str) -> Option<Signal<Session>> {
+        self.open.read().get(id).copied()
+    }
+
+    /// Read a loaded session, subscribing the calling component to it.
+    pub fn with_session<R>(&self, id: &str, f: impl FnOnce(&Session) -> R) -> Option<R> {
+        let sig = self.open.read().get(id).copied()?;
+        let s = sig.read();
+        Some(f(&s))
+    }
+
+    /// Read a loaded session without subscribing (event handlers, tasks).
+    pub fn peek_session<R>(&self, id: &str, f: impl FnOnce(&Session) -> R) -> Option<R> {
+        let sig = self.open.peek().get(id).copied()?;
+        let s = sig.peek();
+        Some(f(&s))
+    }
+
+    /// Change a loaded session in memory (no save).
+    pub fn mutate_session<R>(&self, id: &str, f: impl FnOnce(&mut Session) -> R) -> Option<R> {
+        let mut sig = self.open.peek().get(id).copied()?;
+        let mut s = sig.write();
+        Some(f(&mut s))
+    }
+
+    pub fn is_loaded(&self, id: &str) -> bool {
+        self.open.peek().contains_key(id)
+    }
+
+    /// Add or replace a loaded session.
+    fn put_session(mut self, s: Session) {
+        let existing = self.open.peek().get(&s.id).copied();
+        match existing {
+            Some(mut sig) => sig.set(s),
+            None => {
+                let id = s.id.clone();
+                let sig = root_signal(s);
+                self.open.write().insert(id, sig);
+            }
+        }
+    }
+
+    /// Persist a session in the background and update its sidebar row now.
+    pub fn save_session(mut self, s: &Session) {
+        let sum = s.summary();
+        {
+            let mut list = self.sessions.write();
+            if let Some(i) = list.iter().position(|x| x.id == sum.id) {
+                list.remove(i);
+            }
+            let at = list.partition_point(|x| x.updated_at > sum.updated_at);
+            list.insert(at, sum);
+        }
+        save_async(s.clone());
+    }
+
+    /// Save a loaded session by id.
+    fn save_loaded(self, id: &str) {
+        if let Some(snap) = self.peek_session(id, |s| s.clone()) {
+            self.save_session(&snap);
+        }
     }
 
     // ------------------------------------------------------------- navigation
 
     /// Switch views, recording the move for back / forward.
     pub fn navigate(mut self, v: View) {
-        if *self.view.read() == v {
+        if v.is_tab() {
+            self.ensure_tab(&v, false);
+        }
+        if *self.view.peek() == v {
             return;
         }
         {
@@ -333,13 +514,169 @@ impl App {
             }
             (t as usize, ui.history[t as usize].clone())
         };
-        if let View::Agent(id) = &target.1 {
+        if let Some(id) = target.1.session_id() {
             if !self.ensure_loaded(id) {
                 return;
             }
         }
+        if target.1.is_tab() {
+            self.ensure_tab(&target.1, false);
+        }
         self.ui.write().hist_pos = target.0;
         self.view.set(target.1);
+    }
+
+    // ------------------------------------------------------------- editing prompts
+
+    /// Edit a prompt (`Some((id, text))`) or stop editing (`None`). When the
+    /// open edit has unsaved changes this asks first instead.
+    pub fn request_edit(mut self, target: Option<(String, String)>) {
+        let st = self.editing.peek().clone();
+        let same = match (&st.msg, &target) {
+            (Some(a), Some((b, _))) => a == b,
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        if st.dirty() {
+            self.editing.write().confirm = Some(target);
+            document::eval("setTimeout(() => document.querySelector('.user-msg.editing')?.scrollIntoView({block: 'nearest', behavior: 'smooth'}), 20)");
+            return;
+        }
+        self.set_edit(target);
+    }
+
+    /// Switch editing without asking.
+    pub fn set_edit(mut self, target: Option<(String, String)>) {
+        self.editing.set(match target {
+            Some((id, text)) => EditState { msg: Some(id), original: text.clone(), draft: text, confirm: None },
+            None => EditState::default(),
+        });
+    }
+
+    // ------------------------------------------------------------- tabs
+
+    /// Make sure a tab shows `v`: an existing tab is reused, otherwise the
+    /// preview tab is replaced (or a new tab added after the active one).
+    pub fn ensure_tab(mut self, v: &View, keep: bool) {
+        let active = self.view.peek().clone();
+        let mut tabs = self.tabs.write();
+        if let Some(t) = tabs.iter_mut().find(|t| &t.view == v) {
+            if keep {
+                t.preview = false;
+            }
+            return;
+        }
+        let tab = ChatTab { view: v.clone(), preview: !keep };
+        if !keep {
+            if let Some(p) = tabs.iter().position(|t| t.preview) {
+                tabs[p] = tab;
+                return;
+            }
+        }
+        let at = tabs.iter().position(|t| t.view == active).map(|i| i + 1).unwrap_or(tabs.len());
+        tabs.insert(at, tab);
+    }
+
+    /// Turn a preview tab into a regular one.
+    pub fn keep_tab(mut self, v: &View) {
+        if let Some(t) = self.tabs.write().iter_mut().find(|t| &t.view == v) {
+            t.preview = false;
+        }
+    }
+
+    /// Open a session in its own (kept) tab.
+    pub fn open_session_tab(self, id: &str) {
+        if !self.ensure_loaded(id) {
+            return;
+        }
+        let v = View::Agent(id.to_string());
+        self.ensure_tab(&v, true);
+        self.open_session(id);
+    }
+
+    /// Show a session in the current tab (replacing what it shows).
+    pub fn open_here(mut self, id: &str) {
+        if !self.ensure_loaded(id) {
+            return;
+        }
+        let v = View::Agent(id.to_string());
+        let cur = self.view.peek().clone();
+        {
+            let mut tabs = self.tabs.write();
+            if !tabs.iter().any(|t| t.view == v) {
+                if let Some(t) = tabs.iter_mut().find(|t| t.view == cur) {
+                    t.view = v.clone();
+                    t.preview = false;
+                }
+            }
+        }
+        self.show_session(id);
+    }
+
+    /// Open a subagent's transcript in a tab.
+    pub fn open_subagent(self, session_id: &str, tool_id: &str) {
+        if !self.ensure_loaded(session_id) {
+            return;
+        }
+        self.navigate(View::Subagent { session: session_id.to_string(), tool: tool_id.to_string() });
+    }
+
+    pub fn close_tab(mut self, v: &View) {
+        let next = {
+            let mut tabs = self.tabs.write();
+            let Some(i) = tabs.iter().position(|t| &t.view == v) else { return };
+            tabs.remove(i);
+            if *self.view.peek() != *v {
+                return;
+            }
+            tabs.get(i).or_else(|| tabs.get(i.wrapping_sub(1))).or_else(|| tabs.last()).map(|t| t.view.clone())
+        };
+        match next {
+            Some(n) => self.navigate(n),
+            None => self.navigate(View::Home),
+        }
+    }
+
+    /// Close every tab except `v` ("others") or after it ("right").
+    pub fn close_tabs(mut self, v: &View, which: &str) {
+        {
+            let mut tabs = self.tabs.write();
+            let Some(i) = tabs.iter().position(|t| &t.view == v) else { return };
+            match which {
+                "right" => tabs.truncate(i + 1),
+                "all" => tabs.clear(),
+                _ => tabs.retain(|t| &t.view == v),
+            }
+        }
+        let cur = self.view.peek().clone();
+        if cur.is_tab() && !self.tabs.peek().iter().any(|t| t.view == cur) {
+            self.navigate(if which == "all" { View::Home } else { v.clone() });
+        }
+    }
+
+    /// Drop tabs (and the split) of a session that was deleted or archived.
+    fn forget_tabs(mut self, id: &str) {
+        self.tabs.write().retain(|t| t.view.session_id() != Some(id));
+        if self.split.peek().as_deref() == Some(id) {
+            self.split.set(None);
+        }
+    }
+
+    /// Show `id` side by side with the current session.
+    pub fn open_split(mut self, id: &str) {
+        if !self.ensure_loaded(id) {
+            return;
+        }
+        if self.current_id().as_deref() == Some(id) {
+            return;
+        }
+        if self.current_id().is_none() {
+            return self.open_session_tab(id);
+        }
+        self.split.set(Some(id.to_string()));
     }
 
     pub fn new_agent(mut self) {
@@ -352,13 +689,13 @@ impl App {
     }
 
     /// Make sure a session is loaded into memory.
-    pub fn ensure_loaded(mut self, id: &str) -> bool {
-        if self.open.read().contains_key(id) {
+    pub fn ensure_loaded(self, id: &str) -> bool {
+        if self.is_loaded(id) {
             return true;
         }
         match store().load(id) {
             Ok(s) => {
-                self.open.write().insert(id.to_string(), s);
+                self.put_session(s);
                 true
             }
             Err(e) => {
@@ -368,12 +705,34 @@ impl App {
         }
     }
 
-    pub fn open_session(mut self, id: &str) {
-        if !self.ensure_loaded(id) {
-            return;
+    /// Open a session in the preview tab. Big sessions load off the UI
+    /// thread so the window never freezes.
+    pub fn open_session(self, id: &str) {
+        if self.is_loaded(id) {
+            return self.show_session(id);
         }
+        let id = id.to_string();
+        spawn_forever(async move {
+            let id2 = id.clone();
+            match tokio::task::spawn_blocking(move || store().load(&id2)).await {
+                Ok(Ok(s)) => {
+                    if !self.is_loaded(&id) {
+                        self.put_session(s);
+                    }
+                    self.show_session(&id);
+                }
+                Ok(Err(e)) => self.toast_err(format!("Could not open session: {e}")),
+                Err(e) => self.toast_err(format!("Could not open session: {e}")),
+            }
+        });
+    }
+
+    fn show_session(mut self, id: &str) {
         self.navigate(View::Agent(id.to_string()));
-        let unread = self.open.read().get(id).map(|s| s.unread).unwrap_or(false);
+        if self.split.peek().as_deref() == Some(id) {
+            self.split.set(None);
+        }
+        let unread = self.peek_session(id, |s| s.unread).unwrap_or(false);
         if unread {
             self.update_session(id, |s| s.unread = false);
         }
@@ -381,20 +740,17 @@ impl App {
     }
 
     /// Mutate a session, persist it and refresh the sidebar.
-    pub fn update_session(mut self, id: &str, f: impl FnOnce(&mut Session)) {
+    pub fn update_session(self, id: &str, f: impl FnOnce(&mut Session)) {
         if !self.ensure_loaded(id) {
             return;
         }
-        let snapshot = {
-            let mut open = self.open.write();
-            let Some(s) = open.get_mut(id) else { return };
+        let Some(snapshot) = self.mutate_session(id, |s| {
             f(s);
             s.clone()
+        }) else {
+            return;
         };
-        if let Err(e) = store().save(&snapshot) {
-            self.toast_err(format!("Could not save: {e}"));
-        }
-        self.refresh_sessions();
+        self.save_session(&snapshot);
     }
 
     // ------------------------------------------------------------- running agents
@@ -407,7 +763,12 @@ impl App {
         let id = match session_id {
             Some(id) => {
                 if self.is_running(&id) {
-                    self.toast("Agent is still working — stop it first or wait.");
+                    if self.config.read().settings.queue_followups {
+                        self.queue.write().entry(id.clone()).or_default().push(Queued { id: rand_id(), text, attachments });
+                        self.toast("Queued — sends when the agent finishes");
+                    } else {
+                        self.toast("Agent is still working — stop it first or wait.");
+                    }
                     return;
                 }
                 if !self.ensure_loaded(&id) {
@@ -434,26 +795,23 @@ impl App {
         };
         let mut msg = Message::user_text(text);
         msg.parts.extend(attachments);
-        let (agent, model, account) = {
-            let mut open = self.open.write();
-            let s = open.get_mut(&id).expect("loaded");
+        let Some((agent, model, account)) = self.mutate_session(&id, |s| {
             s.push(msg);
             s.auto_title();
             s.archived = false;
             (s.agent.clone(), s.model.clone(), s.account_id.clone())
+        }) else {
+            return;
         };
-        self.navigate(View::Agent(id.clone()));
+        // A session shown side by side keeps its place; otherwise show it.
+        if self.split.peek().as_deref() != Some(id.as_str()) {
+            self.navigate(View::Agent(id.clone()));
+        }
+        self.keep_tab(&View::Agent(id.clone()));
 
         let cfg = self.config.read().clone();
-        let request = {
-            let open = self.open.read();
-            larrier_agents::build_request(&cfg, open.get(&id).unwrap(), &agent)
-        };
-        let mut recorder = {
-            let mut open = self.open.write();
-            let s = open.get_mut(&id).unwrap();
-            TurnRecorder::begin(s, agent.clone(), model, account)
-        };
+        let request = self.peek_session(&id, |s| larrier_agents::build_request(&cfg, s, &agent)).expect("loaded");
+        let mut recorder = self.mutate_session(&id, |s| TurnRecorder::begin(s, agent.clone(), model, account)).expect("loaded");
         match request {
             Ok(req) => {
                 if let Some(h) = &req.handoff {
@@ -465,43 +823,46 @@ impl App {
                 self.drive(id, handle, recorder);
             }
             Err(e) => {
-                let mut open = self.open.write();
-                let s = open.get_mut(&id).unwrap();
-                recorder.apply(s, &AgentEvent::Error { message: e.to_string() });
-                recorder.finish(s, false);
-                let snap = s.clone();
-                drop(open);
-                let _ = store().save(&snap);
-                self.refresh_sessions();
+                let snap = self.mutate_session(&id, |s| {
+                    recorder.apply(s, &AgentEvent::Error { message: e.to_string() });
+                    recorder.finish(s, false);
+                    s.clone()
+                });
+                if let Some(snap) = snap {
+                    self.save_session(&snap);
+                }
             }
         }
     }
 
     fn persist(self, id: &str) {
-        let snap = self.open.read().get(id).cloned();
-        if let Some(s) = snap {
-            let _ = store().save(&s);
-        }
-        self.refresh_sessions();
+        self.save_loaded(id);
     }
 
     fn drive(self, id: String, mut handle: TurnHandle, mut rec: TurnRecorder) {
         let mut app = self;
         spawn_forever(async move {
             let mut last_save = Instant::now();
+            let mut last_row = Instant::now();
             let mut done = false;
+            let Some(mut sig) = app.open.peek().get(&id).copied() else {
+                app.running.write().remove(&id);
+                return;
+            };
             while let Some(first) = handle.events.recv().await {
                 let mut batch = vec![first];
                 while let Ok(e) = handle.events.try_recv() {
                     batch.push(e);
                 }
+                let mut snapshot = None;
                 {
-                    let mut open = app.open.write();
-                    let Some(s) = open.get_mut(&id) else { break };
+                    let mut s = sig.write();
+                    let s = &mut *s;
                     for e in &batch {
                         match e {
                             AgentEvent::Permission { request } => {
                                 app.permissions.write().insert(id.clone(), request.clone());
+                                crate::notify::agent_event(&s.title, &format!("{} needs your input", s.title), true);
                             }
                             AgentEvent::NativeSession { id: native, .. } => {
                                 store().set_import_record(&import_key(&rec.agent, native), ImportRecord::linked(&id));
@@ -513,36 +874,63 @@ impl App {
                         }
                         rec.apply(s, e);
                     }
-                    if done || last_save.elapsed() > Duration::from_secs(2) {
-                        let _ = store().save(s);
+                    // Save every few seconds and refresh the sidebar row a few
+                    // times a second — never per token.
+                    if done || last_save.elapsed() > Duration::from_secs(3) {
+                        save_async(s.clone());
                         last_save = Instant::now();
+                    }
+                    if last_row.elapsed() > Duration::from_millis(400) {
+                        snapshot = Some(s.summary());
+                        last_row = Instant::now();
                     }
                 }
                 if done {
                     break;
                 }
-                app.sessions.set(store().list());
-                tokio::time::sleep(Duration::from_millis(30)).await;
-            }
-            let is_current = app.current_id().as_deref() == Some(id.as_str());
-            let title = {
-                let mut open = app.open.write();
-                if let Some(s) = open.get_mut(&id) {
-                    if !rec.finished {
-                        rec.finish(s, false);
+                if let Some(sum) = snapshot {
+                    let mut list = app.sessions.write();
+                    if let Some(i) = list.iter().position(|x| x.id == sum.id) {
+                        list[i] = sum;
                     }
-                    if is_current {
-                        s.unread = false;
-                    }
-                    let _ = store().save(s);
-                    Some((s.title.clone(), s.status))
-                } else {
-                    None
                 }
-            };
+                // Coalesce bursts of events into one render per frame.
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+            let is_current = app.current_id().as_deref() == Some(id.as_str()) || app.split.peek().as_deref() == Some(id.as_str());
+            let title = app.mutate_session(&id, |s| {
+                if !rec.finished {
+                    rec.finish(s, false);
+                }
+                if is_current {
+                    s.unread = false;
+                }
+                (s.title.clone(), s.status, s.clone())
+            });
+            let title = title.map(|(t, st, snap)| {
+                app.save_session(&snap);
+                (t, st)
+            });
             app.running.write().remove(&id);
             app.permissions.write().remove(&id);
-            app.sessions.set(store().list());
+            if let Some((t, st)) = &title {
+                let ok = *st != SessionStatus::Error;
+                let what = if ok { "is ready for review" } else { "failed" };
+                crate::notify::agent_event(t, &format!("{t} {what}"), ok);
+            }
+            // Send the next queued follow-up, if any.
+            let next = {
+                let mut q = app.queue.write();
+                let n = q.get_mut(&id).and_then(|v| if v.is_empty() { None } else { Some(v.remove(0)) });
+                if q.get(&id).map(|v| v.is_empty()).unwrap_or(false) {
+                    q.remove(&id);
+                }
+                n
+            };
+            if let Some(n) = next {
+                app.send(Some(id.clone()), n.text, n.attachments);
+                return;
+            }
             if let Some((title, status)) = title {
                 if app.current_id().as_deref() != Some(id.as_str()) {
                     match status {
@@ -565,12 +953,10 @@ impl App {
         if let (Some(req), Some(ctrl)) = (req, self.running.read().get(session_id)) {
             ctrl.respond(req.id, option_id);
         }
-        if let Some(s) = self.open.write().get_mut(session_id) {
-            s.status = SessionStatus::Running;
-        }
+        self.mutate_session(session_id, |s| s.status = SessionStatus::Running);
     }
 
-    fn create_session_from_draft(mut self) -> anyhow::Result<String> {
+    fn create_session_from_draft(self) -> anyhow::Result<String> {
         let d = self.draft.read().clone();
         let ws = d.workspace.clone().map(|p| {
             let mut w = WorkspaceRef::from_path(p.clone());
@@ -618,8 +1004,9 @@ impl App {
             }
         }
         let id = s.id.clone();
-        store().save(&s)?;
-        self.open.write().insert(id.clone(), s);
+        self.save_session(&s);
+        self.put_session(s);
+        self.ensure_tab(&View::Agent(id.clone()), true);
         Ok(id)
     }
 
@@ -646,15 +1033,19 @@ impl App {
             s.archived = !s.archived;
             archived = s.archived;
         });
-        if archived && self.current_id().as_deref() == Some(id) {
-            self.view.set(View::Home);
+        if archived {
+            let cur = self.current_id().as_deref() == Some(id);
+            self.forget_tabs(id);
+            if cur {
+                self.view.set(View::Home);
+            }
         }
     }
 
     pub fn delete(mut self, id: &str) {
         self.stop(id);
         // Clean up a worktree we created.
-        if let Some(s) = self.open.read().get(id).cloned().or_else(|| store().load(id).ok()) {
+        if let Some(s) = self.peek_session(id, |s| s.clone()).or_else(|| store().load(id).ok()) {
             if let (Environment::Worktree { path, .. }, Some(ws)) = (&s.environment, &s.workspace) {
                 let _ = git::remove_worktree(&PathBuf::from(&ws.path), &PathBuf::from(path));
             }
@@ -663,23 +1054,24 @@ impl App {
             self.toast_err(format!("Delete failed: {e}"));
         }
         self.open.write().remove(id);
-        if self.current_id().as_deref() == Some(id) {
+        let cur = self.current_id().as_deref() == Some(id);
+        self.forget_tabs(id);
+        if cur {
             self.view.set(View::Home);
         }
-        self.refresh_sessions();
+        self.sessions.write().retain(|s| s.id != id);
     }
 
-    pub fn fork(mut self, id: &str, message_id: Option<String>) {
+    pub fn fork(self, id: &str, message_id: Option<String>) {
         if !self.ensure_loaded(id) {
             return;
         }
-        let forked = self.open.read().get(id).map(|s| s.fork(message_id.as_deref()));
+        let forked = self.peek_session(id, |s| s.fork(message_id.as_deref()));
         if let Some(f) = forked {
             let fid = f.id.clone();
-            let _ = store().save(&f);
-            self.open.write().insert(fid.clone(), f);
-            self.refresh_sessions();
-            self.open_session(&fid);
+            self.save_session(&f);
+            self.put_session(f);
+            self.open_session_tab(&fid);
             self.toast("Forked into a new agent");
         }
     }
@@ -743,7 +1135,7 @@ impl App {
         if !self.ensure_loaded(id) {
             return;
         }
-        let Some(s) = self.open.read().get(id).cloned() else { return };
+        let Some(s) = self.peek_session(id, |s| s.clone()) else { return };
         let text = match larrier_formats::export_string(&s, format) {
             Ok(t) => t,
             Err(e) => return self.toast_err(e.to_string()),
@@ -762,7 +1154,7 @@ impl App {
 
     /// Open the session in the agent's own CLI in a terminal window.
     pub fn open_in_terminal(self, id: &str) {
-        let Some(s) = self.open.read().get(id).cloned() else { return };
+        let Some(s) = self.peek_session(id, |s| s.clone()) else { return };
         let cwd = s.cwd().unwrap_or_else(|| ".".into());
         let link = s.native_link(&s.agent).cloned();
         let cmd = match (&s.agent, link) {
@@ -882,25 +1274,24 @@ impl App {
 impl App {
     /// Edit a past prompt: continue in a fork that ends just before it, so
     /// the original conversation stays intact.
-    pub fn edit_and_resend(mut self, session_id: &str, message_id: &str, text: String) {
+    pub fn edit_and_resend(self, session_id: &str, message_id: &str, text: String) {
         if text.trim().is_empty() || !self.ensure_loaded(session_id) {
             return;
         }
-        let forked = {
-            let open = self.open.read();
-            let Some(s) = open.get(session_id) else { return };
-            let Some(idx) = s.messages.iter().position(|m| m.id == message_id) else { return };
+        let forked = self.peek_session(session_id, |s| {
+            let idx = s.messages.iter().position(|m| m.id == message_id)?;
             let mut f = s.fork(if idx > 0 { Some(s.messages[idx - 1].id.as_str()) } else { None });
             if idx == 0 {
                 f.messages.clear();
             }
             f.title = s.title.clone();
-            f
-        };
+            Some(f)
+        });
+        let Some(Some(forked)) = forked else { return };
         let fid = forked.id.clone();
-        let _ = store().save(&forked);
-        self.open.write().insert(fid.clone(), forked);
-        self.refresh_sessions();
+        self.save_session(&forked);
+        self.put_session(forked);
+        self.ensure_tab(&View::Agent(fid.clone()), true);
         self.send(Some(fid), text, Vec::new());
     }
 
@@ -920,7 +1311,7 @@ impl App {
 
     /// Open the session's folder in an editor (Cursor, then VS Code, else the file manager).
     pub fn open_in_ide(self, id: &str) {
-        let Some(dir) = self.open.read().get(id).and_then(|s| s.cwd()) else {
+        let Some(dir) = self.peek_session(id, |s| s.cwd()).flatten() else {
             return self.toast("This agent has no folder");
         };
         for editor in ["cursor", "code"] {
@@ -946,6 +1337,132 @@ impl App {
         match arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_string())) {
             Ok(()) => {}
             Err(e) => self.toast_err(format!("Copy failed: {e}")),
+        }
+    }
+}
+
+enum SaveMsg {
+    Save(Box<Session>),
+    Flush(mpsc::Sender<()>),
+}
+
+fn saver() -> &'static Mutex<mpsc::Sender<SaveMsg>> {
+    static TX: OnceLock<Mutex<mpsc::Sender<SaveMsg>>> = OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<SaveMsg>();
+        std::thread::Builder::new()
+            .name("larrier-save".into())
+            .spawn(move || {
+                while let Ok(first) = rx.recv() {
+                    // Coalesce: only the newest snapshot of each session is written.
+                    let mut pending: Vec<Session> = Vec::new();
+                    let mut acks = Vec::new();
+                    let mut take = |m: SaveMsg, pending: &mut Vec<Session>| match m {
+                        SaveMsg::Save(s) => {
+                            pending.retain(|p| p.id != s.id);
+                            pending.push(*s);
+                        }
+                        SaveMsg::Flush(a) => acks.push(a),
+                    };
+                    take(first, &mut pending);
+                    while let Ok(m) = rx.try_recv() {
+                        take(m, &mut pending);
+                    }
+                    for s in pending {
+                        if let Err(e) = store().save(&s) {
+                            tracing::error!("saving {}: {e}", s.id);
+                        }
+                    }
+                    for a in acks {
+                        let _ = a.send(());
+                    }
+                }
+            })
+            .expect("save thread");
+        Mutex::new(tx)
+    })
+}
+
+/// Write a session to disk off the UI thread.
+pub fn save_async(s: Session) {
+    if let Ok(tx) = saver().lock() {
+        let _ = tx.send(SaveMsg::Save(Box::new(s)));
+    }
+}
+
+/// Wait (briefly) until every queued save is on disk — used when closing.
+pub fn flush_saves() {
+    let (ack_tx, ack_rx) = mpsc::channel();
+    if let Ok(tx) = saver().lock() {
+        if tx.send(SaveMsg::Flush(ack_tx)).is_err() {
+            return;
+        }
+    }
+    let _ = ack_rx.recv_timeout(Duration::from_secs(5));
+}
+
+/// Save a pasted / dropped image (a `data:` URL) as an attachment file.
+pub fn save_data_url(data_url: &str, name: &str) -> anyhow::Result<Part> {
+    use base64::Engine;
+    let (meta, b64) = data_url.split_once(',').ok_or_else(|| anyhow::anyhow!("bad data url"))?;
+    let mime = meta.trim_start_matches("data:").split(';').next().unwrap_or("application/octet-stream").to_string();
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim())?;
+    let ext = match mime.as_str() {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("bin"),
+    };
+    let dir = store().root().join("attachments");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}.{ext}", new_id()));
+    std::fs::write(&path, &bytes)?;
+    let path = path.to_string_lossy().to_string();
+    if mime.starts_with("image/") {
+        Ok(Part::Image { mime: Some(mime), source: MediaSource::Path { path } })
+    } else {
+        Ok(Part::File { path, mime: Some(mime), text: None })
+    }
+}
+
+/// Attachment for a local file path (images become image parts).
+pub fn attachment_for_path(path: &str) -> Part {
+    let lower = path.to_lowercase();
+    let mime = [("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("gif", "image/gif"), ("webp", "image/webp"), ("bmp", "image/bmp"), ("svg", "image/svg+xml")]
+        .iter()
+        .find(|(e, _)| lower.ends_with(&format!(".{e}")))
+        .map(|(_, m)| m.to_string());
+    match mime {
+        Some(m) => Part::Image { mime: Some(m), source: MediaSource::Path { path: path.to_string() } },
+        None => Part::File { path: path.to_string(), mime: None, text: None },
+    }
+}
+
+/// `data:` URL for showing an image part (cached; large files skipped).
+pub fn image_src(part: &Part) -> Option<String> {
+    use base64::Engine;
+    use std::sync::Mutex;
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    let Part::Image { mime, source } = part else { return None };
+    match source {
+        MediaSource::Base64 { data } => Some(format!("data:{};base64,{data}", mime.clone().unwrap_or_else(|| "image/png".into()))),
+        MediaSource::Url { url } => Some(url.clone()),
+        MediaSource::Path { path } => {
+            let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+            if let Some(v) = cache.lock().ok()?.get(path) {
+                return Some(v.clone());
+            }
+            let meta = std::fs::metadata(path).ok()?;
+            if meta.len() > 12 * 1024 * 1024 {
+                return None;
+            }
+            let bytes = std::fs::read(path).ok()?;
+            let m = mime.clone().unwrap_or_else(|| "image/png".into());
+            let url = format!("data:{m};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+            cache.lock().ok()?.insert(path.clone(), url.clone());
+            Some(url)
         }
     }
 }

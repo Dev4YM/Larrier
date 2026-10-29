@@ -2,6 +2,12 @@
 //! sticky prompt cards, quiet "Read / Searched / Thought" steps grouped into
 //! "Explored …", command cards, edit cards with inline diff previews, plans
 //! and live streaming state.
+//!
+//! Built for very long chats: only the newest turns are mounted (older ones
+//! load as you scroll up), and each turn re-renders only when its own
+//! content changes — a streaming reply never re-renders the history.
+
+use std::hash::{Hash, Hasher};
 
 use dioxus::prelude::*;
 use larrier_core::{
@@ -13,77 +19,198 @@ use crate::icons::{Icon, I};
 use crate::markdown;
 use crate::state::{use_app, RightTab};
 
+/// Turns mounted at first; scrolling up loads this many more each time.
+const TURN_WINDOW: usize = 24;
+/// Most prompts shown as dashes in the turn navigator.
+const NAV_MAX: usize = 48;
+/// Steps of one turn mounted at first; huge turns reveal more on demand.
+const STEP_WINDOW: usize = 80;
+
+/// Where a turn sits in the message list.
+#[derive(Clone, PartialEq)]
+struct TurnSpan {
+    key: String,
+    start: usize,
+    end: usize,
+    user_id: Option<String>,
+}
+
+fn turn_spans(messages: &[Message]) -> Vec<TurnSpan> {
+    let mut out: Vec<TurnSpan> = Vec::new();
+    for (i, m) in messages.iter().enumerate() {
+        if m.role == Role::User || out.is_empty() {
+            out.push(TurnSpan { key: m.id.clone(), start: i, end: i + 1, user_id: (m.role == Role::User).then(|| m.id.clone()) });
+        } else if let Some(t) = out.last_mut() {
+            t.end = i + 1;
+        }
+    }
+    out
+}
+
+/// Cheap content fingerprint of a turn: changes whenever anything it shows
+/// changes (text grows, a tool finishes, feedback is given).
+fn turn_fp(msgs: &[Message], feedback: Option<&str>) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for m in msgs {
+        m.id.hash(&mut h);
+        m.parts.len().hash(&mut h);
+        for p in &m.parts {
+            match p {
+                Part::Text { text } => (0u8, text.len()).hash(&mut h),
+                Part::Reasoning { text, duration_ms } => (1u8, text.len(), duration_ms).hash(&mut h),
+                Part::Tool(t) => {
+                    2u8.hash(&mut h);
+                    std::mem::discriminant(&t.status).hash(&mut h);
+                    (t.output.as_ref().map(|o| o.len()), t.diffs.len(), t.is_error, t.subagent.len(), t.title.as_ref().map(|x| x.len())).hash(&mut h);
+                }
+                Part::Plan { entries } => {
+                    3u8.hash(&mut h);
+                    for e in entries {
+                        (e.content.len(), std::mem::discriminant(&e.status)).hash(&mut h);
+                    }
+                }
+                Part::Error { message } => (4u8, message.len()).hash(&mut h),
+                Part::Notice { text } => (5u8, text.len()).hash(&mut h),
+                Part::File { path, .. } => (6u8, path.len()).hash(&mut h),
+                Part::Image { .. } => 7u8.hash(&mut h),
+            }
+        }
+    }
+    feedback.hash(&mut h);
+    h.finish()
+}
+
+/// What the transcript mounts for one turn.
+#[derive(Clone, PartialEq)]
+struct TurnRow {
+    key: String,
+    start: usize,
+    end: usize,
+    fp: u64,
+    started: chrono::DateTime<chrono::Utc>,
+    ended: chrono::DateTime<chrono::Utc>,
+}
+
 #[component]
 pub fn Transcript(id: String) -> Element {
     let app = use_app();
     let mut at_bottom = use_signal(|| true);
-    let (messages, updated) = match app.open.read().get(&id) {
-        Some(s) => (s.messages.clone(), s.updated_at),
-        None => return rsx! {},
+    let mut shown = use_signal(|| TURN_WINDOW);
+    let Some(sig) = app.session_sig(&id) else { return rsx! {} };
+    let tid = format!("transcript-{}", &id[id.len().saturating_sub(10)..]);
+
+    // Everything the view needs, computed without cloning the conversation.
+    let (rows, nav, total, empty, waiting, updated) = {
+        let s = sig.read();
+        let spans = turn_spans(&s.messages);
+        let total = spans.len();
+        let first = total.saturating_sub(shown());
+        let rows: Vec<TurnRow> = spans[first..]
+            .iter()
+            .enumerate()
+            .map(|(i, sp)| {
+                let msgs = &s.messages[sp.start..sp.end];
+                let last_reply = msgs.iter().rev().find(|m| m.role != Role::User && m.role != Role::System);
+                let fb = last_reply.and_then(|m| s.extra.get(&format!("feedback:{}", m.id))).and_then(|v| v.as_str());
+                let next = spans.get(first + i + 1).map(|n| s.messages[n.start].created_at);
+                TurnRow {
+                    key: sp.key.clone(),
+                    start: sp.start,
+                    end: sp.end,
+                    fp: turn_fp(msgs, fb),
+                    started: msgs[0].created_at,
+                    ended: next.unwrap_or(s.updated_at),
+                }
+            })
+            .collect();
+        let users: Vec<(usize, String)> = spans.iter().enumerate().filter_map(|(i, t)| t.user_id.clone().map(|u| (i, u))).collect();
+        let nav: Vec<(usize, String)> = users[users.len().saturating_sub(NAV_MAX)..].to_vec();
+        let running = app.is_running(&id);
+        let waiting = running && s.messages.last().map(|m| m.role == Role::User).unwrap_or(false);
+        (rows, nav, total, s.messages.is_empty(), waiting, s.updated_at)
     };
-    let feedback: std::collections::HashMap<String, String> = app
-        .open
-        .read()
-        .get(&id)
-        .map(|s| s.extra.iter().filter_map(|(k, v)| k.strip_prefix("feedback:").map(|m| (m.to_string(), v.as_str().unwrap_or("").to_string()))).collect())
-        .unwrap_or_default();
+    let first = total - rows.len();
     let running = app.is_running(&id);
     let permission = app.permissions.read().get(&id).cloned();
     let show_reasoning = app.config.read().settings.show_reasoning;
-    let waiting = running && messages.last().map(|m| m.role == Role::User).unwrap_or(false);
-    let turns = build_turns(&messages, updated);
-    let n_turns = turns.len();
-    let user_ids: Vec<String> = turns.iter().filter_map(|t| t.user.as_ref().map(|u| u.id.clone())).collect();
+    let n_rows = rows.len();
 
     // Stick to the bottom while streaming unless the user scrolled up; jump
     // to the bottom when a session opens.
+    let tid2 = tid.clone();
     use_effect(use_reactive!(|updated| {
         let _ = updated;
-        document::eval(
-            r#"requestAnimationFrame(() => {
-                const el = document.getElementById('transcript');
+        document::eval(&format!(
+            r#"requestAnimationFrame(() => {{
+                const el = document.getElementById('{tid2}');
                 if (!el) return;
                 const near = el.scrollHeight - el.scrollTop - el.clientHeight < 260;
-                if (near || el.dataset.fresh !== '0') { el.scrollTop = el.scrollHeight; el.dataset.fresh = '0'; }
-            });"#,
-        );
+                if (near || el.dataset.fresh !== '0') {{ el.scrollTop = el.scrollHeight; el.dataset.fresh = '0'; }}
+            }});"#
+        ));
     }));
 
+    let tid3 = tid.clone();
     rsx! {
-        if user_ids.len() > 1 {
+        if nav.len() > 1 {
             div { class: "turn-nav",
-                for (i, uid) in user_ids.iter().enumerate() {
+                for (n, (ti, uid)) in nav.iter().cloned().enumerate() {
                     button {
                         key: "{uid}",
-                        class: if i + 1 == user_ids.len() { "on" } else { "" },
-                        title: "Jump to prompt {i + 1}",
-                        onclick: {
-                            let uid = uid.clone();
-                            move |_| { document::eval(&format!("document.getElementById('m-{uid}')?.scrollIntoView({{block: 'start', behavior: 'smooth'}})")); }
+                        class: if n + 1 == nav.len() { "on" } else { "" },
+                        title: "Jump to prompt {ti + 1}",
+                        onclick: move |_| {
+                            // Mount the turn first if it is above the loaded window.
+                            if ti < first {
+                                shown.set(total - ti);
+                            }
+                            document::eval(&format!("setTimeout(() => document.getElementById('m-{uid}')?.scrollIntoView({{block: 'start', behavior: 'smooth'}}), 30)"));
                         },
                     }
                 }
             }
         }
-        div { class: "transcript", id: "transcript", "data-fresh": "1",
+        div { class: "transcript", id: "{tid}", "data-fresh": "1",
             onscroll: move |e| {
                 let d = e.data();
                 let near = (d.scroll_height() as f64 - d.scroll_top() - d.client_height() as f64) < 120.0;
                 if near != at_bottom() { at_bottom.set(near); }
+                // Load earlier turns before the user reaches the top; scroll
+                // anchoring keeps the view steady while they mount.
+                if d.scroll_top() < 600.0 && first > 0 {
+                    let want = total - first + TURN_WINDOW;
+                    if shown() < want {
+                        shown.set(want);
+                    }
+                }
+            },
+            // Clicking empty space or another message ends editing a prompt.
+            onclick: move |_| {
+                if app.editing.peek().msg.is_some() {
+                    app.request_edit(None);
+                }
             },
             div { class: "transcript-inner selectable",
                 div { class: "spacer-msg" }
-                if messages.is_empty() {
+                if first > 0 {
+                    button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); shown.set(shown() + TURN_WINDOW * 4); },
+                        "Show earlier messages ({first})"
+                    }
+                }
+                if empty {
                     div { class: "empty-state", style: "padding-top: 80px;", "Send a message to get started" }
                 }
-                for (ti, t) in turns.into_iter().enumerate() {
+                for (i, r) in rows.into_iter().enumerate() {
                     TurnView {
-                        key: "{t.key}",
+                        key: "{r.key}",
                         session_id: id.clone(),
-                        turn: t.clone(),
-                        live: running && ti + 1 == n_turns,
+                        start: r.start,
+                        end: r.end,
+                        fp: r.fp,
+                        started: r.started,
+                        ended: r.ended,
+                        live: running && i + 1 == n_rows,
                         show_reasoning,
-                        feedback: feedback.clone(),
                     }
                 }
                 if let Some(req) = permission {
@@ -122,7 +249,7 @@ pub fn Transcript(id: String) -> Element {
         if !at_bottom() {
             div { class: "scroll-bottom",
                 button { class: "round-btn", title: "Scroll to bottom",
-                    onclick: move |_| { document::eval("const el = document.getElementById('transcript'); el && el.scrollTo({top: el.scrollHeight, behavior: 'smooth'});"); },
+                    onclick: move |_| { document::eval(&format!("const el = document.getElementById('{tid3}'); el && el.scrollTo({{top: el.scrollHeight, behavior: 'smooth'}});")); },
                     Icon { i: I::ArrowDown, size: 15 }
                 }
             }
@@ -133,37 +260,21 @@ pub fn Transcript(id: String) -> Element {
 /// One prompt and everything the agent(s) did in response.
 #[derive(Clone, PartialEq)]
 struct Turn {
-    key: String,
     user: Option<Message>,
     replies: Vec<Message>,
     system: Vec<Message>,
-    started: chrono::DateTime<chrono::Utc>,
-    ended: chrono::DateTime<chrono::Utc>,
 }
 
-fn build_turns(messages: &[Message], session_updated: chrono::DateTime<chrono::Utc>) -> Vec<Turn> {
-    let mut turns: Vec<Turn> = Vec::new();
-    for m in messages {
+fn build_turn(msgs: &[Message]) -> Turn {
+    let mut t = Turn { user: None, replies: Vec::new(), system: Vec::new() };
+    for m in msgs {
         match m.role {
-            Role::User => turns.push(Turn { key: m.id.clone(), user: Some(m.clone()), replies: Vec::new(), system: Vec::new(), started: m.created_at, ended: m.created_at }),
-            _ => {
-                if turns.is_empty() {
-                    turns.push(Turn { key: m.id.clone(), user: None, replies: Vec::new(), system: Vec::new(), started: m.created_at, ended: m.created_at });
-                }
-                let t = turns.last_mut().unwrap();
-                if m.role == Role::System {
-                    t.system.push(m.clone());
-                } else {
-                    t.replies.push(m.clone());
-                }
-            }
+            Role::User if t.user.is_none() => t.user = Some(m.clone()),
+            Role::System => t.system.push(m.clone()),
+            _ => t.replies.push(m.clone()),
         }
     }
-    let n = turns.len();
-    for i in 0..n {
-        turns[i].ended = if i + 1 < n { turns[i + 1].started } else { session_updated };
-    }
-    turns
+    t
 }
 
 fn worked_for(secs: i64) -> String {
@@ -178,10 +289,38 @@ fn worked_for(secs: i64) -> String {
     }
 }
 
+/// A turn. Reads its messages without subscribing: it re-renders only when
+/// its fingerprint (`fp`) or liveness changes.
 #[component]
-fn TurnView(session_id: String, turn: Turn, live: bool, show_reasoning: bool, feedback: std::collections::HashMap<String, String>) -> Element {
+fn TurnView(
+    session_id: String,
+    start: usize,
+    end: usize,
+    fp: u64,
+    started: chrono::DateTime<chrono::Utc>,
+    ended: chrono::DateTime<chrono::Utc>,
+    live: bool,
+    show_reasoning: bool,
+) -> Element {
     let app = use_app();
     let mut open = use_signal(|| false);
+    let mut steps = use_signal(|| STEP_WINDOW);
+    let _ = fp;
+    let Some((turn, feedback)) = app.peek_session(&session_id, |s| {
+        let end = end.min(s.messages.len());
+        let start = start.min(end);
+        let t = build_turn(&s.messages[start..end]);
+        let fb = t
+            .replies
+            .last()
+            .and_then(|m| s.extra.get(&format!("feedback:{}", m.id)))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        (t, fb)
+    }) else {
+        return rsx! {};
+    };
     // Final answer = the last text part of the last reply that has one.
     let mut final_at: Option<(usize, usize)> = None;
     for (mi, m) in turn.replies.iter().enumerate().rev() {
@@ -191,13 +330,18 @@ fn TurnView(session_id: String, turn: Turn, live: bool, show_reasoning: bool, fe
         }
     }
     let has_work = turn.replies.iter().enumerate().any(|(mi, m)| m.parts.iter().enumerate().any(|(pi, p)| Some((mi, pi)) != final_at && !matches!(p, Part::Error { .. })));
-    let secs = (turn.ended - turn.started).num_seconds();
+    let secs = (ended - started).num_seconds();
     let label = match worked_for(secs) {
         s if s.is_empty() || secs > 6 * 3600 => "Worked".to_string(),
         s => format!("Worked for {s}"),
     };
     let last_reply = turn.replies.last().cloned();
+    let hidden = turn.replies.len().saturating_sub(steps());
+    let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
+    // Each turn is its own box so its sticky prompt card scrolls away when
+    // the next prompt arrives (instead of stacking under it).
     rsx! {
+        div { class: "turn",
         if let Some(u) = turn.user.clone() {
             UserMessage { key: "{u.id}", session_id: session_id.clone(), msg: u }
         }
@@ -210,8 +354,12 @@ fn TurnView(session_id: String, turn: Turn, live: bool, show_reasoning: bool, fe
             }
         }
         if live {
-            // Running: show every step as it happens.
-            for (mi, m) in turn.replies.iter().enumerate() {
+            // Running: show the steps as they happen (the newest ones; long
+            // turns reveal earlier steps on demand).
+            if hidden > 0 {
+                button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
+            }
+            for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
                 AssistantMessage { key: "{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: mi + 1 == turn.replies.len(), show_reasoning, skip_final: false }
             }
         } else {
@@ -222,7 +370,10 @@ fn TurnView(session_id: String, turn: Turn, live: bool, show_reasoning: bool, fe
                 }
                 if open() {
                     div { class: "sub-steps",
-                        for m in turn.replies.iter() {
+                        if hidden > 0 {
+                            button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
+                        }
+                        for m in turn.replies.iter().skip(hidden) {
                             AssistantMessage { key: "w-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: false, show_reasoning, skip_final: true }
                         }
                     }
@@ -237,29 +388,28 @@ fn TurnView(session_id: String, turn: Turn, live: bool, show_reasoning: bool, fe
                 }
             }
             if let Some((mi, pi)) = final_at {
-                PartView { key: "f-{turn.key}", session_id: session_id.clone(), part: turn.replies[mi].parts[pi].clone(), live: false, show_reasoning }
+                PartView { key: "f-{turn_key}", session_id: session_id.clone(), part: turn.replies[mi].parts[pi].clone(), live: false, show_reasoning }
             }
             if let Some(m) = last_reply {
                 {
-                    let fb = feedback.get(&m.id).cloned().unwrap_or_default();
+                    let fb = feedback.clone();
                     let text = m.text();
                     let (sid1, sid2, sid3, mid1, mid2, mid3) = (session_id.clone(), session_id.clone(), session_id.clone(), m.id.clone(), m.id.clone(), m.id.clone());
-                    let when = crate::state::rel_time(turn.ended);
+                    let when = crate::state::rel_time(ended);
                     let ago = if when == "now" { "just now".to_string() } else { format!("{when} ago") };
+                    let up = fb == "up";
+                    let down = fb == "down";
                     rsx! {
                         div { class: "msg-actions",
-                            button { class: if fb == "up" { "icon-btn on" } else { "icon-btn" }, title: "Good response",
-                                onclick: move |_| app.set_feedback(&sid1, &mid1, if fb == "up" { None } else { Some("up") }),
+                            button { class: if up { "icon-btn on" } else { "icon-btn" }, title: "Good response",
+                                onclick: move |_| app.set_feedback(&sid1, &mid1, if up { None } else { Some("up") }),
                                 Icon { i: I::ThumbsUp, size: 14, stroke: 1.5 }
                             }
-                            button { class: if feedback.get(&m.id).map(|f| f == "down").unwrap_or(false) { "icon-btn on" } else { "icon-btn" }, title: "Bad response",
-                                onclick: move |_| app.set_feedback(&sid2, &mid2, Some("down")),
+                            button { class: if down { "icon-btn on" } else { "icon-btn" }, title: "Bad response",
+                                onclick: move |_| app.set_feedback(&sid2, &mid2, if down { None } else { Some("down") }),
                                 Icon { i: I::ThumbsDown, size: 14, stroke: 1.5 }
                             }
-                            button { class: "icon-btn", title: "Copy",
-                                onclick: move |_| { app.copy_text(&text); app.toast("Copied"); },
-                                Icon { i: I::Copy, size: 14, stroke: 1.5 }
-                            }
+                            super::CopyButton { text: text.clone() }
                             button { class: "icon-btn", title: "Fork from here",
                                 onclick: move |_| app.fork(&sid3, Some(mid3.clone())),
                                 Icon { i: I::Fork, size: 14, stroke: 1.5 }
@@ -270,87 +420,136 @@ fn TurnView(session_id: String, turn: Turn, live: bool, show_reasoning: bool, fe
                 }
             }
         }
+        }
     }
 }
 
 #[component]
-fn UserMessage(session_id: String, msg: Message) -> Element {
-    let app = use_app();
+pub fn UserMessage(session_id: String, msg: Message) -> Element {
+    let mut app = use_app();
     let mut expanded = use_signal(|| false);
-    let mut editing = use_signal(|| false);
-    let mut draft = use_signal(String::new);
+    let mid_m = msg.id.clone();
+    // Only this message re-renders when editing starts or stops.
+    let editing = use_memo(move || app.editing.read().msg.as_deref() == Some(mid_m.as_str()));
     let text = msg.text();
+    if let Some(note) = task_notification_note(&text) {
+        return rsx! { div { class: "notice task-note", id: "m-{msg.id}", Icon { i: I::Bot, size: 12, stroke: 1.5 } "{note}" } };
+    }
     let (quote, body) = split_quote(&text);
     let mid = msg.id.clone();
     let attachments: Vec<String> = msg
         .parts
         .iter()
         .filter_map(|p| match p {
+            Part::File { path, text: Some(_), .. } => Some(path.clone()),
             Part::File { path, .. } => Some(short_path(path)),
-            Part::Image { source: MediaSource::Path { path }, .. } => Some(short_path(path)),
-            Part::Image { .. } => Some("image".into()),
             _ => None,
         })
         .collect();
+    let images: Vec<String> = msg.parts.iter().filter(|p| matches!(p, Part::Image { .. })).filter_map(crate::state::image_src).collect();
     let short = text.lines().count() <= 4 && text.len() < 360;
     let text2 = text.clone();
     let (sid_e, mid_e) = (session_id.clone(), mid.clone());
-    let agent_label = app.open.read().get(&session_id).map(|s| {
-        let m = s.model.clone().filter(|m| m != "default").unwrap_or_else(|| "Auto".into());
-        format!("{} · {}", s.agent.display_name(), m)
-    });
     if editing() {
+        let st = app.editing.read().clone();
+        let confirm = st.confirm.is_some();
+        let agent_label = app.peek_session(&session_id, |s| {
+            let m = s.model.clone().filter(|m| m != "default").unwrap_or_else(|| "Auto".into());
+            format!("{} · {}", s.agent.display_name(), m)
+        });
+        let resend = move |sid: &str, mid: &str| {
+            let t = app.editing.peek().draft.clone();
+            app.set_edit(None);
+            app.edit_and_resend(sid, mid, t);
+        };
         return rsx! {
-            div { class: "user-msg", id: "m-{msg.id}",
-                div { class: "composer tall", style: "box-shadow: 0 4px 18px rgba(0,0,0,.08);",
+            div { class: if confirm { "user-msg editing confirming" } else { "user-msg editing" }, id: "m-{msg.id}",
+                onclick: move |e| e.stop_propagation(),
+                div { class: "composer tall edit-box",
                     textarea {
                         id: "edit-{msg.id}",
-                        style: "padding: 10px 14px 4px; min-height: 60px; font-size: 14px; line-height: 22px; border: none; outline: none; resize: none; background: transparent; field-sizing: content;",
-                        value: "{draft}",
+                        class: "edit-input",
+                        value: "{st.draft}",
                         autofocus: true,
-                        oninput: move |e| draft.set(e.value()),
+                        oninput: move |e| app.editing.write().draft = e.value(),
                         onkeydown: move |e| {
-                            if e.key() == Key::Escape { editing.set(false); }
+                            if e.key() == Key::Escape {
+                                e.stop_propagation();
+                                if app.editing.peek().confirm.is_some() {
+                                    app.editing.write().confirm = None;
+                                } else {
+                                    app.request_edit(None);
+                                }
+                            }
                             if e.key() == Key::Enter && !e.modifiers().shift() {
                                 e.prevent_default();
-                                let t = draft();
-                                editing.set(false);
-                                app.edit_and_resend(&sid_e, &mid_e, t);
+                                resend(&sid_e, &mid_e);
                             }
                         },
                     }
-                    div { class: "composer-row", style: "padding-top: 0;",
-                        span { class: "faint", style: "font-size: 12px; padding-left: 8px;", "Edit and resend — continues in a fork, the original stays" }
-                        div { class: "grow" }
-                        if let Some(l) = agent_label { span { class: "picker", style: "cursor: default;", span { class: "lb sub", "{l}" } } }
-                        button { class: "ghost-btn", style: "border: none;", onclick: move |_| editing.set(false), "Cancel" }
-                        button { class: "send-btn ready", title: "Resend (Enter)",
-                            onclick: {
-                                let (s, m) = (session_id.clone(), mid.clone());
-                                move |_| { let t = draft(); editing.set(false); app.edit_and_resend(&s, &m, t); }
-                            },
-                            Icon { i: I::ArrowUp, size: 15, stroke: 2.2 }
+                    if confirm {
+                        div { class: "edit-confirm",
+                            Icon { i: I::Alert, size: 14 }
+                            span { class: "grow", "Discard your changes to this message?" }
+                            button { class: "ghost-btn",
+                                onclick: move |_| {
+                                    app.editing.write().confirm = None;
+                                    document::eval("document.querySelector('.user-msg.editing textarea')?.focus()");
+                                },
+                                "Keep editing"
+                            }
+                            button { class: "danger-btn",
+                                onclick: move |_| {
+                                    let next = app.editing.peek().confirm.clone().flatten();
+                                    app.set_edit(next);
+                                },
+                                "Discard"
+                            }
+                        }
+                    } else {
+                        div { class: "composer-row", style: "padding-top: 0;",
+                            span { class: "faint edit-hint", "Edit and resend — continues in a fork, the original stays · Esc to cancel" }
+                            div { class: "grow" }
+                            if let Some(l) = agent_label { span { class: "picker", style: "cursor: default;", span { class: "lb sub", "{l}" } } }
+                            button { class: "ghost-btn", style: "border: none;", onclick: move |_| app.request_edit(None), "Cancel" }
+                            button { class: "send-btn ready", title: "Resend (Enter)",
+                                onclick: {
+                                    let (s, m) = (session_id.clone(), mid.clone());
+                                    move |_| resend(&s, &m)
+                                },
+                                Icon { i: I::ArrowUp, size: 15, stroke: 2.2 }
+                            }
                         }
                     }
                 }
             }
         };
     }
+    let mid_c = msg.id.clone();
     rsx! {
         div { class: "user-msg", id: "m-{msg.id}",
             div {
                 class: if expanded() || short { "user-card expanded" } else { "user-card" },
                 dir: "auto",
                 title: "Click to edit · double-click to expand",
-                onclick: move |_| {
-                    draft.set(text2.clone());
-                    editing.set(true);
+                onclick: move |e| {
+                    e.stop_propagation();
+                    app.request_edit(Some((mid_c.clone(), text2.clone())));
                 },
                 ondoubleclick: move |e| { e.stop_propagation(); expanded.toggle(); },
                 if let Some(q) = quote {
                     span { class: "q", Icon { i: I::Quote, size: 13 } "\u{201c}{q}\u{201d} " }
                 }
                 "{body}"
+                if !images.is_empty() {
+                    div { class: "msg-images",
+                        for (i, src) in images.into_iter().enumerate() {
+                            img { key: "{i}", src: "{src}",
+                                onclick: move |e| { e.stop_propagation(); app.ui.write().lightbox = Some(src.clone()); },
+                            }
+                        }
+                    }
+                }
                 if !attachments.is_empty() {
                     div { class: "attach-row",
                         for a in attachments {
@@ -361,6 +560,25 @@ fn UserMessage(session_id: String, msg: Message) -> Element {
             }
         }
     }
+}
+
+/// "Background task finished · …" for a prompt that is only a Claude Code
+/// `<task-notification>` envelope.
+fn task_notification_note(text: &str) -> Option<String> {
+    let t = text.trim();
+    if !t.starts_with("<task-notification>") {
+        return None;
+    }
+    let tag = |name: &str| {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let i = t.find(&open)? + open.len();
+        let j = t[i..].find(&close)? + i;
+        Some(t[i..j].trim().to_string())
+    };
+    let status = tag("status").unwrap_or_else(|| "finished".into());
+    let summary = tag("summary").or_else(|| tag("task-id")).unwrap_or_default();
+    Some(if summary.is_empty() { format!("Background task {status}") } else { format!("Background task {status} · {summary}") })
 }
 
 /// Leading `> quoted` lines (or Cursor's ```chat_selection block) →
@@ -431,7 +649,7 @@ fn group_parts(parts: &[Part]) -> Vec<Item> {
 }
 
 #[component]
-fn AssistantMessage(session_id: String, msg: Message, streaming: bool, show_reasoning: bool, #[props(default = false)] skip_final: bool) -> Element {
+pub fn AssistantMessage(session_id: String, msg: Message, streaming: bool, show_reasoning: bool, #[props(default = false)] skip_final: bool) -> Element {
     let mut parts = msg.parts.clone();
     if skip_final {
         // Inside "Worked for…": everything except the answer and errors.
@@ -493,7 +711,7 @@ fn last_is_live(m: &Message) -> bool {
 }
 
 #[component]
-fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool) -> Element {
+pub fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool) -> Element {
     let app = use_app();
     match part {
         Part::Text { text } => {
@@ -506,7 +724,7 @@ fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool) ->
             }
             rsx! { Reasoning { text, duration_ms, live } }
         }
-        Part::Tool(t) => rsx! { ToolView { tool: t } },
+        Part::Tool(t) => rsx! { ToolView { session_id: session_id.clone(), tool: t } },
         Part::Plan { entries } => {
             let done = entries.iter().filter(|e| e.status == PlanStatus::Completed).count();
             rsx! {
@@ -539,7 +757,7 @@ fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool) ->
                         div { style: "margin-top: 8px;",
                             button { class: "ghost-btn",
                                 onclick: move |_| {
-                                    let s = app.open.read().get(&session_id).cloned();
+                                    let s = app.peek_session(&session_id, |s| s.clone());
                                     if let Some(s) = s {
                                         let spec = s.agent.spec();
                                         let cwd = s.cwd().unwrap_or_else(|| ".".into());
@@ -564,20 +782,16 @@ fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool) ->
         Part::File { path, .. } => rsx! {
             div { class: "tool-card", div { class: "tool-card-head", span { class: "ic", Icon { i: I::Paperclip, size: 13 } } span { class: "name", "{short_path(&path)}" } } }
         },
-        Part::Image { source, .. } => {
-            let src = match &source {
-                MediaSource::Base64 { data } => Some(format!("data:image/png;base64,{data}")),
-                MediaSource::Url { url } if url.starts_with("http") => Some(url.clone()),
-                _ => None,
-            };
-            let label = match &source {
-                MediaSource::Path { path } => short_path(path),
-                MediaSource::Url { url } => url.clone(),
-                MediaSource::Base64 { .. } => "image".into(),
+        Part::Image { .. } => {
+            let src = crate::state::image_src(&part);
+            let label = match &part {
+                Part::Image { source: MediaSource::Path { path }, .. } => short_path(path),
+                Part::Image { source: MediaSource::Url { url }, .. } => url.clone(),
+                _ => "image".into(),
             };
             rsx! {
                 if let Some(src) = src {
-                    img { src: "{src}", style: "max-width: 100%; border-radius: 8px; margin: 4px 0; border: 1px solid var(--border);" }
+                    img { class: "a-img", src: "{src}", onclick: { let s2 = src.clone(); let mut a = app; move |_| a.ui.write().lightbox = Some(s2.clone()) } }
                 } else {
                     div { class: "tool-card", div { class: "tool-card-head", span { class: "ic", Icon { i: I::Image, size: 13 } } span { class: "name", "{label}" } } }
                 }
@@ -719,7 +933,10 @@ fn Step(tool: ToolCall) -> Element {
 }
 
 #[component]
-fn ToolView(tool: ToolCall) -> Element {
+fn ToolView(session_id: String, tool: ToolCall) -> Element {
+    if tool.kind == ToolKind::Task || !tool.subagent.is_empty() {
+        return rsx! { super::tasks::SubagentCard { session_id, tool } };
+    }
     if tool.kind.is_mutation() && !tool.diffs.is_empty() && !tool.is_error {
         return rsx! {
             for (i, d) in tool.diffs.iter().enumerate() {

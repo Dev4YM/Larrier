@@ -2,9 +2,12 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
 mod automations;
+mod highlight;
 mod icons;
 mod logos;
 mod markdown;
+mod notify;
+mod quota;
 mod state;
 mod ui;
 
@@ -47,11 +50,13 @@ fn main() {
     let bg = if dark { (26, 26, 24, 255) } else { (247, 247, 244, 255) };
 
     #[allow(unused_mut)]
-    let mut window = WindowBuilder::new()
-        .with_title("Larrier")
-        .with_inner_size(LogicalSize::new(1440.0, 900.0))
-        .with_min_inner_size(LogicalSize::new(880.0, 560.0))
-        .with_decorations(false);
+    let mut window = crate::notify::apply_to_builder(
+        WindowBuilder::new()
+            .with_title("Larrier")
+            .with_inner_size(LogicalSize::new(1440.0, 900.0))
+            .with_min_inner_size(LogicalSize::new(560.0, 420.0)),
+    )
+    .with_decorations(false);
     #[cfg(windows)]
     {
         use dioxus::desktop::tao::platform::windows::WindowBuilderExtWindows;
@@ -66,8 +71,13 @@ fn main() {
         .with_background_color(bg)
         .with_data_directory(root.join("webview"))
         .with_custom_head(format!(
-            "<meta name=\"color-scheme\" content=\"light dark\"><title>Larrier</title><style>{CSS}</style>"
+            "<meta name=\"color-scheme\" content=\"light dark\"><link rel=\"icon\" href=\"data:,\"><title>Larrier</title><style>{CSS}</style>"
         ))
+        .with_windows_browser_args(match std::env::var("LARRIER_DEVTOOLS_PORT") {
+            // Lets automated UI tests drive the webview over the DevTools protocol.
+            Ok(port) if !port.is_empty() => format!("--remote-debugging-port={port}"),
+            _ => String::new(),
+        })
         .with_navigation_handler(|url: &str| {
             let internal = url.contains("dioxus.") || url.starts_with("about:") || url.starts_with("data:");
             if !internal && (url.starts_with("http://") || url.starts_with("https://")) {

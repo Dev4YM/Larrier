@@ -3,8 +3,8 @@
 
 use dioxus::prelude::*;
 use larrier_core::{
-    agent::catalog, config::CustomAgent, config::SidebarGroup, lsf::new_id, secrets, AccountAuth, AgentKind, Protocol,
-    Provider, ProviderKind, RunMode, Theme,
+    agent::catalog, config::CustomAgent, lsf::new_id, secrets, AccountAuth, AgentKind,
+    Protocol, Provider, ProviderKind, RunMode,
 };
 
 use super::{AgentGlyph, DragRegion, Kbd, Toggle};
@@ -14,6 +14,9 @@ use crate::state::{store, use_app, Modal, SettingsTab, View};
 fn tab_icon(t: SettingsTab) -> I {
     match t {
         SettingsTab::General => I::Settings,
+        SettingsTab::Appearance => I::Sun,
+        SettingsTab::Usage => I::Cpu,
+        SettingsTab::SourceControl => I::GitBranch,
         SettingsTab::Agents => I::Bot,
         SettingsTab::Accounts => I::User,
         SettingsTab::Models => I::Box,
@@ -88,6 +91,9 @@ pub fn SettingsView(tab: SettingsTab) -> Element {
                 div { class: "settings-inner",
                     match tab {
                         SettingsTab::General => rsx! { General {} },
+                        SettingsTab::Appearance => rsx! { Appearance {} },
+                        SettingsTab::Usage => rsx! { super::usage::UsageView {} },
+                        SettingsTab::SourceControl => rsx! { SourceControl {} },
                         SettingsTab::Agents => rsx! { Agents {} },
                         SettingsTab::Accounts => rsx! { Accounts {} },
                         SettingsTab::Models => rsx! { Models {} },
@@ -122,64 +128,127 @@ fn General() -> Element {
     let mut app = use_app();
     let s = app.config.read().settings.clone();
     let seg = |on: bool| if on { "on" } else { "" };
+    let agent_opts: Vec<(String, String)> = larrier_core::agent::runnable().map(|sp| (sp.kind.id(), sp.name.to_string())).collect();
     rsx! {
         h1 { "General" }
-        div { class: "sub", "Appearance and how agents run." }
-        div { class: "set-group-title", "Appearance" }
+        div { class: "set-group-title", "Startup" }
         div { class: "set-card",
-            Row { title: "Theme".to_string(), desc: Some("Follow the system or force light / dark.".to_string()),
-                div { class: "seg",
-                    for (t, l) in [(Theme::System, "System"), (Theme::Light, "Light"), (Theme::Dark, "Dark")] {
-                        button { key: "{l}", class: seg(s.theme == t), onclick: move |_| { app.update_config(|c| c.settings.theme = t); app.apply_theme(); }, "{l}" }
-                    }
-                }
+            Row { title: "Tips".to_string(), desc: Some("Show rotating tips on the new agent screen.".to_string()),
+                Toggle { on: s.show_tips, onchange: move |v| app.update_config(|c| c.settings.show_tips = v) }
             }
-            Row { title: "Font size".to_string(), desc: Some("Transcript and composer text size.".to_string()),
-                select { class: "input", value: "{s.font_size}",
-                    onchange: move |e| { let v = e.value().parse().unwrap_or(13); app.update_config(|c| c.settings.font_size = v); },
-                    for n in [12u32, 13, 14, 15, 16] { option { value: "{n}", selected: n == s.font_size, "{n}px" } }
-                }
+            Row { title: "Window Restoration".to_string(), desc: Some("Reopen Larrier with the same size and position.".to_string()),
+                Toggle { on: s.restore_window, onchange: move |v| app.update_config(|c| c.settings.restore_window = v) }
             }
-            Row { title: "Sidebar grouping".to_string(), desc: Some("How agents are grouped in the sidebar.".to_string()),
-                div { class: "seg",
-                    for (g, l) in [(SidebarGroup::Status, "Status"), (SidebarGroup::Workspace, "Workspace"), (SidebarGroup::Agent, "Agent")] {
-                        button { key: "{l}", class: seg(s.sidebar_group == g), onclick: move |_| app.update_config(|c| c.settings.sidebar_group = g), "{l}" }
-                    }
-                }
+            Row { title: "Continue Interrupted Agents".to_string(), desc: Some("Offer to resume agents that were running when Larrier closed.".to_string()),
+                Toggle { on: s.continue_interrupted, onchange: move |v| app.update_config(|c| c.settings.continue_interrupted = v) }
             }
-            Row { title: "Show reasoning".to_string(), desc: Some("Display thinking blocks in transcripts.".to_string()),
-                Toggle { on: s.show_reasoning, onchange: move |v| app.update_config(|c| c.settings.show_reasoning = v) }
+            Row { title: "Import Sessions on Startup".to_string(), desc: Some("Pull new conversations from every installed agent when Larrier opens.".to_string()),
+                Toggle { on: s.auto_import, onchange: move |v| app.update_config(|c| c.settings.auto_import = v) }
+            }
+        }
+        div { class: "set-group-title", "Notifications" }
+        div { class: "set-card",
+            Row { title: "System Notifications".to_string(), desc: Some("Show a system notification when an agent finishes or needs attention.".to_string()),
+                Toggle { on: s.notify_on_finish, onchange: move |v| app.update_config(|c| c.settings.notify_on_finish = v) }
+            }
+            Row { title: "System Tray Icon".to_string(), desc: Some("Show Larrier in the system tray.".to_string()),
+                Toggle { on: s.tray_icon, onchange: move |v| app.update_config(|c| c.settings.tray_icon = v) }
+            }
+            Row { title: "Completion Sound".to_string(), desc: Some("Play a sound when agents finish or need attention.".to_string()),
+                div { class: "row",
+                    button { class: "ghost-btn", onclick: move |_| crate::notify::preview_sound(), "Preview" }
+                    Toggle { on: s.completion_sound, onchange: move |v| app.update_config(|c| c.settings.completion_sound = v) }
+                }
             }
         }
         div { class: "set-group-title", "Agents" }
         div { class: "set-card",
-            Row { title: "Default agent".to_string(), desc: Some("Used for new agents.".to_string()),
-                select { class: "input",
-                    onchange: move |e| {
-                        let k = AgentKind::from_id(&e.value());
+            Row { title: "Default Agent".to_string(), desc: Some("Used for new agents.".to_string()),
+                super::Select {
+                    value: s.default_agent.id(),
+                    options: agent_opts,
+                    onchange: move |v: String| {
+                        let k = AgentKind::from_id(&v);
                         app.update_config(|c| c.settings.default_agent = k.clone());
                         app.draft.write().agent = k;
                     },
-                    for spec in larrier_core::agent::runnable() {
-                        option { key: "{spec.kind.id()}", value: "{spec.kind.id()}", selected: spec.kind == s.default_agent, "{spec.name}" }
-                    }
                 }
             }
-            Row { title: "Autonomy".to_string(), desc: Some("How much agents may do without asking. Applied through each agent's own permission flags.".to_string()),
+            Row { title: "Autonomy".to_string(), desc: Some("How much agents may do without asking, applied through each agent's own permission flags.".to_string()),
                 div { class: "seg",
                     for m in [RunMode::Ask, RunMode::AutoEdit, RunMode::FullAuto] {
                         button { key: "{m.label()}", class: seg(s.run_mode == m), onclick: move |_| app.update_config(|c| c.settings.run_mode = m), "{m.label()}" }
                     }
                 }
             }
-            Row { title: "Use worktrees by default".to_string(), desc: Some("Start each new agent in its own git worktree so parallel agents never collide.".to_string()),
-                Toggle { on: s.use_worktrees, onchange: move |v| { app.update_config(|c| c.settings.use_worktrees = v); app.draft.write().worktree = v; } }
+            Row { title: "Queue Follow-ups".to_string(), desc: Some("Messages sent while an agent is working are queued and sent when it finishes.".to_string()),
+                Toggle { on: s.queue_followups, onchange: move |v| app.update_config(|c| c.settings.queue_followups = v) }
             }
             Row { title: "Send with Ctrl+Enter".to_string(), desc: Some("Otherwise Enter sends and Shift+Enter adds a line.".to_string()),
                 Toggle { on: s.send_with_ctrl_enter, onchange: move |v| app.update_config(|c| c.settings.send_with_ctrl_enter = v) }
             }
-            Row { title: "Import sessions on startup".to_string(), desc: Some("Pull new conversations from every installed agent when Larrier opens.".to_string()),
-                Toggle { on: s.auto_import, onchange: move |v| app.update_config(|c| c.settings.auto_import = v) }
+            Row { title: "Show Reasoning".to_string(), desc: Some("Display thinking blocks inside \u{201c}Worked for\u{201d}.".to_string()),
+                Toggle { on: s.show_reasoning, onchange: move |v| app.update_config(|c| c.settings.show_reasoning = v) }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ appearance
+
+#[component]
+fn Appearance() -> Element {
+    rsx! { super::appearance::AppearancePage {} }
+}
+
+// ------------------------------------------------------------------ source control
+
+#[component]
+fn SourceControl() -> Element {
+    let mut app = use_app();
+    let s = app.config.read().settings.clone();
+    let gh = use_resource(|| async {
+        tokio::task::spawn_blocking(|| larrier_agents::detect::which_program("gh").is_some()).await.unwrap_or(false)
+    });
+    let git = use_resource(|| async {
+        tokio::task::spawn_blocking(|| larrier_agents::detect::which_program("git").is_some()).await.unwrap_or(false)
+    });
+    let dir = s.worktrees_dir.clone().unwrap_or_else(|| store().worktrees_dir().to_string_lossy().to_string());
+    rsx! {
+        h1 { "Source Control" }
+        div { class: "set-card",
+            Row { title: "Git".to_string(), desc: Some("Used for changes, commits, branches and worktrees.".to_string()),
+                match git.read().clone() {
+                    Some(true) => rsx! { span { class: "status-pill ok", Icon { i: I::Check, size: 11 } "Found" } },
+                    Some(false) => rsx! { span { class: "status-pill missing", "Not found" } },
+                    None => rsx! { div { class: "spinner" } },
+                }
+            }
+            Row { title: "GitHub CLI".to_string(), desc: Some("Needed for pull requests (gh auth login).".to_string()),
+                match gh.read().clone() {
+                    Some(true) => rsx! { span { class: "status-pill ok", Icon { i: I::Check, size: 11 } "Found" } },
+                    Some(false) => rsx! { a { href: "https://cli.github.com", "Install GitHub CLI" } },
+                    None => rsx! { div { class: "spinner" } },
+                }
+            }
+        }
+        div { class: "set-group-title", "Worktrees" }
+        div { class: "set-card",
+            Row { title: "Use Worktrees by Default".to_string(), desc: Some("Start each new agent in its own git worktree so parallel agents never collide.".to_string()),
+                Toggle { on: s.use_worktrees, onchange: move |v| { app.update_config(|c| c.settings.use_worktrees = v); app.draft.write().worktree = v; } }
+            }
+            Row { title: "Worktrees Folder".to_string(), desc: Some(dir.clone()),
+                button { class: "ghost-btn",
+                    onclick: move |_| {
+                        spawn(async move {
+                            if let Some(d) = rfd::AsyncFileDialog::new().pick_folder().await {
+                                let p = d.path().to_string_lossy().to_string();
+                                app.update_config(|c| c.settings.worktrees_dir = Some(p));
+                            }
+                        });
+                    },
+                    Icon { i: I::FolderOpen, size: 13 } "Change…"
+                }
             }
         }
     }
@@ -346,11 +415,10 @@ fn AddCustomAgent() -> Element {
         div { class: "set-row",
             input { class: "input", style: "width: 150px", placeholder: "Name", value: "{name}", oninput: move |e| name.set(e.value()) }
             input { class: "input grow", placeholder: "Command, e.g. npx -y my-acp-agent", value: "{command}", oninput: move |e| command.set(e.value()) }
-            select { class: "input",
-                onchange: move |e| protocol.set(match e.value().as_str() { "claude" => Protocol::ClaudeStream, "plain" => Protocol::PlainText, _ => Protocol::Acp }),
-                option { value: "acp", "ACP" }
-                option { value: "claude", "Claude stream-json" }
-                option { value: "plain", "Plain text" }
+            super::Select {
+                value: match protocol() { Protocol::ClaudeStream => "claude", Protocol::PlainText => "plain", _ => "acp" }.to_string(),
+                options: vec![("acp".to_string(), "ACP".to_string()), ("claude".to_string(), "Claude stream-json".to_string()), ("plain".to_string(), "Plain text".to_string())],
+                onchange: move |v: String| protocol.set(match v.as_str() { "claude" => Protocol::ClaudeStream, "plain" => Protocol::PlainText, _ => Protocol::Acp }),
             }
             button { class: "primary-btn", disabled: name().trim().is_empty() || command().trim().is_empty(),
                 onclick: move |_| {

@@ -2,7 +2,11 @@
 //! input, one agent + model picker (brand logos) and send / stop, with the
 //! branch and environment pickers underneath.
 
+use std::sync::{Mutex, OnceLock};
+
+use dioxus::html::HasFileData;
 use dioxus::prelude::*;
+use larrier_agents::harness::{HarnessItem, ItemKind};
 use larrier_core::{lsf::short_path, AgentKind, Part, Protocol};
 
 use super::{Dropdown, MenuItem};
@@ -69,8 +73,26 @@ const TIPS: &[&str] = &[
     "Every session is a portable .lsf file — export it from the … menu",
 ];
 
+/// What the composer needs from its session (memoized so a streaming
+/// reply doesn't re-render the composer).
+#[derive(Clone, PartialEq)]
+struct SessInfo {
+    agent: AgentKind,
+    model: Option<String>,
+    mode: Option<String>,
+    worktree: bool,
+    usage: larrier_core::Usage,
+    cwd: Option<String>,
+    account: Option<String>,
+}
+
 #[component]
-pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool) -> Element {
+pub fn Composer(
+    session_id: Option<String>,
+    #[props(default = false)] home: bool,
+    /// DOM id of the text box (a split view has two composers).
+    #[props(default = "composer-input")] input_id: &'static str,
+) -> Element {
     let mut app = use_app();
     let mut text = use_signal(String::new);
     let attachments: Signal<Vec<Part>> = use_signal(Vec::new);
@@ -82,17 +104,74 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
     let mut model_query = use_signal(String::new);
     let mut multi: Signal<Vec<AgentKind>> = use_signal(Vec::new);
     let tip_idx = use_hook(|| (chrono::Utc::now().timestamp() as usize) % TIPS.len());
+    let mut hl = use_signal(|| 0usize);
+    let mut dismissed = use_signal(|| None::<String>);
+    let mut dragging = use_signal(|| false);
+    let mut overflow = use_signal(|| false);
+    // Only the newest width measurement counts (older ones can land late).
+    let mut measure_seq = use_signal(|| 0u64);
+
+    let primary = input_id == "composer-input";
+    let quote_memo = crate::state::use_ui(|u| u.quote.clone());
+    // Pick up attachments produced elsewhere (paste, drop, menus).
+    let inbox_len = crate::state::use_ui(|u| u.attach_inbox.len())();
+    use_effect(use_reactive!(|inbox_len| {
+        if inbox_len > 0 && primary {
+            let mut app = app;
+            let items = std::mem::take(&mut app.ui.write().attach_inbox);
+            let mut at = attachments;
+            at.write().extend(items);
+        }
+    }));
+    // Text dropped in for this composer (a dragged chat added as context).
+    let compose_len = crate::state::use_ui(|u| u.compose_inbox.len())();
+    let sid_in = session_id.clone();
+    use_effect(use_reactive!(|compose_len| {
+        if compose_len == 0 {
+            return;
+        }
+        let mut app = app;
+        let mut text = text;
+        let mine: Vec<String> = {
+            let mut ui = app.ui.write();
+            let (m, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut ui.compose_inbox).into_iter().partition(|(sid, _)| *sid == sid_in);
+            ui.compose_inbox = rest;
+            m.into_iter().map(|(_, t)| t).collect()
+        };
+        if !mine.is_empty() {
+            let cur = text.read().clone();
+            let sep = if cur.is_empty() || cur.ends_with(' ') || cur.ends_with('\n') { "" } else { " " };
+            text.set(format!("{cur}{sep}{} ", mine.join(" ")));
+            document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 30)"));
+        }
+    }));
 
     // Focus when asked (Ctrl+L, new agent, opening a session).
-    let focus = app.ui.read().focus_composer;
+    let focus = crate::state::use_ui(|u| u.focus_composer)();
     use_effect(use_reactive!(|focus| {
         let _ = focus;
-        document::eval("setTimeout(() => document.getElementById('composer-input')?.focus(), 30)");
+        if primary {
+            document::eval("setTimeout(() => document.getElementById('composer-input')?.focus(), 30)");
+        }
     }));
+
+    let sid_memo = session_id.clone();
+    let sess = use_memo(move || {
+        let id = sid_memo.as_ref()?;
+        app.with_session(id, |s| SessInfo {
+            agent: s.agent.clone(),
+            model: s.model.clone(),
+            mode: s.mode.clone(),
+            worktree: matches!(s.environment, larrier_core::Environment::Worktree { .. }),
+            usage: s.usage.clone(),
+            cwd: s.cwd(),
+            account: s.account_id.clone(),
+        })
+    });
 
     // Workspace file list for @-mentions (indexed in the background).
     let file_root: Option<String> = match &session_id {
-        Some(id) => app.open.read().get(id).and_then(|s| s.cwd()),
+        Some(_) => sess.read().as_ref().and_then(|s| s.cwd.clone()),
         None => app.draft.read().workspace.clone(),
     };
     let fr2 = file_root.clone();
@@ -108,14 +187,8 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
 
     // Current selections: from the session, or the new-agent draft.
     let (agent, model, mode, worktree, usage) = match &session_id {
-        Some(id) => match app.open.read().get(id) {
-            Some(s) => (
-                s.agent.clone(),
-                s.model.clone(),
-                s.mode.clone(),
-                matches!(s.environment, larrier_core::Environment::Worktree { .. }),
-                Some(s.usage.clone()),
-            ),
+        Some(_) => match sess.read().clone() {
+            Some(s) => (s.agent, s.model, s.mode, s.worktree, Some(s.usage)),
             None => return rsx! {},
         },
         None => {
@@ -127,37 +200,28 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
     let modes: Vec<String> = agent.spec().modes.iter().map(|s| s.to_string()).collect();
     let mode_now = mode.clone().or_else(|| modes.first().cloned()).unwrap_or_else(|| "agent".into());
     let ctrl_enter = app.config.read().settings.send_with_ctrl_enter;
+    let queue_ok = app.config.read().settings.queue_followups;
     let placeholder = if home { "Plan, Build, / for commands, @ for context" } else { "Send follow-up" };
     let atts = attachments.read().clone();
     let can_send = !text.read().trim().is_empty() || !atts.is_empty();
-    let quote = app.ui.read().quote.clone();
+    let quote = quote_memo();
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();
-    let tall = home || text.read().contains('\n') || text.read().len() > 90 || !atts.is_empty() || quote.is_some();
+    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || quote.is_some();
     let model_logo_svg = model.as_deref().and_then(model_logo).or_else(|| agent_logo(&agent));
     let model_text = model_display(&agent, &model);
     let env_text = if worktree { "Worktree" } else { "This PC" };
 
-    // "@file" mentions and "/command" suggestions.
-    let mention = mention_query(&text.read());
-    let mention_hits: Vec<String> = match &mention {
-        Some(q) => {
-            let ql = q.to_lowercase();
-            let idx = file_index.read();
-            let mut hits: Vec<String> = idx.as_ref().map(|v| v.iter().filter(|p| p.to_lowercase().contains(&ql)).take(200).cloned().collect()).unwrap_or_default();
-            hits.sort_by_key(|p| (!p.rsplit('/').next().unwrap_or(p).to_lowercase().starts_with(&ql), p.len()));
-            hits.truncate(8);
-            hits
-        }
-        None => Vec::new(),
+    // "@" mentions and "/" commands: one suggestion list, keyboard navigable.
+    let text_now = text.read().clone();
+    let is_dismissed = dismissed.read().as_deref() == Some(text_now.as_str());
+    let suggs: Vec<Sugg> = if is_dismissed {
+        Vec::new()
+    } else {
+        suggestions(&app, &text_now, file_index.read().as_deref().unwrap_or(&[]), home, &agent, session_id.as_deref())
     };
-    let slash = slash_query(&text.read());
-    let slash_hits: Vec<(&'static str, &'static str)> = match &slash {
-        Some(q) => SLASH.iter().filter(|(c, _)| c[1..].starts_with(q.as_str())).filter(|(c, _)| home || !matches!(*c, "/worktree" | "/local")).copied().collect(),
-        None => Vec::new(),
-    };
-    let first_mention = mention_hits.first().cloned();
-    let first_slash = slash_hits.first().map(|s| s.0);
+    let hl_i = if suggs.is_empty() { 0 } else { hl().min(suggs.len() - 1) };
+    let queued: Vec<crate::state::Queued> = session_id.as_ref().and_then(|id| app.queue.read().get(id).cloned()).unwrap_or_default();
 
     // Copy-able helpers so every menu row and key handler can hold one.
     let set_mode = move |m: Option<String>, sid: Option<String>| {
@@ -183,19 +247,25 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
             _ => {}
         }
     };
-    let pick_mention = move |path: String| {
+    // Apply a suggestion: replace the token being typed, or run a command.
+    let apply = move |sg: Sugg, sid: Option<String>| {
         let mut text = text;
-        let t = text.read().clone();
-        let cut = t.rfind('@').unwrap_or(t.len());
-        text.set(format!("{}@{} ", &t[..cut], path));
-        document::eval("setTimeout(() => document.getElementById('composer-input')?.focus(), 10)");
+        match sg.act {
+            SuggAct::Insert(ins) => {
+                let t = text.read().clone();
+                let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
+                text.set(format!("{}{}", &t[..cut], ins));
+            }
+            SuggAct::Larrier(cmd) => run_slash(cmd, sid),
+        }
+        document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
     };
     // Choose agent (+ model). On an existing session this ports it.
     let choose = move |k: AgentKind, m: Option<String>, sid: Option<String>| {
         let mut app = app;
         match &sid {
             Some(id) => {
-                let current = app.open.read().get(id).map(|s| s.agent.clone());
+                let current = app.peek_session(id, |s| s.agent.clone());
                 if current.as_ref() != Some(&k) {
                     app.port(id, k);
                 }
@@ -216,11 +286,16 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
         let mut app = app;
         let mut text = text;
         let mut at = attachments;
-        let t = text.read().clone();
+        let raw = text.read().clone();
         let a = at.read().clone();
-        if t.trim().is_empty() && a.is_empty() {
+        if raw.trim().is_empty() && a.is_empty() {
             return;
         }
+        let cwd = match &sid {
+            Some(id) => app.peek_session(id, |s| s.cwd()).flatten(),
+            None => app.draft.read().workspace.clone(),
+        };
+        let t = expand_mentions(&app, &raw, cwd.as_deref());
         text.set(String::new());
         at.set(Vec::new());
         let agents = multi.read().clone();
@@ -245,9 +320,9 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
     let sid_send = session_id.clone();
     let sid_key = session_id.clone();
     let (modes_k, mode_k) = (modes.clone(), mode_now.clone());
+    let suggs_k = suggs.clone();
     let sid_stop = session_id.clone();
 
-    let mq = model_query.read().to_lowercase();
     let workspaces = app.config.read().workspaces.clone();
     let ws_now = app.draft.read().workspace.clone();
     let ws_label = ws_now
@@ -258,94 +333,36 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
 
     // The agent + model picker menu.
     let picker_menu = rsx! {
-        Dropdown { open: model_menu, up: !home, right: true,
-            div { class: "menu-search",
-                Icon { i: I::Search, size: 12 }
-                input {
-                    placeholder: "Search agents and models, or type a model id…",
-                    value: "{model_query}",
-                    autofocus: true,
-                    oninput: move |e| model_query.set(e.value()),
-                    onkeydown: {
-                        let sid = session_id.clone();
-                        let a = agent.clone();
-                        move |e: KeyboardEvent| {
-                            let q = model_query.read().trim().to_string();
-                            if e.key() == Key::Enter && !q.is_empty() {
-                                model_menu.set(false);
-                                choose(a.clone(), Some(q), sid.clone());
-                            }
-                        }
-                    },
+        ModelPicker {
+            open: model_menu,
+            up: !home,
+            agent: agent.clone(),
+            model: model.clone(),
+            onpick: {
+                let sid = session_id.clone();
+                move |(k, m): (AgentKind, Option<String>)| {
+                    model_menu.set(false);
+                    choose(k, m, sid.clone());
                 }
-            }
-            for spec in larrier_core::agent::runnable() {
-                {
-                    let det = detected.iter().find(|d| d.kind == spec.kind).cloned();
-                    let installed = spec.binaries.is_empty() || det.as_ref().map(|d| d.installed()).unwrap_or(false);
-                    let models: Vec<String> = std::iter::once("default".to_string()).chain(model_options(&app, &spec.kind).into_iter().filter(|m| m != "default" && m != "auto")).collect();
-                    let agent_match = mq.is_empty() || spec.name.to_lowercase().contains(&mq);
-                    let shown: Vec<String> = models.into_iter().filter(|m| agent_match || m.to_lowercase().contains(&mq)).collect();
-                    let sub = match (&det, spec.binaries.is_empty()) {
-                        (_, true) => "API".to_string(),
-                        (Some(d), _) if d.installed() => d.version.clone().map(|v| format!("v{v}")).unwrap_or_default(),
-                        (Some(_), _) => "not installed".to_string(),
-                        _ => String::new(),
-                    };
-                    let kind = spec.kind.clone();
-                    let sid = session_id.clone();
-                    let current_agent = agent.clone();
-                    let current_model = model.clone();
-                    let logo = agent_logo(&spec.kind);
-                    rsx! {
-                        if !shown.is_empty() && (installed || !mq.is_empty()) {
-                            div { key: "{spec.kind.id()}", class: "menu-label", style: "display: flex; align-items: center; gap: 6px; padding-top: 8px;",
-                                if let Some(svg) = logo { Logo { svg, size: 13 } }
-                                span { style: "color: var(--fg-2); font-weight: 500;", "{spec.name}" }
-                                span { style: "margin-left: auto;", "{sub}" }
-                            }
-                            for m in shown {
-                                {
-                                    let k = kind.clone();
-                                    let sid = sid.clone();
-                                    let val = if m == "default" { None } else { Some(m.clone()) };
-                                    let label = if m == "default" { "Auto".to_string() } else { m.clone() };
-                                    let checked = current_agent == kind && (current_model.as_deref() == val.as_deref());
-                                    let mlogo = val.as_deref().and_then(model_logo);
-                                    rsx! {
-                                        button { key: "{kind.id()}-{m}", class: "menu-item", style: "padding-left: 26px;",
-                                            onclick: move |_| {
-                                                model_menu.set(false);
-                                                choose(k.clone(), val.clone(), sid.clone());
-                                            },
-                                            span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } }
-                                            span { class: "ellipsis", "{label}" }
-                                            if checked { span { class: "check", Icon { i: I::Check, size: 13 } } }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            for c in app.config.read().custom_agents.clone() {
-                {
-                    let k = AgentKind::Custom(c.id.clone());
-                    let sid = session_id.clone();
-                    rsx! {
-                        MenuItem { key: "{c.id}", label: c.name.clone(), sub: Some("custom".to_string()), checked: k == agent,
-                            onclick: move |_| { model_menu.set(false); choose(k.clone(), None, sid.clone()); } }
-                    }
-                }
-            }
-            div { class: "menu-sep" }
-            MenuItem { label: "Manage agents & models…".to_string(), icon: Some(I::Settings), onclick: move |_| { model_menu.set(false); app.open_settings(SettingsTab::Agents); } }
+            },
         }
     };
 
     rsx! {
         div { class: "composer-wrap",
+            ondragover: move |e| { e.prevent_default(); if !dragging() { dragging.set(true); } },
+            ondragleave: move |_| dragging.set(false),
+            ondrop: move |e| {
+                e.prevent_default();
+                dragging.set(false);
+                let mut at = attachments;
+                for f in e.files() {
+                    let p = f.path().to_string_lossy().to_string();
+                    if !p.is_empty() {
+                        at.write().push(crate::state::attachment_for_path(&p));
+                    }
+                }
+            },
             if home {
                 div { class: "row", style: "gap: 2px; margin: 0 0 8px 4px;",
                     div { class: "menu-anchor",
@@ -377,39 +394,59 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
                     EnvPicker { open: env_menu, worktree, is_repo, session: false, label: env_text.to_string() }
                 }
             }
-            if !mention_hits.is_empty() {
-                div { class: "menu up", style: "left: 28px; bottom: calc(100% - 4px); min-width: 340px;",
-                    div { class: "menu-label", "Files" }
-                    for (i, p) in mention_hits.iter().enumerate() {
-                        {
-                            let p2 = p.clone();
-                            let (dir, name) = match p.rsplit_once('/') { Some((d, n)) => (d.to_string(), n.to_string()), None => (String::new(), p.clone()) };
-                            rsx! {
-                                button { key: "{p}", class: if i == 0 { "menu-item hl" } else { "menu-item" },
-                                    onmousedown: move |e| { e.prevent_default(); pick_mention(p2.clone()); },
-                                    span { class: "muted", Icon { i: I::File, size: 13 } }
-                                    span { class: "ellipsis", "{name}" }
-                                    span { class: "sub ellipsis", style: "max-width: 200px;", "{dir}" }
+            if !suggs.is_empty() {
+                div { class: "menu mention-menu in flip-up",
+                    {
+                        let mut last_group = "";
+                        rsx! {
+                            for (i, sg) in suggs.iter().enumerate() {
+                                {
+                                    let show_head = sg.group != last_group;
+                                    last_group = sg.group;
+                                    let sg2 = sg.clone();
+                                    let sid = session_id.clone();
+                                    rsx! {
+                                        if show_head { div { key: "h-{i}", class: "menu-label", "{sg.group}" } }
+                                        button { key: "{i}", class: if i == hl_i { "menu-item hl" } else { "menu-item" },
+                                            onmouseenter: move |_| hl.set(i),
+                                            onmousedown: move |e| { e.prevent_default(); apply(sg2.clone(), sid.clone()); },
+                                            span { class: "ic",
+                                                if let Some(svg) = sg.logo { Logo { svg, size: 14 } } else { Icon { i: sg.icon, size: 14 } }
+                                            }
+                                            span { class: "ellipsis", "{sg.label}" }
+                                            if !sg.sub.is_empty() { span { class: "sub", "{sg.sub}" } }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            if !slash_hits.is_empty() {
-                div { class: "menu up", style: "left: 28px; bottom: calc(100% - 4px); min-width: 300px;",
-                    div { class: "menu-label", "Commands" }
-                    for (i, (c, d)) in slash_hits.iter().copied().enumerate() {
-                        button { key: "{c}", class: if i == 0 { "menu-item hl" } else { "menu-item" },
-                            onmousedown: {
-                                let sid = session_id.clone();
-                                move |e: MouseEvent| { e.prevent_default(); run_slash(c, sid.clone()); }
-                            },
-                            span { class: "mono", style: "font-size: 12px;", "{c}" }
-                            span { class: "sub", "{d}" }
+            if !queued.is_empty() {
+                div { class: "queue",
+                    for q in queued.clone() {
+                        div { key: "{q.id}", class: "queue-item",
+                            Icon { i: I::CornerDownLeft, size: 13 }
+                            span { class: "t", "{q.text}" }
+                            span { class: "faint", style: "font-size: 11px;", "Queued" }
+                            button { class: "icon-btn sm", title: "Remove from queue",
+                                onclick: {
+                                    let sid = session_id.clone();
+                                    move |_| {
+                                        if let Some(id) = &sid {
+                                            if let Some(v) = app.queue.write().get_mut(id) { v.retain(|x| x.id != q.id); }
+                                        }
+                                    }
+                                },
+                                Icon { i: I::X, size: 12 }
+                            }
                         }
                     }
                 }
+            }
+            if dragging() {
+                div { class: "drop-zone", "Drop files or images to attach" }
             }
             div { class: format!("composer{}{}", if tall { " tall" } else { "" }, if home { " home-c" } else { "" }),
                 if let Some(q) = quote {
@@ -420,46 +457,84 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
                     }
                 }
                 if !atts.is_empty() {
-                    div { class: "attachments",
+                    div { class: "thumb-row",
                         for (i, a) in atts.iter().enumerate() {
-                            span { key: "{i}", class: "attach-chip",
-                                Icon { i: if matches!(a, Part::Image { .. }) { I::Image } else { I::Paperclip }, size: 11 }
-                                span { class: "ellipsis",
-                                    match a {
-                                        Part::File { path, .. } => short_path(path),
-                                        Part::Image { source: larrier_core::lsf::MediaSource::Path { path }, .. } => short_path(path),
-                                        _ => "attachment".to_string(),
+                            match a {
+                                Part::Image { .. } => rsx! {
+                                    div { key: "{i}", class: "thumb", title: "Image",
+                                        if let Some(src) = crate::state::image_src(a) {
+                                            img { src: "{src}", onclick: { let s2 = src.clone(); move |_| app.ui.write().lightbox = Some(s2.clone()) } }
+                                        } else {
+                                            Icon { i: I::Image, size: 20 }
+                                        }
+                                        button { class: "x", onclick: move |_| { let mut at = attachments; at.write().remove(i); }, Icon { i: I::X, size: 11 } }
                                     }
-                                }
-                                button { class: "icon-btn sm",
-                                    onclick: move |_| { let mut at = attachments; at.write().remove(i); },
-                                    Icon { i: I::X, size: 11 }
-                                }
+                                },
+                                Part::File { path, text, .. } => rsx! {
+                                    span { key: "{i}", class: "file-pill", title: "{path}",
+                                        Icon { i: if text.is_some() { I::Lines } else { I::Paperclip }, size: 12 }
+                                        span { class: "ellipsis", if text.is_some() { "{path}" } else { "{short_path(path)}" } }
+                                        button { class: "x", onclick: move |_| { let mut at = attachments; at.write().remove(i); }, Icon { i: I::X, size: 11 } }
+                                    }
+                                },
+                                _ => rsx! {},
                             }
                         }
                     }
                 }
-                div { class: "composer-row",
-                    if !home {
-                        PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), modes: modes.clone(), mode_now: mode_now.clone(), text }
+                // One grid for both layouts so the text box is never re-created
+                // (and never loses focus) when the composer grows.
+                div { class: "composer-row cgrid",
+                    div { class: "c-plus",
+                        PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), modes: modes.clone(), mode_now: mode_now.clone(), text, input_id }
                     }
                     textarea {
-                        id: "composer-input",
+                        id: "{input_id}",
+                        class: "c-text",
                         rows: if home { "3" } else { "1" },
                         placeholder: "{placeholder}",
                         value: "{text}",
-                        oninput: move |e| text.set(e.value()),
-                        onkeydown: move |e| {
-                            if matches!(e.key(), Key::Enter | Key::Tab) && !e.modifiers().shift() {
-                                if let Some(p) = first_mention.clone() {
-                                    e.prevent_default();
-                                    pick_mention(p);
-                                    return;
+                        oninput: move |e| {
+                            hl.set(0);
+                            let v = e.value();
+                            if v.is_empty() {
+                                overflow.set(false);
+                            }
+                            text.set(v);
+                            // Measure against the one-line width so the layout
+                            // doesn't flip back and forth.
+                            let js = format!(
+                                r#"const el = document.getElementById('{input_id}'); if (!el) return false;
+                                const box = el.closest('.composer');
+                                if (box && !box.classList.contains('tall')) el.dataset.cw = el.clientWidth;
+                                const w = parseFloat(el.dataset.cw || el.clientWidth);
+                                const c = window.__lmc || (window.__lmc = document.createElement('canvas').getContext('2d'));
+                                const cs = getComputedStyle(el);
+                                c.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+                                return el.value.includes('\n') || c.measureText(el.value).width > w - 14;"#
+                            );
+                            let seq = measure_seq() + 1;
+                            measure_seq.set(seq);
+                            spawn(async move {
+                                if let Ok(b) = document::eval(&js).join::<bool>().await {
+                                    if *measure_seq.peek() == seq && overflow() != b {
+                                        overflow.set(b);
+                                    }
                                 }
-                                if let Some(c) = first_slash {
-                                    e.prevent_default();
-                                    run_slash(c, sid_key.clone());
-                                    return;
+                            });
+                        },
+                        onkeydown: move |e| {
+                            if !suggs_k.is_empty() {
+                                match e.key() {
+                                    Key::ArrowDown => { e.prevent_default(); hl.set((hl_i + 1) % suggs_k.len()); return; }
+                                    Key::ArrowUp => { e.prevent_default(); hl.set((hl_i + suggs_k.len() - 1) % suggs_k.len()); return; }
+                                    Key::Escape => { e.prevent_default(); dismissed.set(Some(text.read().clone())); return; }
+                                    Key::Enter | Key::Tab if !e.modifiers().shift() => {
+                                        e.prevent_default();
+                                        apply(suggs_k[hl_i].clone(), sid_key.clone());
+                                        return;
+                                    }
+                                    _ => {}
                                 }
                             }
                             if e.key() == Key::Tab && e.modifiers().shift() && !modes_k.is_empty() {
@@ -472,24 +547,20 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
                             if e.key() == Key::Enter {
                                 let m = e.modifiers();
                                 let wants = if ctrl_enter { m.ctrl() || m.meta() } else { !m.shift() };
-                                if wants && !running {
+                                if wants && (!running || queue_ok) {
                                     e.prevent_default();
                                     do_send(sid_key.clone());
                                 }
                             }
                         },
                     }
-                    if home {
-                        PlusMenu { open: plus_menu, attachments, session_id: None, modes: modes.clone(), mode_now: mode_now.clone(), text }
-                        div { class: "spacer" }
-                    }
                     if mode_now != "agent" && mode_now != "build" && !modes.is_empty() {
-                        span { class: "picker", style: "color: var(--blue); cursor: default;", title: "Shift+Tab to change mode",
+                        span { class: "picker c-mode", style: "color: var(--blue); cursor: default;", title: "Shift+Tab to change mode",
                             Icon { i: if mode_now == "plan" { I::List } else { I::Message }, size: 13 }
                             "{mode_label(&mode_now)}"
                         }
                     }
-                    div { class: "menu-anchor",
+                    div { class: "menu-anchor c-model",
                         button { class: if model_menu() { "picker open" } else { "picker" }, title: "{agent.display_name()}",
                             onclick: move |_| { model_query.set(String::new()); model_menu.set(true); },
                             if let Some(svg) = model_logo_svg { Logo { svg, size: 14 } }
@@ -500,12 +571,12 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
                         {picker_menu}
                     }
                     if running {
-                        button { class: "send-btn stop", title: "Stop (Ctrl+.)",
+                        button { class: "send-btn stop c-send", title: "Stop (Ctrl+.)",
                             onclick: move |_| if let Some(id) = &sid_stop { app.stop(id) },
                             Icon { i: I::Stop, size: 10 }
                         }
                     } else {
-                        button { class: if can_send { "send-btn ready" } else { "send-btn" }, disabled: !can_send, title: "Send (Enter)",
+                        button { class: if can_send { "send-btn ready c-send" } else { "send-btn c-send" }, disabled: !can_send, title: "Send (Enter)",
                             onclick: move |_| do_send(sid_send.clone()),
                             Icon { i: I::ArrowUp, size: 15, stroke: 2.2 }
                         }
@@ -563,12 +634,9 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
                     EnvPicker { open: env_menu, worktree, is_repo, session: true, label: env_text.to_string() }
                     div { class: "grow" }
                     if let Some(u) = usage.filter(|u| u.total_tokens() > 0) {
-                        span { class: "faint", style: "font-size: 11px; margin-right: 2px;",
-                            title: "Tokens used in this agent",
-                            "{super::transcript::human_count(u.total_tokens())}"
-                            if let Some(c) = u.cost_usd { " · ${c:.2}" }
-                        }
+                        ChatUsage { usage: u }
                     }
+                    super::usage::QuotaChip { agent: agent.clone(), account_id: sess.read().as_ref().and_then(|s| s.account.clone()) }
                     span { class: if running { "ring busy" } else { "ring" }, title: if running { "Working" } else { "Idle" } }
                 }
             }
@@ -581,9 +649,230 @@ pub fn Composer(session_id: Option<String>, #[props(default = false)] home: bool
     }
 }
 
+/// Agents that can be picked: enabled and installed (API agents need a
+/// provider), plus the one in use.
+fn pickable_agents(app: &App, current: &AgentKind) -> Vec<(AgentKind, String, String)> {
+    let cfg = app.config.read();
+    let detected = app.detected.read();
+    let mut out: Vec<(AgentKind, String, String)> = Vec::new();
+    for spec in larrier_core::agent::runnable() {
+        let det = detected.iter().find(|d| d.kind == spec.kind);
+        let api = spec.binaries.is_empty();
+        let installed = api || det.map(|d| d.installed()).unwrap_or(false);
+        let usable = if spec.protocol == Protocol::HttpChat { cfg.providers.iter().any(|p| p.enabled) } else { installed };
+        if !(cfg.agent(&spec.kind).enabled && usable) && spec.kind != *current {
+            continue;
+        }
+        let sub = if api { "API".to_string() } else { det.and_then(|d| d.version.clone()).map(|v| format!("v{v}")).unwrap_or_default() };
+        out.push((spec.kind.clone(), spec.name.to_string(), sub));
+    }
+    for c in cfg.custom_agents.iter() {
+        out.push((AgentKind::Custom(c.id.clone()), c.name.clone(), "custom".into()));
+    }
+    out
+}
+
+fn agent_models(app: &App, kind: &AgentKind) -> Vec<Option<String>> {
+    std::iter::once(None).chain(model_options(app, kind).into_iter().filter(|m| m != "default" && m != "auto").map(Some)).collect()
+}
+
+/// Agent + model picker: enabled agents on the left, the hovered agent's
+/// models on the right; typing searches every model. Fixed size so it never
+/// jumps while you browse, and it folds into one column on narrow windows.
+#[component]
+fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<String>, onpick: EventHandler<(AgentKind, Option<String>)>) -> Element {
+    let app = use_app();
+    let mut query = use_signal(String::new);
+    let mut browse = use_signal(|| agent.clone());
+    let is_open = open();
+    let a0 = agent.clone();
+    use_effect(use_reactive!(|is_open| {
+        if is_open {
+            browse.set(a0.clone());
+            query.set(String::new());
+        }
+    }));
+    let agents = pickable_agents(&app, &agent);
+    let q = query.read().trim().to_lowercase();
+    let cur = browse();
+    let cur_meta = agents.iter().find(|(k, _, _)| *k == cur).cloned();
+    let results: Vec<(AgentKind, String, Option<String>)> = if q.is_empty() {
+        Vec::new()
+    } else {
+        let mut v = Vec::new();
+        for (k, name, _) in agents.iter() {
+            let agent_hit = name.to_lowercase().contains(&q);
+            for m in agent_models(&app, k) {
+                let label = m.clone().unwrap_or_else(|| "Auto".into());
+                if agent_hit || label.to_lowercase().contains(&q) {
+                    v.push((k.clone(), name.clone(), m));
+                }
+            }
+        }
+        v
+    };
+    let typed = query.read().trim().to_string();
+    let cur_name = cur_meta.as_ref().map(|m| m.1.clone()).unwrap_or_else(|| cur.display_name().to_string());
+    rsx! {
+        Dropdown { open, up, right: true, class: "model-picker",
+            div { class: "menu-search",
+                Icon { i: I::Search, size: 12 }
+                input {
+                    placeholder: "Search models, or type a model id…",
+                    value: "{query}",
+                    autofocus: true,
+                    oninput: move |e| query.set(e.value()),
+                    onkeydown: {
+                        let cur = cur.clone();
+                        let first = results.first().cloned();
+                        move |e: KeyboardEvent| {
+                            if e.key() == Key::Enter {
+                                e.prevent_default();
+                                match &first {
+                                    Some((k, _, m)) => onpick.call((k.clone(), m.clone())),
+                                    None => {
+                                        let t = query.read().trim().to_string();
+                                        if !t.is_empty() {
+                                            onpick.call((cur.clone(), Some(t)));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+            if q.is_empty() {
+                div { class: "mp-body",
+                    div { class: "mp-agents",
+                        for (k, name, sub) in agents.clone() {
+                            {
+                                let on = k == cur;
+                                let using = k == agent;
+                                let (k1, k2) = (k.clone(), k.clone());
+                                let logo = agent_logo(&k);
+                                rsx! {
+                                    button { key: "{k.id()}", class: if on { "mp-agent on" } else { "mp-agent" }, title: "{name} {sub}",
+                                        onmouseenter: move |_| browse.set(k1.clone()),
+                                        onclick: move |_| browse.set(k2.clone()),
+                                        span { class: "lg", if let Some(svg) = logo { Logo { svg, size: 15 } } else { Icon { i: I::Bot, size: 14 } } }
+                                        span { class: "nm ellipsis", "{name}" }
+                                        if using { span { class: "using", title: "In use" } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "mp-models",
+                        div { class: "mp-head",
+                            span { class: "nm", "{cur_name}" }
+                            if let Some((_, _, sub)) = cur_meta.clone() { span { class: "sub", "{sub}" } }
+                        }
+                        for m in agent_models(&app, &cur) {
+                            {
+                                let checked = cur == agent && model.as_deref() == m.as_deref();
+                                let label = m.clone().unwrap_or_else(|| "Auto".into());
+                                let desc = if m.is_none() { "Agent's default" } else { "" };
+                                let mlogo = m.as_deref().and_then(model_logo);
+                                let k = cur.clone();
+                                let m2 = m.clone();
+                                rsx! {
+                                    button { key: "{label}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" },
+                                        onclick: move |_| onpick.call((k.clone(), m2.clone())),
+                                        span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } else { Icon { i: I::Sparkle, size: 13, stroke: 1.5 } } }
+                                        span { class: "ellipsis", "{label}" }
+                                        if !desc.is_empty() { span { class: "sub", "{desc}" } }
+                                        if checked { span { class: "check", Icon { i: I::Check, size: 13 } } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                div { class: "mp-results",
+                    for (k, name, m) in results.clone() {
+                        {
+                            let checked = k == agent && model.as_deref() == m.as_deref();
+                            let label = m.clone().unwrap_or_else(|| "Auto".into());
+                            let mlogo = m.as_deref().and_then(model_logo).or_else(|| agent_logo(&k));
+                            let (k2, m2) = (k.clone(), m.clone());
+                            rsx! {
+                                button { key: "{k.id()}-{label}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" },
+                                    onclick: move |_| onpick.call((k2.clone(), m2.clone())),
+                                    span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } }
+                                    span { class: "ellipsis", "{label}" }
+                                    span { class: "sub", "{name}" }
+                                    if checked { span { class: "check", Icon { i: I::Check, size: 13 } } }
+                                }
+                            }
+                        }
+                    }
+                    if results.is_empty() {
+                        div { class: "menu-empty", "No matching models" }
+                    }
+                    {
+                        let k = cur.clone();
+                        let t = typed.clone();
+                        rsx! {
+                            button { class: "menu-item mp-row",
+                                onclick: move |_| onpick.call((k.clone(), Some(t.clone()))),
+                                span { class: "lg", Icon { i: I::CornerDownLeft, size: 13 } }
+                                span { class: "ellipsis", "Use “{typed}”" }
+                                span { class: "sub", "with {cur_name}" }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "mp-foot",
+                button { class: "menu-item",
+                    onclick: move |_| {
+                        let mut o = open;
+                        o.set(false);
+                        app.open_settings(SettingsTab::Agents);
+                    },
+                    span { class: "muted", Icon { i: I::Settings, size: 14 } }
+                    span { class: "ellipsis", "Manage agents & models…" }
+                }
+                span { class: "mp-keys", "↑↓ ↵" }
+            }
+        }
+    }
+}
+
+/// This chat's token use, compact, with the breakdown on hover.
+#[component]
+fn ChatUsage(usage: larrier_core::Usage) -> Element {
+    use super::transcript::human_count;
+    let u = &usage;
+    let mut tip = format!(
+        "This chat\nInput {} · Output {}\nCache read {} · Cache write {}",
+        human_count(u.input_tokens),
+        human_count(u.output_tokens),
+        human_count(u.cache_read_tokens),
+        human_count(u.cache_write_tokens)
+    );
+    if u.reasoning_tokens > 0 {
+        tip.push_str(&format!("\nReasoning {}", human_count(u.reasoning_tokens)));
+    }
+    if let Some(c) = u.cost_usd {
+        tip.push_str(&format!("\nCost ${c:.2}"));
+    }
+    let fresh = u.input_tokens + u.output_tokens;
+    rsx! {
+        span { class: "chat-usage", title: "{tip}",
+            Icon { i: I::Cpu, size: 12, stroke: 1.5 }
+            span { class: "num", "{human_count(fresh)}" }
+            span { class: "dim", "+{human_count(u.cache_read_tokens + u.cache_write_tokens)} cache" }
+            if let Some(c) = u.cost_usd { span { class: "num", "${c:.2}" } }
+        }
+    }
+}
+
 /// The "+" menu: attachments, mentions, mode, commands.
 #[component]
-fn PlusMenu(open: Signal<bool>, attachments: Signal<Vec<Part>>, session_id: Option<String>, modes: Vec<String>, mode_now: String, text: Signal<String>) -> Element {
+fn PlusMenu(open: Signal<bool>, attachments: Signal<Vec<Part>>, session_id: Option<String>, modes: Vec<String>, mode_now: String, text: Signal<String>, input_id: &'static str) -> Element {
     let mut app = use_app();
     let mut open = open;
     let mut text = text;
@@ -598,7 +887,7 @@ fn PlusMenu(open: Signal<bool>, attachments: Signal<Vec<Part>>, session_id: Opti
                     open.set(false);
                     let t = text.read().clone();
                     text.set(if t.is_empty() || t.ends_with(' ') { format!("{t}@") } else { format!("{t} @") });
-                    document::eval("setTimeout(() => document.getElementById('composer-input')?.focus(), 10)");
+                    document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
                 } }
                 if modes.len() > 1 {
                     div { class: "menu-sep" }
@@ -663,6 +952,148 @@ fn EnvPicker(open: Signal<bool>, worktree: bool, is_repo: bool, session: bool, l
             }
         }
     }
+}
+
+#[derive(Clone, PartialEq)]
+enum SuggAct {
+    /// Replace the token being typed with this text.
+    Insert(String),
+    /// Run a Larrier command.
+    Larrier(&'static str),
+}
+
+#[derive(Clone, PartialEq)]
+struct Sugg {
+    group: &'static str,
+    icon: I,
+    logo: Option<&'static str>,
+    label: String,
+    sub: String,
+    act: SuggAct,
+}
+
+static HARNESS: OnceLock<Mutex<Option<Vec<HarnessItem>>>> = OnceLock::new();
+
+/// Agent skills and commands (discovered once in the background).
+fn harness_items(app: &App) -> Vec<HarnessItem> {
+    let cell = HARNESS.get_or_init(|| Mutex::new(None));
+    if let Some(v) = cell.lock().ok().and_then(|g| g.clone()) {
+        return v;
+    }
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let ws: Vec<std::path::PathBuf> = app.config.read().workspaces.iter().map(|w| std::path::PathBuf::from(&w.path)).collect();
+        std::thread::spawn(move || {
+            let items = larrier_agents::harness::discover(&ws);
+            if let Some(c) = HARNESS.get() {
+                if let Ok(mut g) = c.lock() {
+                    *g = Some(items);
+                }
+            }
+        });
+    }
+    Vec::new()
+}
+
+fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &AgentKind, current: Option<&str>) -> Vec<Sugg> {
+    let mut out = Vec::new();
+    if let Some(q) = mention_query(text) {
+        let ql = q.to_lowercase();
+        // Files
+        let mut hits: Vec<&String> = files.iter().filter(|p| p.to_lowercase().contains(&ql)).take(300).collect();
+        hits.sort_by_key(|p| (!p.rsplit('/').next().unwrap_or(p).to_lowercase().starts_with(&ql), p.len()));
+        for p in hits.into_iter().take(6) {
+            let (dir, name) = match p.rsplit_once('/') { Some((d, n)) => (d.to_string(), n.to_string()), None => (String::new(), p.clone()) };
+            out.push(Sugg { group: "Files", icon: I::File, logo: None, label: name, sub: dir, act: SuggAct::Insert(format!("@{p} ")) });
+        }
+        // Folders
+        let mut dirs: Vec<String> = files
+            .iter()
+            .filter_map(|p| p.rsplit_once('/').map(|(d, _)| d.to_string()))
+            .filter(|d| d.to_lowercase().contains(&ql))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        dirs.sort_by_key(|d| d.len());
+        for d in dirs.into_iter().take(3) {
+            out.push(Sugg { group: "Folders", icon: I::Folder, logo: None, label: format!("{d}/"), sub: String::new(), act: SuggAct::Insert(format!("@{d}/ ")) });
+        }
+        // Other agents' conversations
+        let sessions = app.sessions.read();
+        for s in sessions.iter().filter(|s| Some(s.id.as_str()) != current && !s.archived && (ql.is_empty() || s.title.to_lowercase().contains(&ql))).take(4) {
+            let short = &s.id[s.id.len().saturating_sub(8)..];
+            out.push(Sugg {
+                group: "Agents",
+                icon: I::Message,
+                logo: crate::logos::agent_logo(&s.agent),
+                label: s.title.clone(),
+                sub: format!("{} · {}", s.agent.display_name(), crate::state::rel_time(s.updated_at)),
+                act: SuggAct::Insert(format!("@agent:{short} ")),
+            });
+        }
+        if "git".starts_with(&ql) || ql.starts_with("git") || "diff".starts_with(&ql) {
+            out.push(Sugg { group: "Context", icon: I::Diff, logo: None, label: "Git diff".into(), sub: "uncommitted changes".into(), act: SuggAct::Insert("@git:diff ".into()) });
+        }
+        return out;
+    }
+    if let Some(q) = slash_query(text) {
+        let ql = q.to_lowercase();
+        for (c, d) in SLASH.iter().copied() {
+            if c[1..].starts_with(&ql) && (home || !matches!(c, "/worktree" | "/local")) {
+                out.push(Sugg { group: "Larrier", icon: I::Command, logo: None, label: c.to_string(), sub: d.to_string(), act: SuggAct::Larrier(c) });
+            }
+        }
+        let logo = crate::logos::agent_logo(agent);
+        let mut seen = std::collections::BTreeSet::new();
+        for it in harness_items(app).into_iter().filter(|it| matches!(it.kind, ItemKind::Command | ItemKind::Skill) && it.agents.contains(agent)) {
+            let name = it.name.trim_start_matches('/').to_string();
+            if !name.to_lowercase().contains(&ql) || !seen.insert(name.clone()) {
+                continue;
+            }
+            let group = if it.kind == ItemKind::Skill { "Skills" } else { "Commands" };
+            out.push(Sugg {
+                group,
+                icon: if it.kind == ItemKind::Skill { I::Sparkle } else { I::Slash },
+                logo: if it.kind == ItemKind::Command { logo } else { None },
+                label: format!("/{name}"),
+                sub: it.description.clone().unwrap_or_default().chars().take(80).collect(),
+                act: SuggAct::Insert(format!("/{name} ")),
+            });
+            if out.len() > 40 {
+                break;
+            }
+        }
+        out.sort_by_key(|s| match s.group { "Larrier" => 0, "Commands" => 1, _ => 2 });
+    }
+    out
+}
+
+/// Expand `@agent:<id>` and `@git:diff` into context the agent can read.
+fn expand_mentions(app: &App, text: &str, cwd: Option<&str>) -> String {
+    let mut extra = String::new();
+    for tok in text.split_whitespace() {
+        if let Some(short) = tok.strip_prefix("@agent:") {
+            let found = app.sessions.read().iter().find(|s| s.id.ends_with(short)).map(|s| s.id.clone());
+            if let Some(id) = found {
+                if let Ok(s) = crate::state::store().load(&id) {
+                    let ctx = s.handoff_context(0, 24_000);
+                    extra.push_str(&format!("\n\n<agent_context title=\"{}\" agent=\"{}\">\n{}\n</agent_context>", s.title, s.agent.display_name(), ctx.trim()));
+                }
+            }
+        } else if tok == "@git:diff" {
+            if let Some(dir) = cwd {
+                let out = std::process::Command::new("git").args(["diff", "HEAD", "--no-color"]).current_dir(dir).output();
+                if let Ok(o) = out {
+                    let d = String::from_utf8_lossy(&o.stdout).to_string();
+                    let d: String = d.chars().take(60_000).collect();
+                    if !d.trim().is_empty() {
+                        extra.push_str(&format!("\n\n<git_diff>\n{d}\n</git_diff>"));
+                    }
+                }
+            }
+        }
+    }
+    format!("{text}{extra}")
 }
 
 const SLASH: &[(&str, &str)] = &[

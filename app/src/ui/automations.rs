@@ -535,14 +535,14 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                     span { class: "k", "Agent" }
                     div { class: "row",
                         AgentGlyph { kind: cur.agent.clone() }
-                        select { class: "input grow",
-                            onchange: move |e| { let mut w = a.write(); w.agent = AgentKind::from_id(&e.value()); w.model = None; },
-                            for s in larrier_core::agent::runnable() {
-                                option { key: "{s.kind.id()}", value: "{s.kind.id()}", selected: s.kind == cur.agent, "{s.name}" }
-                            }
-                            for c in customs {
-                                option { key: "{c.id}", value: "custom:{c.id}", selected: AgentKind::Custom(c.id.clone()) == cur.agent, "{c.name}" }
-                            }
+                        super::Select {
+                            value: cur.agent.id().to_string(),
+                            wide: true,
+                            options: larrier_core::agent::runnable()
+                                .map(|s| (s.kind.id().to_string(), s.name.to_string()))
+                                .chain(customs.iter().map(|c| (AgentKind::Custom(c.id.clone()).id().to_string(), c.name.clone())))
+                                .collect::<Vec<_>>(),
+                            onchange: move |v: String| { let mut w = a.write(); w.agent = AgentKind::from_id(&v); w.model = None; },
                         }
                     }
 
@@ -557,12 +557,13 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                     }
 
                     span { class: "k", "Workspace" }
-                    select { class: "input full",
-                        onchange: move |e| { let v = e.value(); a.write().workspace = (!v.is_empty()).then_some(v); },
-                        option { value: "", selected: cur.workspace.is_none(), "No folder (chat only)" }
-                        for w in workspaces {
-                            option { key: "{w.id}", value: "{w.path}", selected: cur.workspace.as_deref() == Some(w.path.as_str()), "{w.name} — {w.path}" }
-                        }
+                    super::Select {
+                        value: cur.workspace.clone().unwrap_or_default(),
+                        wide: true,
+                        options: std::iter::once((String::new(), "No folder (chat only)".to_string()))
+                            .chain(workspaces.iter().map(|w| (w.path.clone(), format!("{} — {}", w.name, w.path))))
+                            .collect::<Vec<_>>(),
+                        onchange: move |v: String| a.write().workspace = (!v.is_empty()).then_some(v),
                     }
 
                     if cur.workspace.is_some() {
@@ -603,11 +604,13 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                         },
                         Kind::Interval => rsx! {
                             span { class: "k", "Every" }
-                            select { class: "input",
-                                onchange: move |e| minutes.set(e.value().parse().unwrap_or(60)),
-                                for (m, l) in [(15u32, "15 minutes"), (30, "30 minutes"), (60, "hour"), (120, "2 hours"), (240, "4 hours"), (720, "12 hours"), (1440, "24 hours")] {
-                                    option { key: "{m}", value: "{m}", selected: minutes() == m, "{l}" }
-                                }
+                            super::Select {
+                                value: minutes().to_string(),
+                                options: [(15u32, "15 minutes"), (30, "30 minutes"), (60, "hour"), (120, "2 hours"), (240, "4 hours"), (720, "12 hours"), (1440, "24 hours")]
+                                    .iter()
+                                    .map(|(m, l)| (m.to_string(), l.to_string()))
+                                    .collect::<Vec<_>>(),
+                                onchange: move |v: String| minutes.set(v.parse().unwrap_or(60)),
                             }
                         },
                         Kind::Git => rsx! {

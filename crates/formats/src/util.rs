@@ -403,6 +403,8 @@ pub fn image_mime(path: &str) -> Option<String> {
 /// anything else is returned unchanged.
 pub fn file_url_path(u: &str) -> String {
     let Some(rest) = u.strip_prefix("file://") else { return u.to_string() };
+    let decoded = percent_decode(rest);
+    let rest = decoded.as_str();
     let b = rest.as_bytes();
     // `/C:/…` — a Windows drive after the URL's leading slash.
     if b.len() > 2 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
@@ -410,6 +412,26 @@ pub fn file_url_path(u: &str) -> String {
     } else {
         rest.to_string()
     }
+}
+
+/// `%3A` → `:`; malformed escapes are kept as they are.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let hex = |c: u8| (c as char).to_digit(16);
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 pub fn content_text(v: &Value) -> String {

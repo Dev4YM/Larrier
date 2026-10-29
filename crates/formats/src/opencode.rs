@@ -5,7 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use larrier_core::{AgentKind, FileDiff, Part, Session, ToolCall, Usage};
+use larrier_core::{AgentKind, FileDiff, Message, Part, Session, ToolCall, Usage};
+use rusqlite::Connection;
 use serde_json::Value;
 
 use crate::util::{self, env_dir, finish, open_sqlite, s, string, ts_from_ms, Conv, Meta};
@@ -77,25 +78,6 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
     let srow = con.query_row("SELECT title, directory, time_created, time_updated FROM session WHERE id = ?1", [&info.native_id], |r| {
         Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<i64>>(3)?))
     })?;
-    let mut msgs: Vec<(String, Value)> = Vec::new();
-    {
-        let mut st = con.prepare("SELECT id, data FROM message WHERE session_id = ?1 ORDER BY time_created, id")?;
-        for r in st.query_map([&info.native_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten() {
-            if let Ok(v) = serde_json::from_str::<Value>(&r.1) {
-                msgs.push((r.0, v));
-            }
-        }
-    }
-    let mut parts: std::collections::HashMap<String, Vec<Value>> = std::collections::HashMap::new();
-    {
-        let mut st = con.prepare("SELECT message_id, data FROM part WHERE session_id = ?1 ORDER BY id")?;
-        for r in st.query_map([&info.native_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten() {
-            if let Ok(v) = serde_json::from_str::<Value>(&r.1) {
-                parts.entry(r.0).or_default().push(v);
-            }
-        }
-    }
-    let list: Vec<(Value, Vec<Value>)> = msgs.into_iter().map(|(id, m)| (m, parts.remove(&id).unwrap_or_default())).collect();
     let meta = Meta {
         native_id: info.native_id.clone(),
         path: Some(info.path.clone()),
@@ -105,7 +87,44 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
         updated: srow.3.and_then(ts_from_ms),
         ..Default::default()
     };
-    build(list, meta)
+    load(&con, &info.native_id, meta, 0)
+}
+
+/// A session from the database, with the transcripts of the subagent
+/// sessions its `task` calls started (two levels deep).
+fn load(con: &Connection, id: &str, meta: Meta, depth: u8) -> Result<Session> {
+    let list = rows(con, id)?;
+    let children = |child: &str| {
+        if depth >= 2 {
+            return Vec::new();
+        }
+        let meta = Meta { native_id: child.to_string(), ..Default::default() };
+        load(con, child, meta, depth + 1).map(|s| s.messages).unwrap_or_default()
+    };
+    build(list, meta, &children)
+}
+
+/// A session's messages with their parts, oldest first.
+fn rows(con: &Connection, id: &str) -> Result<Vec<(Value, Vec<Value>)>> {
+    let mut msgs: Vec<(String, Value)> = Vec::new();
+    {
+        let mut st = con.prepare("SELECT id, data FROM message WHERE session_id = ?1 ORDER BY time_created, id")?;
+        for r in st.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten() {
+            if let Ok(v) = serde_json::from_str::<Value>(&r.1) {
+                msgs.push((r.0, v));
+            }
+        }
+    }
+    let mut parts: std::collections::HashMap<String, Vec<Value>> = std::collections::HashMap::new();
+    {
+        let mut st = con.prepare("SELECT message_id, data FROM part WHERE session_id = ?1 ORDER BY id")?;
+        for r in st.query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten() {
+            if let Ok(v) = serde_json::from_str::<Value>(&r.1) {
+                parts.entry(r.0).or_default().push(v);
+            }
+        }
+    }
+    Ok(msgs.into_iter().map(|(id, m)| (m, parts.remove(&id).unwrap_or_default())).collect())
 }
 
 fn import_legacy(info: &NativeSessionInfo) -> Result<Session> {
@@ -145,15 +164,28 @@ fn import_legacy(info: &NativeSessionInfo) -> Result<Session> {
         updated: sv["time"]["updated"].as_i64().and_then(ts_from_ms),
         ..Default::default()
     };
-    build(list, meta)
+    build(list, meta, &|_| Vec::new())
 }
 
-fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta) -> Result<Session> {
+/// Whether OpenCode is still mid-turn: the last message is a prompt, or a
+/// reply that has neither finished nor failed.
+fn turn_open(list: &[(Value, Vec<Value>)]) -> bool {
+    match list.last() {
+        Some((m, _)) if s(m, "role") == Some("user") => true,
+        Some((m, _)) => m["time"]["completed"].is_null() && m.get("error").map(|e| e.is_null()).unwrap_or(true),
+        None => false,
+    }
+}
+
+fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta, children: &dyn Fn(&str) -> Vec<Message>) -> Result<Session> {
     let mut conv = Conv::new(AGENT);
+    let open = turn_open(&list);
+    let mut agent: Option<String> = None;
     for (m, parts) in list {
         let ts = m["time"]["created"].as_i64().and_then(ts_from_ms);
         let role = s(&m, "role").unwrap_or("");
         if role == "user" {
+            agent = string(&m, "agent").or(agent);
             let mut out = Vec::new();
             for p in &parts {
                 if p["synthetic"].as_bool().unwrap_or(false) {
@@ -161,6 +193,7 @@ fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta) -> Result<Session> {
                 }
                 match s(p, "type") {
                     Some("text") => out.push(Part::Text { text: s(p, "text").unwrap_or("").to_string() }),
+                    Some("compaction") => conv.notice("Context compacted", ts),
                     Some("file") => {
                         let mime = string(p, "mime");
                         let url = s(p, "url").unwrap_or("");
@@ -169,7 +202,7 @@ fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta) -> Result<Session> {
                                 out.push(img);
                             }
                         } else {
-                            let path = s(p, "filename").map(String::from).unwrap_or_else(|| url.trim_start_matches("file://").to_string());
+                            let path = if url.starts_with("file://") { util::file_url_path(url) } else { s(p, "filename").unwrap_or(url).to_string() };
                             out.push(Part::File { path, mime, text: None });
                         }
                     }
@@ -180,9 +213,14 @@ fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta) -> Result<Session> {
             continue;
         }
         let model = s(&m, "modelID");
+        // The summary written when the context was compacted: only its usage.
+        let summary = m["summary"].as_bool().unwrap_or(false) || s(&m, "agent") == Some("compaction");
         let _ = conv.assistant(ts, model);
         for p in &parts {
             let pts = p["time"]["start"].as_i64().and_then(ts_from_ms).or(ts);
+            if summary && s(p, "type") != Some("step-finish") {
+                continue;
+            }
             match s(p, "type") {
                 Some("text") if !p["synthetic"].as_bool().unwrap_or(false) => conv.text(s(p, "text").unwrap_or(""), pts, model),
                 Some("reasoning") => {
@@ -199,6 +237,10 @@ fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta) -> Result<Session> {
                     let mut tool = ToolCall::new(id.clone(), name, st.get("input").cloned().unwrap_or(Value::Null));
                     if let Some(t) = s(st, "title").filter(|t| !t.is_empty()) {
                         tool.title = Some(format!("{} {}", tool.describe().split(' ').next().unwrap_or(name), t));
+                    }
+                    // `task` runs a subagent in a child session.
+                    if let Some(child) = s(&st["metadata"], "sessionId") {
+                        tool.subagent = children(child);
                     }
                     conv.tool(tool, pts, model);
                     let status = s(st, "status").unwrap_or("completed");
@@ -223,12 +265,20 @@ fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta) -> Result<Session> {
         }
         if let Some(err) = m.get("error").filter(|e| !e.is_null()) {
             let msg = err["data"]["message"].as_str().map(String::from).unwrap_or_else(|| s(err, "name").unwrap_or("error").to_string());
-            if !msg.contains("MessageAbortedError") {
+            if s(err, "name") == Some("MessageAbortedError") || msg.contains("MessageAbortedError") {
+                conv.notice("Interrupted", ts);
+            } else if !summary {
                 conv.error(&msg, ts);
             }
         }
     }
-    finish(conv, AGENT, meta)
+    let mut session = finish(conv, AGENT, meta)?;
+    session.external_turn = open;
+    session.mode = agent.filter(|a| matches!(a.as_str(), "build" | "plan"));
+    if let Some(m) = &session.mode {
+        session.extra.insert("import_mode".into(), Value::String(m.clone()));
+    }
+    Ok(session)
 }
 
 fn tool_diffs(state: &Value) -> Vec<FileDiff> {
@@ -264,11 +314,50 @@ mod tests {
             serde_json::json!({"type":"text","text":"done"}),
             serde_json::json!({"type":"step-finish","tokens":{"input":10,"output":5,"cache":{"read":1,"write":0}},"cost":0.01}),
         ];
-        let s = build(vec![(user, up), (asst, ap)], Meta { native_id: "ses_1".into(), ..Default::default() }).unwrap();
+        let s = build(vec![(user, up), (asst, ap)], Meta { native_id: "ses_1".into(), ..Default::default() }, &|_| Vec::new()).unwrap();
         assert_eq!(s.messages.len(), 2);
         let t = s.messages[1].tool_calls().next().unwrap();
         assert_eq!(t.diffs[0].added, 1);
         assert_eq!(s.usage.input_tokens, 10);
         assert_eq!(s.model.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn compaction_subagents_files_and_open_turns() {
+        let json = |v: &str| serde_json::from_str::<Value>(v).unwrap();
+        let list = vec![
+            (
+                json(r#"{"role":"user","agent":"plan","time":{"created":1700000000000}}"#),
+                vec![
+                    json(r#"{"type":"text","text":"explore the api"}"#),
+                    json(r#"{"type":"file","mime":"text/plain","filename":"a.rs","url":"file:///d%3A/repo/a.rs"}"#),
+                ],
+            ),
+            (
+                json(r#"{"role":"assistant","agent":"plan","modelID":"m1","time":{"created":1700000001000,"completed":1700000002000}}"#),
+                vec![json(r#"{"type":"tool","tool":"task","callID":"c1","state":{"status":"completed","input":{"description":"Explore","subagent_type":"explore","prompt":"look"},"output":"report","metadata":{"sessionId":"ses_child"}}}"#)],
+            ),
+            (json(r#"{"role":"user","agent":"plan","time":{"created":1700000003000}}"#), vec![json(r#"{"type":"compaction","auto":true}"#)]),
+            (
+                json(r#"{"role":"assistant","agent":"compaction","mode":"compaction","summary":true,"time":{"created":1700000004000,"completed":1700000005000}}"#),
+                vec![json(r#"{"type":"text","text":"Summary of the conversation so far"}"#)],
+            ),
+            (json(r#"{"role":"user","agent":"plan","time":{"created":1700000006000}}"#), vec![json(r#"{"type":"text","text":"continue"}"#)]),
+            (json(r#"{"role":"assistant","agent":"plan","modelID":"m1","time":{"created":1700000007000}}"#), vec![json(r#"{"type":"reasoning","text":"thinking"}"#)]),
+        ];
+        let child = |id: &str| {
+            assert_eq!(id, "ses_child");
+            vec![Message::new(larrier_core::Role::User, vec![Part::Text { text: "look".into() }])]
+        };
+        let s = build(list, Meta { native_id: "ses_1".into(), ..Default::default() }, &child).unwrap();
+        assert!(s.external_turn, "the last reply has not completed");
+        assert_eq!(s.mode.as_deref(), Some("plan"));
+        let file = s.messages[0].parts.iter().find_map(|p| match p { Part::File { path, .. } => Some(path.clone()), _ => None }).unwrap();
+        assert_eq!(file, "d:/repo/a.rs");
+        let task = s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.name == "task").unwrap();
+        assert_eq!(task.subagent.len(), 1);
+        let text: Vec<String> = s.messages.iter().map(|m| m.text()).collect();
+        assert!(!text.iter().any(|t| t.contains("Summary of the conversation")), "{text:?}");
+        assert!(s.messages.iter().flat_map(|m| &m.parts).any(|p| matches!(p, Part::Notice { text } if text == "Context compacted")));
     }
 }

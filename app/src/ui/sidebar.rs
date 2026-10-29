@@ -27,8 +27,8 @@ struct Repo {
 
 fn sort_items(items: &mut [SessionSummary], sort: SidebarSort) {
     match sort {
-        SidebarSort::Recent => items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)),
-        SidebarSort::Created => items.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
+        // Activity never reorders chats: "recent" (older configs) means created.
+        SidebarSort::Recent | SidebarSort::Created => items.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
         SidebarSort::Name => items.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
     }
 }
@@ -42,10 +42,10 @@ fn build_agent_groups(list: &[SessionSummary], sort: SidebarSort) -> Vec<Repo> {
             name: s.agent.display_name().to_string(),
             path: None,
             items: Vec::new(),
-            latest: s.updated_at,
+            latest: s.created_at,
             agent: Some(s.agent.clone()),
         });
-        e.latest = e.latest.max(s.updated_at);
+        e.latest = e.latest.max(s.created_at);
         e.items.push(s.clone());
     }
     let mut v: Vec<Repo> = map.into_values().collect();
@@ -73,7 +73,7 @@ fn build_repos(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], 
         }
         let key = repo_key(s);
         if key.is_empty() {
-            no_repo.latest = no_repo.latest.max(s.updated_at);
+            no_repo.latest = no_repo.latest.max(s.created_at);
             no_repo.items.push(s.clone());
             continue;
         }
@@ -83,10 +83,10 @@ fn build_repos(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], 
             name: if w.name.is_empty() { w.path.clone() } else { w.name.clone() },
             path: Some(w.path.clone()),
             items: Vec::new(),
-            latest: s.updated_at,
+            latest: s.created_at,
             agent: None,
         });
-        e.latest = e.latest.max(s.updated_at);
+        e.latest = e.latest.max(s.created_at);
         e.items.push(s.clone());
     }
     // Workspaces added in settings show even without agents yet.
@@ -126,19 +126,6 @@ pub fn activity(app: &App, id: &str) -> Option<String> {
     .flatten()
 }
 
-/// The live "Reading main.rs" line under a running agent. Its own component
-/// so streaming re-renders this line only, not the sidebar.
-#[component]
-fn ChatActivity(id: String) -> Element {
-    let app = use_app();
-    let id_m = id.clone();
-    let doing = use_memo(move || activity(&app, &id_m));
-    match doing() {
-        Some(d) => rsx! { div { class: "chat-sub", "{d}" } },
-        None => rsx! { div { class: "chat-sub", "Working" } },
-    }
-}
-
 #[component]
 pub fn Sidebar() -> Element {
     let mut app = use_app();
@@ -167,37 +154,13 @@ pub fn Sidebar() -> Element {
             })
             .collect()
     };
-    // Status grouping lifts agents that need you (or are working) to the top.
-    let mut needs: Vec<SessionSummary> = Vec::new();
-    let mut working: Vec<SessionSummary> = Vec::new();
-    let mut review: Vec<SessionSummary> = Vec::new();
-    let rest: Vec<SessionSummary> = if group == SidebarGroup::Status && query.is_empty() {
-        let mut rest = Vec::new();
-        for s in filtered.iter() {
-            if s.pinned {
-                rest.push(s.clone());
-            } else if s.status == SessionStatus::NeedsInput {
-                needs.push(s.clone());
-            } else if running.contains(&s.id) {
-                working.push(s.clone());
-            } else if s.unread && matches!(s.status, SessionStatus::Review | SessionStatus::Done) {
-                review.push(s.clone());
-            } else {
-                rest.push(s.clone());
-            }
-        }
-        rest
-    } else {
-        filtered.clone()
-    };
+    let rest: Vec<SessionSummary> = filtered.clone();
     let (pinned, no_repo, repos) = if group == SidebarGroup::Agent {
         let pinned: Vec<SessionSummary> = rest.iter().filter(|s| s.pinned).cloned().collect();
         (pinned, None, build_agent_groups(&rest, sort))
     } else {
         build_repos(&rest, if query.is_empty() { &workspaces } else { &[] }, sort)
     };
-    let sections: Vec<(&'static str, Vec<SessionSummary>)> =
-        [("Needs Input", needs), ("In Progress", working), ("Ready for Review", review)].into_iter().filter(|(_, v)| !v.is_empty()).collect();
     let group_label = match group {
         SidebarGroup::Agent => "Agents",
         _ => "Repositories",
@@ -264,14 +227,6 @@ pub fn Sidebar() -> Element {
                         "Customize"
                     }
                 }
-                for (label, items) in sections {
-                    div { key: "sec-{label}", class: "side-sec",
-                        div { class: "side-sec-head", span { class: "grow", "{label}" } span { class: "cnt", "{items.len()}" } }
-                        for s in items {
-                            ChatRow { key: "st-{s.id}", s: s.clone(), ctx: ctx.clone(), logo: true }
-                        }
-                    }
-                }
                 if !pinned.is_empty() {
                     div { class: "side-sec",
                         div { class: "side-sec-head", span { class: "grow", "Pinned" } }
@@ -289,13 +244,11 @@ pub fn Sidebar() -> Element {
                             }
                             Dropdown { open: filter_menu, up: false, right: true,
                                 div { class: "menu-label", "Group by" }
-                                MenuItem { label: "Status, then repository".to_string(), checked: group == SidebarGroup::Status, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Status) }
-                                MenuItem { label: "Repository".to_string(), checked: group == SidebarGroup::Workspace, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Workspace) }
+                                MenuItem { label: "Repository".to_string(), checked: group != SidebarGroup::Agent, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Workspace) }
                                 MenuItem { label: "Agent".to_string(), checked: group == SidebarGroup::Agent, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Agent) }
                                 div { class: "menu-sep" }
                                 div { class: "menu-label", "Sort by" }
-                                MenuItem { label: "Recent activity".to_string(), checked: sort == SidebarSort::Recent, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Recent) }
-                                MenuItem { label: "Date created".to_string(), checked: sort == SidebarSort::Created, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Created) }
+                                MenuItem { label: "Date created".to_string(), checked: sort != SidebarSort::Name, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Created) }
                                 MenuItem { label: "Name".to_string(), checked: sort == SidebarSort::Name, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Name) }
                                 div { class: "menu-sep" }
                                 MenuItem { label: "Show archived".to_string(), checked: show_archived, onclick: move |_| app.update_config(|c| c.settings.show_archived = !c.settings.show_archived) }
@@ -495,6 +448,7 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
                     super::Spinner { size: 14 }
                 } else if logo {
                     AgentGlyph { kind: s.agent.clone() }
+                    if s.unread { span { class: "unread-dot" } }
                 } else {
                     span { class: "pt" }
                 }
@@ -511,9 +465,6 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
                     Icon { i: I::More, size: 14 }
                 }
             }
-        }
-        if running {
-            ChatActivity { id: s.id.clone() }
         }
     }
 }

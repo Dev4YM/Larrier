@@ -1140,3 +1140,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 }
 .app.no-motion .spin { animation: spin-turn 2.4s linear infinite !important; }
 .app.no-motion .spin-arc { animation: none !important; stroke-dasharray: 30 70; }
+
+/* Unread chats: the dot (or a badge on the agent logo) in the accent color. */
+.chat-row.unread .bullet .pt { width: 7px; height: 7px; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c, var(--blue)) 18%, transparent); }
+.chat-row .bullet { position: relative; }
+.chat-row .bullet .unread-dot { position: absolute; right: -1px; top: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 2px var(--win); }

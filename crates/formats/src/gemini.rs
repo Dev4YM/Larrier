@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use larrier_core::{AgentKind, NativeLink, Role, Session, ToolCall, Usage};
+use larrier_core::{AgentKind, NativeLink, Part, Role, Session, ToolCall, Usage};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -137,7 +137,9 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
         match s(r, "type").unwrap_or("") {
             "user" => {
                 let t = r.get("displayContent").filter(|d| !d.is_null()).map(gemini_text).unwrap_or_else(|| gemini_text(&r["content"]));
-                conv.user(t, ts);
+                let mut parts = vec![Part::Text { text: t }];
+                parts.extend(gemini_images(&r["content"]));
+                conv.user_parts(parts, ts);
             }
             "gemini" | "model" | "assistant" => {
                 for th in r["thoughts"].as_array().into_iter().flatten() {
@@ -156,6 +158,13 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                     let out = tool_result_text(&tc["result"]).or_else(|| tc.get("resultDisplay").and_then(|d| d.as_str()).map(String::from));
                     let err = matches!(s(tc, "status"), Some("error") | Some("cancelled"));
                     conv.tool_result(&id, out, err, Vec::new());
+                    // Screenshots and images a tool read come back as parts
+                    // next to (or inside) the function response.
+                    let mut images = gemini_images(&tc["result"]);
+                    for r in tc["result"].as_array().into_iter().flatten() {
+                        images.extend(gemini_images(&r["functionResponse"]["parts"]));
+                    }
+                    conv.tool_images(&id, images);
                 }
                 conv.text(&gemini_text(&r["content"]), ts, model);
                 if let Some(t) = r.get("tokens") {
@@ -206,6 +215,23 @@ fn gemini_text(v: &Value) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// Image parts of a Gemini `content` list (`inlineData` / `fileData`).
+fn gemini_images(v: &Value) -> Vec<Part> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            let (d, data, url) = match (p.get("inlineData"), p.get("fileData")) {
+                (Some(d), _) => (d, s(d, "data"), None),
+                (None, Some(f)) => (f, None, s(f, "fileUri")),
+                _ => return None,
+            };
+            let mime = string(d, "mimeType").filter(|m| m.starts_with("image/"))?;
+            util::image_part(Some(mime), data, url)
+        })
+        .collect()
 }
 
 fn tool_result_text(v: &Value) -> Option<String> {
@@ -322,6 +348,15 @@ mod tests {
         assert!(s.messages[1].text().contains("Rust app"));
         assert!(!s.messages[1].text().contains("partial"));
         assert_eq!(s.messages[1].tool_calls().next().unwrap().output.as_deref(), Some("fn main"));
+
+        let with_images = [
+            r#"{"sessionId":"G3","projectHash":"h","startTime":"2026-01-01T00:00:00Z","kind":"main"}"#,
+            r#"{"id":"1","timestamp":"2026-01-01T00:00:01Z","type":"user","content":[{"text":"what is this?"},{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}"#,
+            r#"{"id":"2","timestamp":"2026-01-01T00:00:02Z","type":"gemini","content":"A logo.","toolCalls":[{"id":"t1","name":"read_file","args":{"file_path":"shot.png"},"status":"success","result":[{"functionResponse":{"response":{"output":"Binary content provided"},"parts":[{"inlineData":{"mimeType":"image/png","data":"iVBORw0KGgo="}}]}}]}]}"#,
+        ];
+        let s = parse(&with_images.join("\n"), None).unwrap();
+        assert!(s.messages[0].parts.iter().any(|p| matches!(p, Part::Image { .. })));
+        assert_eq!(s.messages[1].tool_calls().next().unwrap().images.len(), 1);
 
         let legacy = r#"{"sessionId":"G2","projectHash":"h","startTime":"2026-01-01T00:00:00Z","messages":[{"id":"1","timestamp":"2026-01-01T00:00:01Z","type":"user","content":"hi"},{"id":"2","timestamp":"2026-01-01T00:00:02Z","type":"gemini","content":"hello"}]}"#;
         let s = parse(legacy, None).unwrap();

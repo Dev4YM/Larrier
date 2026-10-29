@@ -9,6 +9,7 @@ use dioxus::prelude::*;
 use larrier_agents::harness::{HarnessItem, ItemKind};
 use larrier_core::{lsf::short_path, AgentKind, Part, Protocol};
 
+use super::mentions::{MentionChip, MentionChipView};
 use super::{Dropdown, MenuItem};
 use crate::icons::{Icon, I};
 use crate::logos::{agent_logo, model_logo, Logo};
@@ -150,6 +151,8 @@ pub fn Composer(
     let mut app = use_app();
     let mut text = use_signal(String::new);
     let attachments: Signal<Vec<Part>> = use_signal(Vec::new);
+    // Files, folders, chats, the diff and skills the prompt refers to, as chips.
+    let mut mentions: Signal<Vec<MentionChip>> = use_signal(Vec::new);
     let plus_menu = use_signal(|| false);
     let mut model_menu = use_signal(|| false);
     let env_menu = use_signal(|| false);
@@ -193,9 +196,26 @@ pub fn Composer(
             m.into_iter().map(|(_, t)| t).collect()
         };
         if !mine.is_empty() {
-            let cur = text.read().clone();
-            let sep = if cur.is_empty() || cur.ends_with(' ') || cur.ends_with('\n') { "" } else { " " };
-            text.set(format!("{cur}{sep}{} ", mine.join(" ")));
+            let mut loose: Vec<String> = Vec::new();
+            for t in mine {
+                let found = t
+                    .trim()
+                    .strip_prefix("@agent:")
+                    .and_then(|short| app.sessions.read().iter().find(|s| s.id.ends_with(short)).map(MentionChip::agent));
+                match found {
+                    Some(chip) => {
+                        if !mentions.read().iter().any(|c| c.value == chip.value) {
+                            mentions.write().push(chip);
+                        }
+                    }
+                    None => loose.push(t),
+                }
+            }
+            if !loose.is_empty() {
+                let cur = text.read().clone();
+                let sep = if cur.is_empty() || cur.ends_with(' ') || cur.ends_with('\n') { "" } else { " " };
+                text.set(format!("{cur}{sep}{} ", loose.join(" ")));
+            }
             document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 30)"));
         }
     }));
@@ -257,11 +277,12 @@ pub fn Composer(
     let queue_ok = app.config.read().settings.queue_followups;
     let placeholder = if home { "Plan, Build, / for commands, @ for context" } else { "Send follow-up" };
     let atts = attachments.read().clone();
-    let can_send = !text.read().trim().is_empty() || !atts.is_empty();
+    let chips_now = mentions.read().clone();
+    let can_send = !text.read().trim().is_empty() || !atts.is_empty() || !chips_now.is_empty();
     let quote = quote_memo();
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();
-    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || quote.is_some();
+    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || !chips_now.is_empty() || quote.is_some();
     let model_logo_svg = model.as_deref().and_then(model_logo).or_else(|| agent_logo(&agent));
     let model_text = model_display(&agent, &model);
     let env_text = if worktree { "Worktree" } else { "This PC" };
@@ -301,14 +322,19 @@ pub fn Composer(
             _ => {}
         }
     };
-    // Apply a suggestion: replace the token being typed, or run a command.
+    // Apply a suggestion: the typed `@…` / `/…` becomes a chip, or a
+    // Larrier command runs.
     let apply = move |sg: Sugg, sid: Option<String>| {
         let mut text = text;
+        let mut mentions = mentions;
         match sg.act {
-            SuggAct::Insert(ins) => {
+            SuggAct::Chip(chip) => {
                 let t = text.read().clone();
                 let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
-                text.set(format!("{}{}", &t[..cut], ins));
+                text.set(t[..cut].to_string());
+                if !mentions.read().iter().any(|c| c.kind == chip.kind && c.value == chip.value) {
+                    mentions.write().push(chip);
+                }
             }
             SuggAct::Larrier(cmd) => run_slash(cmd, sid),
         }
@@ -339,19 +365,25 @@ pub fn Composer(
     let do_send = move |sid: Option<String>| {
         let mut app = app;
         let mut text = text;
+        let mut mentions = mentions;
         let mut at = attachments;
-        let raw = text.read().clone();
+        let typed = text.read().clone();
         let a = at.read().clone();
-        if raw.trim().is_empty() && a.is_empty() {
+        let chips = mentions.read().clone();
+        if typed.trim().is_empty() && a.is_empty() && chips.is_empty() {
             return;
         }
         let cwd = match &sid {
             Some(id) => app.peek_session(id, |s| s.cwd()).flatten(),
             None => app.draft.read().workspace.clone(),
         };
+        // Chips become what the agent reads: a leading /skill, @paths, and
+        // context blocks for chats and the diff.
+        let raw = super::mentions::to_prompt(&chips, &typed);
         let t = expand_mentions(&app, &raw, cwd.as_deref());
         text.set(String::new());
         at.set(Vec::new());
+        mentions.set(Vec::new());
         let agents = multi.read().clone();
         if sid.is_none() && agents.len() > 1 {
             // Multitask: the same prompt on several agents, side by side.
@@ -510,8 +542,13 @@ pub fn Composer(
                         button { class: "icon-btn sm", onclick: move |_| app.ui.write().quote = None, Icon { i: I::X, size: 11 } }
                     }
                 }
-                if !atts.is_empty() {
+                if !atts.is_empty() || !chips_now.is_empty() {
                     div { class: "thumb-row",
+                        for (i, c) in chips_now.iter().cloned().enumerate() {
+                            MentionChipView { key: "m{i}-{c.value}", chip: c,
+                                onremove: move |_| { if i < mentions.read().len() { mentions.write().remove(i); } },
+                            }
+                        }
                         for (i, a) in atts.iter().enumerate() {
                             match a {
                                 Part::Image { .. } => rsx! {
@@ -578,6 +615,14 @@ pub fn Composer(
                             });
                         },
                         onkeydown: move |e| {
+                            // Backspace in an empty box removes the last chip.
+                            if e.key() == Key::Backspace && text.read().is_empty() {
+                                let n = mentions.read().len();
+                                if n > 0 {
+                                    mentions.write().truncate(n - 1);
+                                }
+                                return;
+                            }
                             if !suggs_k.is_empty() {
                                 match e.key() {
                                     Key::ArrowDown => { e.prevent_default(); hl.set((hl_i + 1) % suggs_k.len()); return; }
@@ -1016,8 +1061,8 @@ fn EnvPicker(open: Signal<bool>, worktree: bool, is_repo: bool, session: bool, l
 
 #[derive(Clone, PartialEq)]
 enum SuggAct {
-    /// Replace the token being typed with this text.
-    Insert(String),
+    /// Turn the token being typed into this chip.
+    Chip(MentionChip),
     /// Run a Larrier command.
     Larrier(&'static str),
 }
@@ -1064,7 +1109,7 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
         hits.sort_by_key(|p| (!p.rsplit('/').next().unwrap_or(p).to_lowercase().starts_with(&ql), p.len()));
         for p in hits.into_iter().take(6) {
             let (dir, name) = match p.rsplit_once('/') { Some((d, n)) => (d.to_string(), n.to_string()), None => (String::new(), p.clone()) };
-            out.push(Sugg { group: "Files", icon: I::File, logo: None, label: name, sub: dir, act: SuggAct::Insert(format!("@{p} ")) });
+            out.push(Sugg { group: "Files", icon: I::File, logo: None, label: name, sub: dir, act: SuggAct::Chip(MentionChip::path(p, false)) });
         }
         // Folders
         let mut dirs: Vec<String> = files
@@ -1076,23 +1121,22 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
         dirs.dedup();
         dirs.sort_by_key(|d| d.len());
         for d in dirs.into_iter().take(3) {
-            out.push(Sugg { group: "Folders", icon: I::Folder, logo: None, label: format!("{d}/"), sub: String::new(), act: SuggAct::Insert(format!("@{d}/ ")) });
+            out.push(Sugg { group: "Folders", icon: I::Folder, logo: None, label: format!("{d}/"), sub: String::new(), act: SuggAct::Chip(MentionChip::path(&format!("{d}/"), true)) });
         }
         // Other agents' conversations
         let sessions = app.sessions.read();
         for s in sessions.iter().filter(|s| Some(s.id.as_str()) != current && !s.archived && (ql.is_empty() || s.title.to_lowercase().contains(&ql))).take(4) {
-            let short = &s.id[s.id.len().saturating_sub(8)..];
             out.push(Sugg {
                 group: "Agents",
                 icon: I::Message,
                 logo: crate::logos::agent_logo(&s.agent),
                 label: s.title.clone(),
                 sub: format!("{} · {}", s.agent.display_name(), crate::state::rel_time(s.updated_at)),
-                act: SuggAct::Insert(format!("@agent:{short} ")),
+                act: SuggAct::Chip(MentionChip::agent(s)),
             });
         }
         if "git".starts_with(&ql) || ql.starts_with("git") || "diff".starts_with(&ql) {
-            out.push(Sugg { group: "Context", icon: I::Diff, logo: None, label: "Git diff".into(), sub: "uncommitted changes".into(), act: SuggAct::Insert("@git:diff ".into()) });
+            out.push(Sugg { group: "Context", icon: I::Diff, logo: None, label: "Git diff".into(), sub: "uncommitted changes".into(), act: SuggAct::Chip(MentionChip::git_diff()) });
         }
         return out;
     }
@@ -1111,13 +1155,14 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
                 continue;
             }
             let group = if it.kind == ItemKind::Skill { "Skills" } else { "Commands" };
+            let desc: String = it.description.clone().unwrap_or_default().chars().take(80).collect();
             out.push(Sugg {
                 group,
                 icon: if it.kind == ItemKind::Skill { I::Sparkle } else { I::Slash },
                 logo: if it.kind == ItemKind::Command { logo } else { None },
                 label: format!("/{name}"),
-                sub: it.description.clone().unwrap_or_default().chars().take(80).collect(),
-                act: SuggAct::Insert(format!("/{name} ")),
+                sub: desc.clone(),
+                act: SuggAct::Chip(MentionChip::skill(&name, it.kind == ItemKind::Skill, &desc)),
             });
             if out.len() > 40 {
                 break;

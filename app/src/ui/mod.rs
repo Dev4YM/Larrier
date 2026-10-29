@@ -7,6 +7,7 @@ mod composer;
 mod customize;
 mod files;
 mod home;
+pub mod mentions;
 mod menubar;
 mod models;
 mod overlays;

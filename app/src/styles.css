@@ -1063,6 +1063,20 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .mr-row .c-name .mr-tag { flex-shrink: 0; }
 .mr-row .c-name .id { flex: 1 1 0; }
 
+/* Mention chips: files, folders, chats, the diff and skills attached to a
+   prompt, in the composer and on sent prompts. */
+.mention-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; max-width: 240px; padding: 0 6px 0 7px; border-radius: 8px; background: var(--chip); color: var(--fg); font-size: 12px; line-height: 1; flex-shrink: 0; cursor: default; }
+.mention-chip .ic { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; color: var(--fg-2); flex-shrink: 0; }
+.mention-chip .ic .agent-glyph { width: 14px; height: 14px; }
+.mention-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mention-chip .x { width: 16px; height: 16px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); flex-shrink: 0; }
+.mention-chip .x:hover { background: var(--chip-2); color: var(--fg); }
+.mention-chip.skill { background: color-mix(in srgb, var(--accent-c, var(--blue)) 12%, var(--chip)); color: var(--accent-c, var(--blue)); }
+.mention-chip.skill .ic { color: inherit; }
+.thumb-row .mention-chip { align-self: center; }
+.mention-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.user-card .mention-row:first-child { margin-top: 0; margin-bottom: 6px; }
+
 /* Tool views: duration, images a tool returned, input / output, plans and questions. */
 .step .dur { font-size: 11px; color: var(--fg-4); margin-left: 6px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .tool-images { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }

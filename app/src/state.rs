@@ -833,7 +833,11 @@ impl App {
         let text = match quote {
             Some(q) if !q.trim().is_empty() => {
                 let quoted: String = q.trim().lines().map(|l| format!("> {l}\n")).collect();
-                format!("{quoted}\n{text}")
+                // A leading "/skill" must stay first for the agent to run it.
+                match text.strip_prefix('/').and_then(|rest| rest.split_once(char::is_whitespace)) {
+                    Some((skill, rest)) if !skill.is_empty() => format!("/{skill}\n{quoted}\n{}", rest.trim_start()),
+                    _ => format!("{quoted}\n{text}"),
+                }
             }
             _ => text,
         };

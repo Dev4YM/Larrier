@@ -441,6 +441,9 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
         return rsx! { div { class: "notice task-note", id: "m-{msg.id}", Icon { i: I::Bot, size: 12, stroke: 1.5 } "{note}" } };
     }
     let (quote, body) = split_quote(&text);
+    // Mentioned chats, files and skills show as chips, not as the raw tokens
+    // and context blocks that were sent to the agent.
+    let (body, chips) = super::mentions::split_mentions(&body);
     let mid = msg.id.clone();
     let attachments: Vec<String> = msg
         .parts
@@ -452,7 +455,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
         })
         .collect();
     let images: Vec<String> = msg.parts.iter().filter(|p| matches!(p, Part::Image { .. })).filter_map(crate::state::image_src).collect();
-    let short = text.lines().count() <= 4 && text.len() < 360;
+    let short = body.lines().count() <= 4 && body.len() < 360;
     let text2 = text.clone();
     let (sid_e, mid_e) = (session_id.clone(), mid.clone());
     if editing() {
@@ -542,6 +545,9 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                     app.request_edit(Some((mid_c.clone(), text2.clone())));
                 },
                 ondoubleclick: move |e| { e.stop_propagation(); expanded.toggle(); },
+                if !chips.is_empty() {
+                    super::mentions::MentionChips { chips: chips.clone() }
+                }
                 if let Some(q) = quote {
                     span { class: "q", Icon { i: I::Quote, size: 13 } "\u{201c}{q}\u{201d} " }
                 }

@@ -50,6 +50,10 @@ pub enum AgentEvent {
     Usage { usage: Usage },
     Notice { text: String },
     Error { message: String },
+    /// A plan rate-limit window as the agent reports it mid-turn (Claude
+    /// Code's `rate_limit_event`): percent used and when it resets (unix
+    /// seconds). Not part of the transcript.
+    RateLimit { window: String, used_pct: f64, resets_at: Option<i64> },
     /// Diagnostic output from the agent process (not shown inline).
     Log { line: String },
     /// Turn finished. `ok == false` when the agent failed or was cancelled.

@@ -634,14 +634,26 @@ fn task_status(status: &str) -> Option<ToolStatus> {
     })
 }
 
-/// `rate_limit_event`: a notice when the plan's limit stops the turn; the
-/// usage warnings that precede it only go to the log.
+/// `rate_limit_event`: the window's usage for the plan-limit chip, and a
+/// notice when the limit stops the turn.
 fn rate_limit(info: &Value, sink: &EventSink) {
     let window = match s(info, "rateLimitType") {
         Some("five_hour") => " (5-hour limit)",
         Some("seven_day") | Some("seven_day_opus") | Some("seven_day_sonnet") => " (weekly limit)",
         _ => "",
     };
+    // Same names as the plan limits read from the account.
+    let name = match s(info, "rateLimitType") {
+        Some("five_hour") => Some("5-hour"),
+        Some("seven_day") => Some("Weekly"),
+        Some("seven_day_opus") => Some("Weekly · Opus"),
+        Some("seven_day_sonnet") => Some("Weekly · Sonnet"),
+        _ => None,
+    };
+    let used = info["utilization"].as_f64().map(|u| u * 100.0).or_else(|| (s(info, "status") == Some("rejected")).then_some(100.0));
+    if let (Some(name), Some(used_pct)) = (name, used) {
+        sink.send(AgentEvent::RateLimit { window: name.to_string(), used_pct, resets_at: info["resetsAt"].as_i64() });
+    }
     match s(info, "status") {
         Some("rejected") => {
             let resets = info["resetsAt"]
@@ -919,6 +931,7 @@ mod tests {
             r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2"}},"parent_tool_use_id":null}"#,
             r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m2","content":[{"type":"fallback","from":{"model":"claude-opus-5"},"to":{"model":"claude-sonnet-5"}},{"type":"text","text":"partial answer"}]}}"#,
             r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"max_tokens"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.82,"resetsAt":1793900000,"rateLimitType":"seven_day"}}"#,
             r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1793278800,"rateLimitType":"five_hour"}}"#,
             r#"{"type":"some_future_event","x":1}"#,
             r#"{"type":"result","subtype":"error_max_turns","is_error":true,"stop_reason":"max_tokens","errors":[],"usage":{"input_tokens":5,"output_tokens":40,"output_tokens_details":{"thinking_tokens":12}},"permission_denials":[]}"#,
@@ -943,6 +956,10 @@ mod tests {
         assert_eq!(final_status(&ev, "t_bg"), Some(ToolStatus::Failed), "system task_notification");
         assert_eq!(final_status(&ev, "t_agent"), Some(ToolStatus::Cancelled), "task_updated patch");
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Usage { usage } if usage.reasoning_tokens == 12)));
+        // Window usage for the plan-limit chip: a warning reports its share,
+        // a rejection means the window is used up.
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::RateLimit { window, used_pct, .. } if window == "Weekly" && (*used_pct - 82.0).abs() < 0.01)));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::RateLimit { window, used_pct, resets_at: Some(1793278800) } if window == "5-hour" && *used_pct == 100.0)));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Error { message } if message == "Stopped at the turn limit (--max-turns)")));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, stop_reason: Some(r) }) if r == "error_max_turns"));
     }

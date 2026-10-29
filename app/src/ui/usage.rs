@@ -562,6 +562,27 @@ pub fn refresh_quotas(app: App, force: bool) {
     });
 }
 
+/// A window's usage reported by a running agent: update the cached plan
+/// limits right away, without asking the account again.
+pub fn observe_limit(agent: &AgentKind, account_id: Option<&str>, window: &str, used_pct: f64, resets_at: Option<i64>) {
+    let mut state = QUOTAS.write();
+    let Some(state) = state.as_mut() else { return };
+    let q = match state.list.iter().position(|q| &q.agent == agent && q.account_id.as_deref() == account_id) {
+        Some(i) => Some(i),
+        None => state.list.iter().position(|q| &q.agent == agent && q.account_id.is_none()),
+    };
+    let Some(q) = q.map(|i| &mut state.list[i]) else { return };
+    let resets_at = resets_at.and_then(|t| DateTime::from_timestamp(t, 0));
+    match q.windows.iter_mut().find(|w| w.name == window) {
+        Some(w) => {
+            w.used_pct = used_pct;
+            w.resets_at = resets_at.or(w.resets_at);
+        }
+        None => q.windows.push(Window { name: window.to_string(), used_pct, resets_at, detail: None }),
+    }
+    q.as_of = Some(Utc::now());
+}
+
 fn short_window(name: &str) -> String {
     match name {
         "5-hour" => "5h".into(),

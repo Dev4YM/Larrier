@@ -202,7 +202,7 @@ impl TurnRecorder {
                 }
                 true
             }
-            AgentEvent::Log { .. } => false,
+            AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } => false,
             AgentEvent::Done { ok, .. } => {
                 self.close_reasoning(session);
                 self.finish(session, *ok);
@@ -370,7 +370,7 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
             }
             return;
         }
-        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::Log { .. } | AgentEvent::Done { .. } => return,
+        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Done { .. } => return,
         _ => {}
     }
     let parts: usize = msgs.iter().map(|m| m.parts.len()).sum();

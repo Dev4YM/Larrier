@@ -17,7 +17,7 @@ mod sidebar;
 mod tasks;
 mod terminal;
 mod transcript;
-mod usage;
+pub(crate) mod usage;
 
 use dioxus::prelude::*;
 use larrier_core::AgentKind;

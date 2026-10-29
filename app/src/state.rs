@@ -968,6 +968,9 @@ impl App {
                                 store().flush_imports();
                             }
                             AgentEvent::Log { line } => tracing::debug!("[{}] {line}", rec.agent.id()),
+                            AgentEvent::RateLimit { window, used_pct, resets_at } => {
+                                crate::ui::usage::observe_limit(&rec.agent, s.account_id.as_deref(), window, *used_pct, *resets_at);
+                            }
                             AgentEvent::Done { .. } => done = true,
                             _ => {}
                         }

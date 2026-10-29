@@ -37,9 +37,12 @@ struct TurnSpan {
 
 fn turn_spans(messages: &[Message]) -> Vec<TurnSpan> {
     let mut out: Vec<TurnSpan> = Vec::new();
+    // Keys must be unique among siblings even if a source repeats an id.
+    let mut seen = std::collections::HashSet::new();
     for (i, m) in messages.iter().enumerate() {
         if m.role == Role::User || out.is_empty() {
-            out.push(TurnSpan { key: m.id.clone(), start: i, end: i + 1, user_id: (m.role == Role::User).then(|| m.id.clone()) });
+            let key = if seen.insert(m.id.clone()) { m.id.clone() } else { format!("{}~{i}", m.id) };
+            out.push(TurnSpan { key, start: i, end: i + 1, user_id: (m.role == Role::User).then(|| m.id.clone()) });
         } else if let Some(t) = out.last_mut() {
             t.end = i + 1;
         }
@@ -223,7 +226,7 @@ pub fn Transcript(id: String) -> Element {
             div { class: "turn-nav", "data-for": "{tid}",
                 div { class: "tn-dashes",
                     for it in nav.iter() {
-                        span { key: "d-{it.uid}", class: "tn-dash", "data-uid": "{it.uid}" }
+                        span { key: "d-{it.ti}", class: "tn-dash", "data-uid": "{it.uid}" }
                     }
                 }
                 div { class: "tn-panel",
@@ -231,7 +234,7 @@ pub fn Transcript(id: String) -> Element {
                     div { class: "tn-list",
                         for it in nav.iter().cloned() {
                             button {
-                                key: "r-{it.uid}",
+                                key: "r-{it.ti}",
                                 class: "tn-row",
                                 "data-uid": "{it.uid}",
                                 onclick: move |e| {
@@ -450,7 +453,7 @@ fn TurnView(
                 button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
             }
             for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
-                AssistantMessage { key: "{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: mi + 1 == turn.replies.len(), show_reasoning, skip_final: false }
+                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: mi + 1 == turn.replies.len(), show_reasoning, skip_final: false }
             }
         } else {
             if has_work {
@@ -463,8 +466,8 @@ fn TurnView(
                         if hidden > 0 {
                             button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
                         }
-                        for m in turn.replies.iter().skip(hidden) {
-                            AssistantMessage { key: "w-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: false, show_reasoning, skip_final: true }
+                        for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
+                            AssistantMessage { key: "w{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: false, show_reasoning, skip_final: true }
                         }
                     }
                 }

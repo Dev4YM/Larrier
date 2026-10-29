@@ -168,10 +168,10 @@ pub fn SubagentTranscript(session_id: String, tool_id: String) -> Element {
                     }
                     for (i, m) in msgs.into_iter().enumerate() {
                         if m.role == Role::User {
-                            div { key: "{m.id}", class: "tk-user", "{m.text()}" }
+                            div { key: "{i}-{m.id}", class: "tk-user", "{m.text()}" }
                         } else {
                             super::transcript::AssistantMessage {
-                                key: "{m.id}",
+                                key: "{i}-{m.id}",
                                 session_id: session_id.clone(),
                                 msg: m.clone(),
                                 streaming: running && i + 1 == n,
@@ -414,7 +414,9 @@ fn all_rows(messages: &[Message]) -> Vec<TaskRow> {
 fn collect_rows(messages: &[Message], out: &mut Vec<TaskRow>, depth: usize) {
     for m in messages {
         for t in m.tool_calls() {
-            if t.background || t.is_subagent() {
+            // A call seen twice (a subagent transcript linked into two
+            // calls) is listed once: rows are keyed by call id.
+            if (t.background || t.is_subagent()) && !out.iter().any(|r| r.id == t.id) {
                 out.push(task_row(t));
             }
             if depth < 4 {

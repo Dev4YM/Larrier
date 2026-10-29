@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use larrier_core::{FileDiff, ToolKind, ToolStatus};
+use larrier_core::{FileDiff, ToolKind, ToolStatus, Usage};
+use larrier_formats::codex::{error_message, unwrap_shell};
+use larrier_formats::util::image_parts;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -45,6 +47,12 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         }
     }
     let mut parser = CodexStream::new(req.cwd.clone());
+    // `exec resume` reports the thread's running totals; measure this turn
+    // from where the thread stood.
+    if let Some(id) = req.resume_id.clone() {
+        let home = req.launch.env.iter().find(|(k, _)| k == "CODEX_HOME").map(|(_, v)| PathBuf::from(v));
+        parser.baseline = tokio::task::spawn_blocking(move || larrier_formats::codex::thread_usage(home.as_deref(), &id)).await.ok().flatten();
+    }
     run_stream("Codex", cmd, Some(prompt), &sink, &mut control, &mut parser).await;
 }
 
@@ -53,6 +61,10 @@ pub struct CodexStream {
     cwd: PathBuf,
     done: bool,
     failed: bool,
+    /// The last error shown (`turn.failed` repeats the preceding `error`).
+    last_error: Option<String>,
+    /// Thread totals before a resumed turn (`turn.completed` is cumulative).
+    pub baseline: Option<Usage>,
     /// Characters already emitted per streaming item (agent_message / reasoning).
     emitted: HashMap<String, usize>,
     started_tools: HashMap<String, ToolKind>,
@@ -68,6 +80,8 @@ impl CodexStream {
             cwd,
             done: false,
             failed: false,
+            last_error: None,
+            baseline: None,
             emitted: HashMap::new(),
             started_tools: HashMap::new(),
             agent_threads: HashMap::new(),
@@ -108,7 +122,9 @@ impl CodexStream {
                 }
             }
             "command_execution" => {
-                let command = s(item, "command").unwrap_or("").to_string();
+                // Commands arrive wrapped in a login shell (`bash -lc '…'`,
+                // `cmd.exe /c '…'`); show what the model actually ran.
+                let command = unwrap_shell(s(item, "command").unwrap_or(""));
                 self.start(&id, || tool(id.clone(), "shell", json!({ "command": command })), sink);
                 let status = s(item, "status").unwrap_or(if completed { "completed" } else { "in_progress" });
                 if status != "in_progress" {
@@ -164,20 +180,40 @@ impl CodexStream {
             "mcp_tool_call" => {
                 let name = format!("mcp__{}__{}", s(item, "server").unwrap_or("mcp"), s(item, "tool").unwrap_or("tool"));
                 let args = item.get("arguments").cloned().unwrap_or(Value::Null);
-                self.start(&id, || tool(id.clone(), &name, args.clone()), sink);
+                self.start(
+                    &id,
+                    || {
+                        let mut t = tool(id.clone(), &name, args.clone());
+                        // `node_repl` / `cua_repl` scripts carry a display title.
+                        if let Some(title) = s(&args, "title").filter(|x| !x.trim().is_empty()) {
+                            t.title = Some(title.to_string());
+                        }
+                        t
+                    },
+                    sink,
+                );
                 let status = s(item, "status").unwrap_or("");
                 if completed || status == "completed" || status == "failed" {
                     let err = item.get("error").filter(|e| !e.is_null());
+                    let content = &item["result"]["content"];
                     let output = match err {
                         Some(e) => s(e, "message").unwrap_or("error").to_string(),
-                        None => content_text(&item["result"]["content"]),
+                        None => content_text(&Value::Array(
+                            content.as_array().into_iter().flatten().filter(|c| s(c, "type") != Some("image")).cloned().collect(),
+                        )),
                     };
+                    // A failed call may carry its error in `result` with `error: null`.
+                    let failed = err.is_some() || status == "failed" || item["result"]["isError"].as_bool() == Some(true);
+                    let images = image_parts(content);
+                    if !images.is_empty() {
+                        sink.send(AgentEvent::ToolImages { id: id.clone(), images });
+                    }
                     sink.send(AgentEvent::ToolUpdate {
                         id,
-                        status: Some(if err.is_some() || status == "failed" { ToolStatus::Failed } else { ToolStatus::Completed }),
+                        status: Some(if failed { ToolStatus::Failed } else { ToolStatus::Completed }),
                         output: Some(output),
                         diffs: Vec::new(),
-                        is_error: err.is_some(),
+                        is_error: failed,
                         title: None,
                     });
                 }
@@ -351,42 +387,40 @@ impl LineParser for CodexStream {
                 let us = &v["usage"];
                 let input = u(us, "input_tokens");
                 let cached = u(us, "cached_input_tokens");
-                sink.send(AgentEvent::Usage {
-                    usage: usage_from(
-                        input.saturating_sub(cached),
-                        u(us, "output_tokens"),
-                        cached,
-                        u(us, "cache_write_input_tokens"),
-                        u(us, "reasoning_output_tokens"),
+                let mut usage = usage_from(input.saturating_sub(cached), u(us, "output_tokens"), cached, u(us, "cache_write_input_tokens"), u(us, "reasoning_output_tokens"), None);
+                if let Some(b) = self.baseline.as_ref().filter(|b| covers(&usage, b)) {
+                    usage = usage_from(
+                        usage.input_tokens - b.input_tokens,
+                        usage.output_tokens - b.output_tokens,
+                        usage.cache_read_tokens - b.cache_read_tokens,
+                        usage.cache_write_tokens - b.cache_write_tokens,
+                        usage.reasoning_tokens - b.reasoning_tokens,
                         None,
-                    ),
-                });
+                    );
+                }
+                sink.send(AgentEvent::Usage { usage });
                 self.done = true;
                 sink.done(true, Some("end_turn".into()));
             }
             "turn.failed" => {
-                let raw = s(&v["error"], "message").unwrap_or("Codex turn failed");
-                let msg = serde_json::from_str::<Value>(raw)
-                    .ok()
-                    .and_then(|j| j["error"]["message"].as_str().or(j["message"].as_str()).map(|m| m.to_string()))
-                    .unwrap_or_else(|| raw.to_string());
-                sink.error(msg);
+                let msg = error_message(s(&v["error"], "message").unwrap_or("Codex turn failed"));
+                // The same failure usually arrived as an `error` event first.
+                if self.last_error.as_deref() != Some(msg.as_str()) {
+                    sink.error(msg);
+                }
                 self.failed = true;
                 self.done = true;
                 sink.done(false, Some("error".into()));
             }
             "error" => {
-                let raw = s(&v, "message").unwrap_or("error");
                 // API failures arrive as a JSON string; surface the human message.
-                let pretty = serde_json::from_str::<Value>(raw)
-                    .ok()
-                    .and_then(|j| j["error"]["message"].as_str().or(j["message"].as_str()).map(|m| m.to_string()));
-                let msg = pretty.as_deref().unwrap_or(raw);
+                let msg = error_message(s(&v, "message").unwrap_or("error"));
                 // Transient reconnect notices are informational.
                 if msg.to_ascii_lowercase().contains("reconnect") {
-                    sink.log(msg.to_string());
+                    sink.log(msg);
                 } else {
-                    sink.error(msg.to_string());
+                    sink.error(msg.clone());
+                    self.last_error = Some(msg);
                     self.failed = true;
                 }
             }
@@ -401,6 +435,15 @@ impl LineParser for CodexStream {
     fn failed(&self) -> bool {
         self.failed
     }
+}
+
+/// Whether `total` includes `base` (cumulative thread totals).
+fn covers(total: &Usage, base: &Usage) -> bool {
+    total.input_tokens >= base.input_tokens
+        && total.output_tokens >= base.output_tokens
+        && total.cache_read_tokens >= base.cache_read_tokens
+        && total.cache_write_tokens >= base.cache_write_tokens
+        && total.reasoning_tokens >= base.reasoning_tokens
 }
 
 /// Codex `CollabAgentStatus` → tool status.
@@ -435,7 +478,7 @@ mod tests {
         let ev = collect(&mut p, &lines);
         assert!(matches!(&ev[0], AgentEvent::NativeSession { id, .. } if id.starts_with("0199a213")));
         assert!(matches!(&ev[1], AgentEvent::Reasoning { .. }));
-        assert!(matches!(&ev[2], AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Shell && tool.title.as_deref() == Some("Ran bash -lc ls")));
+        assert!(matches!(&ev[2], AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Shell && tool.title.as_deref() == Some("Ran ls")), "login-shell wrapper removed");
         assert!(matches!(&ev[3], AgentEvent::ToolUpdate { status: Some(ToolStatus::Completed), output: Some(o), .. } if o.contains("Cargo.toml")));
         assert!(matches!(&ev[4], AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Edit && tool.locations.len() == 2));
         assert!(matches!(&ev[5], AgentEvent::ToolUpdate { diffs, .. } if diffs.len() == 2));
@@ -460,6 +503,81 @@ mod tests {
         assert!(matches!(&ev[1], AgentEvent::TextDelta { text } if text == "lo"));
         assert!(matches!(&ev[2], AgentEvent::Error { message } if message.contains("usage limit")));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })));
+    }
+
+    fn fixture(text: &str) -> Vec<AgentEvent> {
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        collect(&mut CodexStream::new(std::env::temp_dir()), &lines)
+    }
+
+    fn errors(ev: &[AgentEvent]) -> Vec<&str> {
+        ev.iter().filter_map(|e| match e { AgentEvent::Error { message } => Some(message.as_str()), _ => None }).collect()
+    }
+
+    /// Real run with an unsupported model: two warning items, then `error`
+    /// and `turn.failed` carrying the same API error.
+    #[test]
+    fn real_bad_model_run() {
+        let ev = fixture(include_str!("../../tests/fixtures/codex_bad_model.jsonl"));
+        let notices = ev.iter().filter(|e| matches!(e, AgentEvent::Notice { .. })).count();
+        assert_eq!(notices, 2, "service-tier and metadata warnings");
+        assert_eq!(errors(&ev), ["The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."], "one readable error, not the JSON twice");
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })));
+    }
+
+    /// Real Windows run: commands wrapped in `cmd.exe /c '…'`, a new file,
+    /// and a command exiting with code 3.
+    #[test]
+    fn real_exec_tools_run() {
+        let ev = fixture(include_str!("../../tests/fixtures/codex_exec_tools.jsonl"));
+        let titles: Vec<&str> = ev.iter().filter_map(|e| match e { AgentEvent::ToolStart { tool } => tool.title.as_deref(), _ => None }).collect();
+        assert_eq!(titles[0], "Ran type notes.txt");
+        assert!(titles[1].starts_with("Write"), "{titles:?}");
+        assert_eq!(titles[2], "Ran exit 3");
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), output: Some(o), .. } if id == "item_1" && o.contains("beta line"))));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Failed), output: Some(o), .. } if id == "item_3" && o.contains("[exit code 3]"))));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Usage { usage } if usage.cache_read_tokens == 57088 && usage.input_tokens == 72708 - 57088)));
+        assert!(errors(&ev).is_empty());
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
+    }
+
+    /// Real run where the sandbox blocked the shell and Codex fell back to
+    /// computer-use MCP calls; several end `failed` with `error: null`.
+    #[test]
+    fn real_mcp_fallback_run() {
+        let ev = fixture(include_str!("../../tests/fixtures/codex_mcp_fallback.jsonl"));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Mcp && tool.title.as_deref() == Some("Inspect available Windows surfaces"))));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), is_error: false, .. } if id == "item_2")));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Failed), is_error: true, output: Some(o), .. } if id == "item_3" && !o.is_empty())));
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
+    }
+
+    /// Real `exec resume` turn: `turn.completed` carries the thread's running
+    /// totals, so the turn's usage is measured from the thread's prior total.
+    #[test]
+    fn real_resume_usage_is_per_turn() {
+        let text = include_str!("../../tests/fixtures/codex_resume.jsonl");
+        let lines: Vec<&str> = text.lines().collect();
+        let mut p = CodexStream::new(std::env::temp_dir());
+        // The thread's last `token_count` before this turn (from its rollout).
+        p.baseline = Some(usage_from(72708 - 57088, 691, 57088, 0, 210, None));
+        let ev = collect(&mut p, &lines);
+        let usage = ev.iter().find_map(|e| match e { AgentEvent::Usage { usage } => Some(usage.clone()), _ => None }).unwrap();
+        assert_eq!((usage.input_tokens, usage.cache_read_tokens, usage.output_tokens, usage.reasoning_tokens), (16578, 0, 5, 0));
+        // Without a baseline (or a non-cumulative report) the totals pass through.
+        let ev = collect(&mut CodexStream::new(std::env::temp_dir()), &lines);
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Usage { usage } if usage.output_tokens == 696)));
+    }
+
+    #[test]
+    fn mcp_result_images() {
+        let lines = [
+            r#"{"type":"item.completed","item":{"id":"m1","type":"mcp_tool_call","server":"cua_repl","tool":"js","arguments":{"code":"await cua.screenshot();"},"result":{"content":[{"type":"text","text":"Captured"},{"type":"image","data":"iVBORw0KGgo=","mimeType":"image/png"}]},"error":null,"status":"completed"}}"#,
+        ];
+        let ev = collect(&mut CodexStream::new(std::env::temp_dir()), &lines);
+        assert!(matches!(&ev[0], AgentEvent::ToolStart { tool } if tool.name == "mcp__cua_repl__js"));
+        assert!(matches!(&ev[1], AgentEvent::ToolImages { id, images } if id == "m1" && matches!(&images[0], larrier_core::Part::Image { mime: Some(m), .. } if m == "image/png")));
+        assert!(matches!(&ev[2], AgentEvent::ToolUpdate { output: Some(o), .. } if o == "Captured"));
     }
 
     #[test]

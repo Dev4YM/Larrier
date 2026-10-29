@@ -1,0 +1,11 @@
+{"type":"thread.started","thread_id":"01a00000-0000-7000-8000-000000000003"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll perform the three requested directory-local operations, in order."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"\"C:\\\\WINDOWS\\\\system32\\\\cmd.exe\" /c 'cmd.exe /d /c type notes.txt'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"\"C:\\\\WINDOWS\\\\system32\\\\cmd.exe\" /c 'cmd.exe /d /c type notes.txt'","aggregated_output":"alpha line\nbeta line","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_2","type":"file_change","changes":[{"path":"C:\\proj\\out.txt","kind":"add"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"C:\\proj\\out.txt","kind":"add"}],"status":"completed"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"\"C:\\\\WINDOWS\\\\system32\\\\cmd.exe\" /c 'cmd.exe /d /c exit 3'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"\"C:\\\\WINDOWS\\\\system32\\\\cmd.exe\" /c 'cmd.exe /d /c exit 3'","aggregated_output":"","exit_code":3,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":72708,"cached_input_tokens":57088,"cache_write_input_tokens":0,"output_tokens":691,"reasoning_output_tokens":210}}

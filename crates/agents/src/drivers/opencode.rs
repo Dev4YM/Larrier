@@ -108,7 +108,13 @@ impl LineParser for OpenCodeStream {
             "error" => {
                 let e = &v["error"];
                 let msg = s(&e["data"], "message").or_else(|| s(e, "message")).or_else(|| s(e, "name")).unwrap_or("OpenCode error");
-                sink.error(msg.to_string());
+                // A rejected provider key reads "User not found." (401): say
+                // so, so the chat offers to sign in again.
+                let msg = match e["data"]["statusCode"].as_u64() {
+                    Some(401 | 403) => format!("Authentication failed: {msg}"),
+                    _ => msg.to_string(),
+                };
+                sink.error(msg);
                 self.failed = true;
             }
             _ => {}
@@ -146,5 +152,15 @@ mod tests {
         assert!(matches!(&ev[3], AgentEvent::ToolUpdate { diffs, .. } if diffs[0].added == 1 && diffs[0].removed == 1));
         assert!(matches!(&ev[4], AgentEvent::Text { text } if text == "Updated x.ts"));
         assert!(matches!(&ev[5], AgentEvent::Usage { usage } if usage.cost_usd == Some(0.01)));
+    }
+
+    #[test]
+    fn rejected_key_reads_as_sign_in() {
+        // opencode 1.17.19 with a revoked OpenRouter key.
+        let lines = [r#"{"type":"error","timestamp":1,"sessionID":"ses_abc","error":{"name":"APIError","data":{"message":"User not found.","statusCode":401,"isRetryable":false}}}"#];
+        let mut p = OpenCodeStream::default();
+        let ev = collect(&mut p, &lines);
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Error { message } if message == "Authentication failed: User not found.")), "{ev:?}");
+        assert!(p.failed());
     }
 }

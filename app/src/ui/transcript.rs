@@ -661,10 +661,20 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
         };
     }
     let mid_c = msg.id.clone();
+    // At most a few lines tall until double-clicked; longer prompts fade out.
+    let mut card_class = String::from("user-card");
+    if expanded() {
+        card_class.push_str(" expanded");
+    } else if short {
+        card_class.push_str(" short");
+    }
+    if !images.is_empty() {
+        card_class.push_str(" has-images");
+    }
     rsx! {
         div { class: "user-msg", id: "m-{msg.id}",
             div {
-                class: if expanded() || short { "user-card expanded" } else { "user-card" },
+                class: card_class,
                 dir: "auto",
                 title: "Click to edit · double-click to expand",
                 onclick: move |e| {
@@ -672,13 +682,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                     app.request_edit(Some((mid_c.clone(), text2.clone())));
                 },
                 ondoubleclick: move |e| { e.stop_propagation(); expanded.toggle(); },
-                if !chips.is_empty() {
-                    super::mentions::MentionChips { chips: chips.clone() }
-                }
-                if let Some(q) = quote {
-                    span { class: "q", Icon { i: I::Quote, size: 13 } "\u{201c}{q}\u{201d} " }
-                }
-                "{body}"
+                // Images first, as small thumbnails (click to view), like Cursor.
                 if !images.is_empty() {
                     div { class: "msg-images",
                         for (i, src) in images.into_iter().enumerate() {
@@ -688,6 +692,13 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                         }
                     }
                 }
+                if !chips.is_empty() {
+                    super::mentions::MentionChips { chips: chips.clone() }
+                }
+                if let Some(q) = quote {
+                    span { class: "q", Icon { i: I::Quote, size: 13 } "\u{201c}{q}\u{201d} " }
+                }
+                "{body}"
                 if !attachments.is_empty() {
                     div { class: "attach-row",
                         for a in attachments {

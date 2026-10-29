@@ -1,7 +1,7 @@
 //! Normalized runtime events every driver emits, and the controls a running
 //! turn accepts.
 
-use larrier_core::{FileDiff, PlanEntry, ToolCall, ToolStatus, Usage};
+use larrier_core::{FileDiff, Part, PlanEntry, ToolCall, ToolStatus, Usage};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
@@ -30,6 +30,8 @@ pub enum AgentEvent {
         is_error: bool,
         title: Option<String>,
     },
+    /// Images a tool returned (screenshots from MCP / browser tools).
+    ToolImages { id: String, images: Vec<Part> },
     Plan { entries: Vec<PlanEntry> },
     /// Extra facts about a tool call: run time, background-ness, subagent type.
     ToolMeta {

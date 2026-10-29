@@ -141,6 +141,14 @@ impl TurnRecorder {
                 }
                 false
             }
+            AgentEvent::ToolImages { id, images } => match self.find_tool(session, id) {
+                Some(t) => {
+                    t.images.extend(images.iter().cloned());
+                    session.touch();
+                    true
+                }
+                None => false,
+            },
             AgentEvent::Subagent { parent_tool_id, inner } => {
                 let agent = self.agent.clone();
                 match self.find_tool(session, parent_tool_id) {
@@ -356,6 +364,12 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
             }
             return;
         }
+        AgentEvent::ToolImages { id, images } => {
+            if let Some(t) = find_tool_deep_mut(msgs, id) {
+                t.images.extend(images.iter().cloned());
+            }
+            return;
+        }
         AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::Log { .. } | AgentEvent::Done { .. } => return,
         _ => {}
     }
@@ -448,5 +462,22 @@ mod tests {
         rec.apply(&mut s, &AgentEvent::ToolUpdate { id: "task1".into(), status: Some(ToolStatus::Completed), output: Some("done".into()), diffs: vec![], is_error: false, title: None });
         rec.apply(&mut s, &AgentEvent::Done { ok: true, stop_reason: None });
         assert!(active_tasks(&s.messages).is_empty(), "everything closes when the turn ends");
+    }
+
+    #[test]
+    fn records_tool_images_in_turn_and_subagents() {
+        let mut s = Session::new(AgentKind::ClaudeCode, None);
+        s.push(Message::user_text("screenshot it"));
+        let mut rec = TurnRecorder::begin(&mut s, AgentKind::ClaudeCode, None, None);
+        let img = || vec![Part::Image { mime: Some("image/png".into()), source: larrier_core::lsf::MediaSource::Base64 { data: "iVBORw0KGgo=".into() } }];
+        rec.apply(&mut s, &AgentEvent::ToolStart { tool: ToolCall::new("shot", "mcp__browser__screenshot", serde_json::json!({})) });
+        rec.apply(&mut s, &AgentEvent::ToolStart { tool: ToolCall::new("task1", "Agent", serde_json::json!({"description": "Check UI"})) });
+        rec.apply(&mut s, &sub("task1", AgentEvent::ToolStart { tool: ToolCall::new("inner", "mcp__browser__screenshot", serde_json::json!({})) }));
+        assert!(rec.apply(&mut s, &AgentEvent::ToolImages { id: "shot".into(), images: img() }));
+        rec.apply(&mut s, &sub("task1", AgentEvent::ToolImages { id: "inner".into(), images: img() }));
+        let m = s.messages.last().unwrap();
+        assert_eq!(m.tool_calls().find(|t| t.id == "shot").unwrap().images.len(), 1);
+        let task = m.tool_calls().find(|t| t.id == "task1").unwrap();
+        assert_eq!(task.subagent[0].tool_calls().find(|t| t.id == "inner").unwrap().images.len(), 1);
     }
 }

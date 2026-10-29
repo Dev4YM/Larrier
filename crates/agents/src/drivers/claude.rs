@@ -5,7 +5,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use larrier_core::{AgentKind, FileDiff, ToolStatus};
+use larrier_core::{AgentKind, FileDiff, Part, ToolCall, ToolStatus};
+use larrier_formats::claude::{fix_tool_kind, loaded_tools, server_tool_result};
+use larrier_formats::util::image_parts;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -89,6 +91,16 @@ pub struct ClaudeStream {
     output_calls: HashMap<String, String>,
     /// Tool ids already seen inside subagents.
     side_tools: HashSet<String>,
+    /// Tool calls already marked denied by a `permission_denied` event.
+    denied: HashSet<String>,
+    /// An API retry streak was announced (until the next response starts).
+    retrying: bool,
+    /// A safeguard refusal was announced (its `fallback` block and the
+    /// result's `refusal` stop reason need no second notice).
+    refusal_noted: bool,
+    switch_noted: bool,
+    /// The output-token cut-off was announced.
+    cutoff_noted: bool,
 }
 
 impl LineParser for ClaudeStream {
@@ -107,7 +119,11 @@ impl LineParser for ClaudeStream {
             "assistant" => self.assistant(&v, sink),
             "user" => self.user(&v, sink),
             "result" => self.result(&v, sink),
-            _ => {}
+            "rate_limit_event" => rate_limit(&v["rate_limit_info"], sink),
+            // Heartbeats, tool-use summaries, prompt suggestions, auth
+            // progress and /clear resets carry nothing a transcript keeps.
+            "tool_progress" | "tool_use_summary" | "prompt_suggestion" | "auth_status" | "conversation_reset" => {}
+            _ => sink.log(line),
         }
     }
 
@@ -132,14 +148,25 @@ impl ClaudeStream {
                 }
             }
             "compact_boundary" => sink.notice("Context compacted"),
-            "api_retry" => sink.log(format!(
-                "API retry {}/{}: {}",
-                u(v, "attempt"),
-                u(v, "max_retries"),
-                s(v, "error").unwrap_or("")
-            )),
+            "api_retry" => {
+                // One notice per retry streak; every attempt goes to the log.
+                if !self.retrying {
+                    self.retrying = true;
+                    let status = v["error_status"].as_u64().map(|c| format!(" ({c})")).unwrap_or_default();
+                    let what = match s(v, "error").unwrap_or("unknown") {
+                        "overloaded" => "is overloaded".to_string(),
+                        "rate_limit" => "rate limit hit".to_string(),
+                        "server_error" => "server error".to_string(),
+                        "unknown" => "request failed".to_string(),
+                        other => other.replace('_', " "),
+                    };
+                    sink.notice(format!("Claude API {what}{status}, retrying…"));
+                }
+                sink.log(format!("API retry {}/{}: {}", u(v, "attempt"), u(v, "max_retries"), s(v, "error").unwrap_or("")));
+            }
             "permission_denied" => {
                 if let Some(id) = s(v, "tool_use_id") {
+                    self.denied.insert(id.to_string());
                     sink.send(AgentEvent::ToolUpdate {
                         id: id.to_string(),
                         status: Some(ToolStatus::Failed),
@@ -150,6 +177,56 @@ impl ClaudeStream {
                     });
                 }
             }
+            "informational" | "local_command_output" => {
+                if let Some(c) = s(v, "content").map(str::trim).filter(|c| !c.is_empty()) {
+                    sink.notice(c);
+                }
+            }
+            "model_refusal_fallback" => {
+                self.refusal_noted = true;
+                self.switch_noted = true;
+                let to = s(v, "fallback_model").unwrap_or("the fallback model");
+                sink.notice(s(v, "content").map(str::trim).filter(|c| !c.is_empty()).map(String::from).unwrap_or_else(|| format!("Safeguards flagged this message; retrying on {to}")));
+            }
+            "model_refusal_no_fallback" => {
+                self.refusal_noted = true;
+                sink.notice(s(v, "content").map(str::trim).filter(|c| !c.is_empty()).unwrap_or("Safeguards stopped this response"));
+            }
+            "task_notification" => {
+                // `worker_restart`: neither finished nor failed.
+                if s(v, "reason") != Some("worker_restart") {
+                    let target = s(v, "tool_use_id").map(String::from).or_else(|| s(v, "task_id").and_then(|t| self.bg_by_task.get(t).cloned()));
+                    if let (Some(id), Some(status)) = (target, task_status(s(v, "status").unwrap_or("completed"))) {
+                        let output = s(v, "summary").filter(|x| !x.is_empty()).map(String::from);
+                        sink.send(AgentEvent::ToolUpdate { id, status: Some(status), output, diffs: Vec::new(), is_error: false, title: None });
+                    }
+                }
+            }
+            "task_updated" => {
+                let target = s(v, "task_id").and_then(|t| self.bg_by_task.get(t).cloned());
+                if let (Some(id), Some(status)) = (target, s(&v["patch"], "status").and_then(task_status).filter(|st| *st != ToolStatus::Running)) {
+                    sink.send(AgentEvent::ToolUpdate { id, status: Some(status), output: None, diffs: Vec::new(), is_error: false, title: None });
+                }
+            }
+            "hook_response" => {
+                if s(v, "outcome") == Some("error") {
+                    let why = [s(v, "stderr"), s(v, "output"), s(v, "stdout")].into_iter().flatten().flat_map(str::lines).map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+                    let event = s(v, "hook_event").or_else(|| s(v, "hook_name")).unwrap_or("A");
+                    sink.notice(format!("{event} hook failed{}{why}", if why.is_empty() { "" } else { ": " }));
+                }
+            }
+            "plugin_install" => {
+                if s(v, "status") == Some("failed") {
+                    sink.notice(format!("Plugin install failed: {} {}", s(v, "name").unwrap_or(""), s(v, "error").unwrap_or("")).trim_end().to_string());
+                }
+            }
+            // Progress and bookkeeping with no transcript effect: hook start /
+            // progress, the compacting status, thinking-token estimates, task
+            // start / progress / live-set snapshots (completion arrives as
+            // task_notification), session state, checkpoints, command lists,
+            // shutdown and control-request progress.
+            "hook_started" | "hook_progress" | "status" | "thinking_tokens" | "task_started" | "task_progress" | "background_tasks_changed" | "session_state_changed" | "files_persisted" | "commands_changed"
+            | "worker_shutting_down" | "control_request_progress" => {}
             _ => sink.log(v.to_string()),
         }
     }
@@ -158,6 +235,11 @@ impl ClaudeStream {
         match s(ev, "type").unwrap_or("") {
             "message_start" => {
                 self.current_msg = ev["message"]["id"].as_str().map(|s| s.to_string());
+                self.retrying = false;
+            }
+            "message_delta" if s(&ev["delta"], "stop_reason") == Some("max_tokens") && !self.cutoff_noted => {
+                self.cutoff_noted = true;
+                sink.notice("Response hit the output token limit");
             }
             "content_block_delta" => {
                 let d = &ev["delta"];
@@ -199,8 +281,8 @@ impl ClaudeStream {
                     }
                 }
                 "thinking" if !streamed => {
-                    if let Some(t) = b["thinking"].as_str() {
-                        sink.send(AgentEvent::Reasoning { text: t.to_string(), duration_ms: None });
+                    if let Some(t) = b["thinking"].as_str().filter(|t| !t.is_empty()) {
+                        sink.send(AgentEvent::Reasoning { text: t.to_string(), duration_ms: v["thinking_duration_ms"].as_u64() });
                     }
                 }
                 "tool_use" | "server_tool_use" => {
@@ -214,10 +296,25 @@ impl ClaudeStream {
                             }
                         }
                         self.track_background(&id, name, &input);
-                        sink.send(AgentEvent::ToolStart { tool: tool(id, name, input) });
+                        sink.send(AgentEvent::ToolStart { tool: claude_tool(id, name, input) });
                     }
                 }
-                _ => {}
+                // Model switch (`--fallback-model`, or a safeguard refusal
+                // already announced by its system event).
+                "fallback" => {
+                    if !std::mem::take(&mut self.switch_noted) {
+                        let from = s(&b["from"], "model").unwrap_or("the requested model");
+                        let to = s(&b["to"], "model").unwrap_or("a fallback model");
+                        sink.notice(format!("Switched from {from} to {to}"));
+                    }
+                }
+                // `redacted_thinking` is encrypted: nothing to show.
+                _ => {
+                    if let Some((id, output, is_error)) = server_tool_result(b) {
+                        let status = if is_error { ToolStatus::Failed } else { ToolStatus::Completed };
+                        sink.send(AgentEvent::ToolUpdate { id, status: Some(status), output: Some(output), diffs: Vec::new(), is_error, title: None });
+                    }
+                }
             }
         }
     }
@@ -237,8 +334,11 @@ impl ClaudeStream {
                 Some("tool_result") => {
                     let id = s(b, "tool_use_id").unwrap_or("").to_string();
                     let is_error = b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
-                    let output = content_text(&b["content"]);
+                    let (output, images) = result_content(&b["content"]);
                     let diffs = meta.as_ref().map(diffs_from_result).unwrap_or_default();
+                    if !images.is_empty() {
+                        sink.send(AgentEvent::ToolImages { id: id.clone(), images });
+                    }
                     self.tool_result(id, output, is_error, diffs, meta.as_ref(), sink);
                 }
                 _ => {}
@@ -320,12 +420,7 @@ impl ClaudeStream {
         for n in parse_task_notifications(text) {
             let target = n.tool_use_id.clone().or_else(|| n.task_id.as_ref().and_then(|t| self.bg_by_task.get(t).cloned()));
             let Some(target) = target else { continue };
-            let status = match n.status.as_deref().unwrap_or("completed") {
-                "failed" | "error" => ToolStatus::Failed,
-                "killed" | "stopped" | "cancelled" | "canceled" => ToolStatus::Cancelled,
-                "running" => ToolStatus::Running,
-                _ => ToolStatus::Completed,
-            };
+            let Some(status) = task_status(n.status.as_deref().unwrap_or("completed")) else { continue };
             sink.send(AgentEvent::ToolUpdate { id: target, status: Some(status), output: n.summary.clone(), diffs: Vec::new(), is_error: false, title: None });
         }
     }
@@ -354,10 +449,15 @@ impl ClaudeStream {
                             if self.side_tools.insert(id.clone()) {
                                 let name = s(b, "name").unwrap_or("tool");
                                 let input = b.get("input").cloned().unwrap_or(Value::Null);
-                                sink.send(wrap(AgentEvent::ToolStart { tool: tool(id, name, input) }));
+                                sink.send(wrap(AgentEvent::ToolStart { tool: claude_tool(id, name, input) }));
                             }
                         }
-                        _ => {}
+                        _ => {
+                            if let Some((id, output, is_error)) = server_tool_result(b) {
+                                let status = if is_error { ToolStatus::Failed } else { ToolStatus::Completed };
+                                sink.send(wrap(AgentEvent::ToolUpdate { id, status: Some(status), output: Some(output), diffs: Vec::new(), is_error, title: None }));
+                            }
+                        }
                     }
                 }
             }
@@ -371,10 +471,14 @@ impl ClaudeStream {
                     let id = s(b, "tool_use_id").unwrap_or("").to_string();
                     let is_error = b.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
                     let diffs = meta.as_ref().map(diffs_from_result).unwrap_or_default();
+                    let (output, images) = result_content(&b["content"]);
+                    if !images.is_empty() {
+                        sink.send(wrap(AgentEvent::ToolImages { id: id.clone(), images }));
+                    }
                     sink.send(wrap(AgentEvent::ToolUpdate {
                         id,
                         status: Some(if is_error { ToolStatus::Failed } else { ToolStatus::Completed }),
-                        output: Some(content_text(&b["content"])),
+                        output: Some(output),
                         diffs,
                         is_error,
                         title: None,
@@ -394,13 +498,34 @@ impl ClaudeStream {
                     u(us, "output_tokens"),
                     u(us, "cache_read_input_tokens"),
                     u(us, "cache_creation_input_tokens"),
-                    0,
+                    // Part of output_tokens; shown as a breakdown.
+                    u(&us["output_tokens_details"], "thinking_tokens"),
                     v["total_cost_usd"].as_f64(),
                 ),
             });
         }
         if let Some(id) = s(v, "session_id") {
             sink.send(AgentEvent::NativeSession { id: id.to_string(), path: None });
+        }
+        // The authoritative list of denied calls (`permission_denied`
+        // events are best-effort). A headless run can't ask, so say why.
+        let denials = v["permission_denials"].as_array().cloned().unwrap_or_default();
+        let mut denied_tools: Vec<&str> = Vec::new();
+        for d in &denials {
+            if let Some(id) = s(d, "tool_use_id").filter(|id| self.denied.insert(id.to_string())) {
+                sink.send(AgentEvent::ToolUpdate { id: id.to_string(), status: Some(ToolStatus::Failed), output: None, diffs: Vec::new(), is_error: true, title: None });
+            }
+            if let Some(name) = s(d, "tool_name").filter(|n| !denied_tools.contains(n)) {
+                denied_tools.push(name);
+            }
+        }
+        if !denied_tools.is_empty() {
+            sink.notice(format!("Claude Code denied {} without asking: this run's permission mode doesn't allow it", denied_tools.join(", ")));
+        }
+        match s(v, "stop_reason") {
+            Some("max_tokens") if !self.cutoff_noted => sink.notice("Response hit the output token limit"),
+            Some("refusal") if !self.refusal_noted => sink.notice("Claude's safeguards stopped this response"),
+            _ => {}
         }
         let is_error = v.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
         let subtype = s(v, "subtype").unwrap_or("success").to_string();
@@ -410,7 +535,14 @@ impl ClaudeStream {
                 .and_then(|e| e.as_array())
                 .map(|a| a.iter().map(content_text).collect::<Vec<_>>().join("\n"))
                 .filter(|s| !s.is_empty());
-            let msg = s(v, "result").map(|s| s.to_string()).filter(|s| !s.is_empty()).or(errors).unwrap_or_else(|| subtype.replace('_', " "));
+            let label = match subtype.as_str() {
+                "error_max_turns" => "Stopped at the turn limit (--max-turns)".to_string(),
+                "error_max_budget_usd" => "Stopped at the spending limit (--max-budget-usd)".to_string(),
+                "error_max_structured_output_retries" => "Gave up producing valid structured output".to_string(),
+                "error_during_execution" => "Claude Code failed while running the turn".to_string(),
+                other => other.replace('_', " "),
+            };
+            let msg = s(v, "result").map(|s| s.to_string()).filter(|s| !s.is_empty()).or(errors).unwrap_or(label);
             sink.error(msg);
             self.failed = true;
         }
@@ -460,6 +592,69 @@ pub fn parse_task_notifications(text: &str) -> Vec<TaskNotification> {
         rest = &after[end..];
     }
     out
+}
+
+/// A Claude Code tool call, with the kinds the generic classifier gets wrong
+/// fixed (TaskCreate is not a file write, ToolSearch is not a code search).
+fn claude_tool(id: String, name: &str, input: Value) -> ToolCall {
+    let mut t = tool(id, name, input);
+    fix_tool_kind(&mut t);
+    t
+}
+
+/// Tool result text and images. Image blocks (MCP / browser screenshots)
+/// travel as images, not "[image]" lines; `tool_reference` blocks
+/// (ToolSearch) read as "Loaded X" instead of raw JSON.
+fn result_content(content: &Value) -> (String, Vec<Part>) {
+    let images = image_parts(content);
+    let loaded = loaded_tools(content);
+    let text = match content.as_array() {
+        Some(items) if !images.is_empty() || loaded.is_some() => {
+            let rest: Vec<Value> = items.iter().filter(|b| !matches!(s(b, "type"), Some("image") | Some("tool_reference"))).cloned().collect();
+            content_text(&Value::Array(rest))
+        }
+        _ => content_text(content),
+    };
+    let text = match loaded {
+        Some(l) if text.trim().is_empty() => l,
+        Some(l) => format!("{text}\n{l}"),
+        None => text,
+    };
+    (text, images)
+}
+
+/// Background task status words (notifications, `task_updated` patches).
+fn task_status(status: &str) -> Option<ToolStatus> {
+    Some(match status.to_ascii_lowercase().as_str() {
+        "failed" | "error" => ToolStatus::Failed,
+        "killed" | "stopped" | "cancelled" | "canceled" => ToolStatus::Cancelled,
+        "running" => ToolStatus::Running,
+        "pending" => return None,
+        _ => ToolStatus::Completed,
+    })
+}
+
+/// `rate_limit_event`: a notice when the plan's limit stops the turn; the
+/// usage warnings that precede it only go to the log.
+fn rate_limit(info: &Value, sink: &EventSink) {
+    let window = match s(info, "rateLimitType") {
+        Some("five_hour") => " (5-hour limit)",
+        Some("seven_day") | Some("seven_day_opus") | Some("seven_day_sonnet") => " (weekly limit)",
+        _ => "",
+    };
+    match s(info, "status") {
+        Some("rejected") => {
+            let resets = info["resetsAt"]
+                .as_i64()
+                .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                .map(|t| format!(" · resets {}", t.with_timezone(&chrono::Local).format("%a %H:%M")))
+                .unwrap_or_default();
+            let credits = if s(info, "errorCode") == Some("credits_required") { " · buy usage credits to continue" } else { "" };
+            sink.notice(format!("Usage limit reached{window}{resets}{credits}"));
+        }
+        Some(st) => sink.log(format!("rate limit {st}{window}: {:.0}% used", info["utilization"].as_f64().unwrap_or(0.0) * 100.0)),
+        None => {}
+    }
 }
 
 /// "Command running in background with ID: b8b97ntfm." → `b8b97ntfm`.
@@ -637,4 +832,118 @@ mod tests {
         assert_eq!(output_status("Status: running"), Some(ToolStatus::Running));
     }
 
+    fn fixture(text: &str) -> Vec<AgentEvent> {
+        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        collect(&mut ClaudeStream::default(), &lines)
+    }
+
+    fn notices(ev: &[AgentEvent]) -> Vec<&str> {
+        ev.iter().filter_map(|e| match e { AgentEvent::Notice { text } => Some(text.as_str()), _ => None }).collect()
+    }
+
+    fn final_status(ev: &[AgentEvent], id: &str) -> Option<ToolStatus> {
+        ev.iter().rev().find_map(|e| match e { AgentEvent::ToolUpdate { id: i, status, .. } if i == id => *status, _ => None })
+    }
+
+    /// Captured from Claude Code 2.1.310, `--permission-mode auto`, with
+    /// `--include-partial-messages`: a Bash call and a file write run
+    /// without prompting.
+    #[test]
+    fn fixture_auto_mode_runs_tools_headless() {
+        let ev = fixture(include_str!("../../tests/fixtures/claude_auto_tools.jsonl"));
+        let tools: Vec<&ToolCall> = ev.iter().filter_map(|e| match e { AgentEvent::ToolStart { tool } => Some(tool), _ => None }).collect();
+        assert_eq!(tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["Bash", "Write"]);
+        for t in &tools {
+            assert_eq!(final_status(&ev, &t.id), Some(ToolStatus::Completed), "{} completes", t.name);
+        }
+        let write_diffs = ev.iter().find_map(|e| match e { AgentEvent::ToolUpdate { id, diffs, .. } if *id == tools[1].id && !diffs.is_empty() => Some(diffs), _ => None }).expect("write diff");
+        assert_eq!(write_diffs[0].path, "/tmp/w/created.txt");
+        let streamed: String = ev.iter().filter_map(|e| match e { AgentEvent::TextDelta { text } => Some(text.as_str()), _ => None }).collect();
+        assert_eq!(streamed, "OK", "text streams token by token");
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Text { .. } | AgentEvent::Error { .. })), "no duplicate full text, no errors");
+        assert!(notices(&ev).is_empty(), "a rate-limit warning is not a notice: {:?}", notices(&ev));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::NativeSession { id, .. } if id == "sess-fixture")));
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
+    }
+
+    /// Captured in the default (Manual) mode: the write is denied headlessly.
+    #[test]
+    fn fixture_permission_denial() {
+        let ev = fixture(include_str!("../../tests/fixtures/claude_permission_denied.jsonl"));
+        let write = ev.iter().find_map(|e| match e { AgentEvent::ToolStart { tool } => Some(tool), _ => None }).unwrap();
+        assert_eq!(final_status(&ev, &write.id), Some(ToolStatus::Failed));
+        assert_eq!(notices(&ev), ["Claude Code denied Write without asking: this run's permission mode doesn't allow it"]);
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })), "the turn itself still succeeds");
+    }
+
+    /// Captured with an empty config dir and with an unknown `--model`:
+    /// `is_error` results with subtype `success`, exit code 1.
+    #[test]
+    fn fixture_auth_and_model_errors() {
+        for (text, want) in [
+            (include_str!("../../tests/fixtures/claude_not_logged_in.jsonl"), "Not logged in"),
+            (include_str!("../../tests/fixtures/claude_bad_model.jsonl"), "issue with the selected model"),
+        ] {
+            let mut p = ClaudeStream::default();
+            let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+            let ev = collect(&mut p, &lines);
+            let errors: Vec<&str> = ev.iter().filter_map(|e| match e { AgentEvent::Error { message } => Some(message.as_str()), _ => None }).collect();
+            assert!(!errors.is_empty() && errors.iter().all(|m| m.contains(want)), "{errors:?}");
+            assert!(p.failed && p.done);
+            assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })));
+        }
+    }
+
+    /// Event shapes from the stream-json / Agent SDK reference that a short
+    /// local run doesn't produce.
+    #[test]
+    fn documented_events() {
+        let png = "iVBORw0KGgo=";
+        let shot = format!(r#"{{"type":"user","parent_tool_use_id":null,"message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t_shot","content":[{{"type":"text","text":"captured"}},{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{png}"}}}}]}}]}}}}"#);
+        let lines = [
+            r#"{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":500,"error_status":529,"error":"overloaded"}"#,
+            r#"{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,"retry_delay_ms":900,"error_status":529,"error":"overloaded"}"#,
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"system","subtype":"model_refusal_fallback","original_model":"claude-fable-5","fallback_model":"claude-opus-5"}"#,
+            r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m1","content":[{"type":"fallback","from":{"model":"claude-fable-5"},"to":{"model":"claude-opus-5"}},{"type":"tool_use","id":"t_task","name":"TaskCreate","input":{"subject":"Write tests"}},{"type":"tool_use","id":"t_find","name":"ToolSearch","input":{"query":"select:Monitor"}},{"type":"tool_use","id":"t_shot","name":"mcp__browser__screenshot","input":{}},{"type":"tool_use","id":"t_bg","name":"Bash","input":{"command":"npm test","run_in_background":true}},{"type":"tool_use","id":"t_agent","name":"Agent","input":{"description":"scan","prompt":"scan","run_in_background":true}}]}}"#,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t_find","content":[{"type":"tool_reference","tool_name":"Monitor"}]}]}}"#,
+            &shot,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t_bg","content":"Command running in background with ID: bx1"}]},"tool_use_result":{"backgroundTaskId":"bx1"}}"#,
+            r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t_agent","content":"Async agent launched"}]},"tool_use_result":{"status":"async_launched","agentId":"ag1","isAsync":true}}"#,
+            r#"{"type":"system","subtype":"task_notification","task_id":"bx1","status":"failed","output_file":"/tmp/bx1","summary":"exit 1"}"#,
+            r#"{"type":"system","subtype":"task_updated","task_id":"ag1","patch":{"status":"killed"}}"#,
+            r#"{"type":"system","subtype":"hook_response","hook_id":"h","hook_name":"PostToolUse:Bash","hook_event":"PostToolUse","output":"","stdout":"","stderr":"lint failed\nmore","exit_code":2,"outcome":"error"}"#,
+            r#"{"type":"system","subtype":"informational","content":"Backgrounding after the current tool finishes…","level":"warning"}"#,
+            r#"{"type":"system","subtype":"thinking_tokens","estimated_tokens":10,"estimated_tokens_delta":10}"#,
+            r#"{"type":"tool_progress","tool_use_id":"t_bg","tool_name":"Bash","parent_tool_use_id":null,"elapsed_time_seconds":30,"heartbeat":true}"#,
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m2"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m2","content":[{"type":"fallback","from":{"model":"claude-opus-5"},"to":{"model":"claude-sonnet-5"}},{"type":"text","text":"partial answer"}]}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"max_tokens"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1793278800,"rateLimitType":"five_hour"}}"#,
+            r#"{"type":"some_future_event","x":1}"#,
+            r#"{"type":"result","subtype":"error_max_turns","is_error":true,"stop_reason":"max_tokens","errors":[],"usage":{"input_tokens":5,"output_tokens":40,"output_tokens_details":{"thinking_tokens":12}},"permission_denials":[]}"#,
+        ];
+        let mut p = ClaudeStream::default();
+        let ev = collect(&mut p, &lines);
+        let n = notices(&ev);
+        assert_eq!(n[0], "Claude API is overloaded (529), retrying…", "one notice per retry streak");
+        assert_eq!(n[1], "Safeguards flagged this message; retrying on claude-opus-5");
+        assert_eq!(n[2], "PostToolUse hook failed: lint failed");
+        assert_eq!(n[3], "Backgrounding after the current tool finishes…");
+        assert_eq!(n[4], "Switched from claude-opus-5 to claude-sonnet-5", "an unannounced switch is noted");
+        assert_eq!(n[5], "Response hit the output token limit");
+        assert!(n[6].starts_with("Usage limit reached (5-hour limit) · resets "), "{}", n[6]);
+        assert_eq!(n.len(), 7, "refusal switch and cut-off are not repeated: {n:?}");
+        let start = |id: &str| ev.iter().find_map(|e| match e { AgentEvent::ToolStart { tool } if tool.id == id => Some(tool), _ => None }).unwrap();
+        assert_eq!(start("t_task").kind, ToolKind::Other, "TaskCreate is not a file write");
+        assert_eq!(start("t_find").kind, ToolKind::Other);
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, output: Some(o), .. } if id == "t_find" && o == "Loaded Monitor")));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolImages { id, images } if id == "t_shot" && images.len() == 1)));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, output: Some(o), .. } if id == "t_shot" && o == "captured")), "no [image] placeholder");
+        assert_eq!(final_status(&ev, "t_bg"), Some(ToolStatus::Failed), "system task_notification");
+        assert_eq!(final_status(&ev, "t_agent"), Some(ToolStatus::Cancelled), "task_updated patch");
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Usage { usage } if usage.reasoning_tokens == 12)));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Error { message } if message == "Stopped at the turn limit (--max-turns)")));
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, stop_reason: Some(r) }) if r == "error_max_turns"));
+    }
 }

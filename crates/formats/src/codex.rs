@@ -281,7 +281,11 @@ fn convert(lines: &[Value], path: Option<&Path>, meta: &mut Meta) -> (Conv, Vec<
                     let role = s(pl, "role").unwrap_or("");
                     let text = content_text(&pl["content"]);
                     if role == "assistant" {
+                        let (text, actions) = app_directives(&text);
                         conv.text(&text, ts, model.as_deref());
+                        if !actions.is_empty() {
+                            conv.notice(format!("Git: {}", actions.join(", ")), ts);
+                        }
                     } else if role == "user" {
                         if use_events {
                             // Place the matching event prompt here (keeps ordering).
@@ -700,8 +704,71 @@ fn emit_user(conv: &mut Conv, text: &str, ts: Option<DateTime<Utc>>, mut parts: 
         return;
     }
     let _ = seen;
-    parts.insert(0, Part::Text { text: text.to_string() });
+    // The Codex app sends attached files as a list ahead of the request.
+    let (text, files) = mentioned_files(text).unwrap_or_else(|| (text.to_string(), Vec::new()));
+    for path in files {
+        let have = parts.iter().any(|p| matches!(p, Part::Image { source: MediaSource::Path { path: q }, .. } | Part::File { path: q, .. } if q.replace('\\', "/") == path.replace('\\', "/")));
+        if have {
+            continue;
+        }
+        parts.push(match util::image_mime(&path) {
+            Some(mime) => Part::Image { mime: Some(mime), source: MediaSource::Path { path } },
+            None => Part::File { path, mime: None, text: None },
+        });
+    }
+    parts.insert(0, Part::Text { text });
     conv.user_parts(parts, ts);
+}
+
+/// "# Files mentioned by the user:\n\n## shot.png: C:/…/shot.png\n\n## My
+/// request for Codex:\nfix it" → ("fix it", ["C:/…/shot.png"]).
+fn mentioned_files(text: &str) -> Option<(String, Vec<String>)> {
+    let rest = text.trim_start().strip_prefix("# Files mentioned by the user:")?;
+    let (list, request) = match rest.find("## My request for Codex:") {
+        Some(i) => (&rest[..i], rest[i + "## My request for Codex:".len()..].trim().to_string()),
+        None => (rest, String::new()),
+    };
+    let files = list
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("## "))
+        .filter_map(|l| l.split_once(": ").map(|(_, p)| p.trim().to_string()))
+        .filter(|p| !p.is_empty())
+        .collect();
+    Some((request, files))
+}
+
+/// Codex app directives at the end of a reply (`::git-stage{cwd="…"}
+/// ::git-commit{…} ::git-push{… branch="main"}`), which the Codex app
+/// shows as action chips: the text without them, and their names
+/// ("stage", "commit", "push").
+pub fn app_directives(text: &str) -> (String, Vec<String>) {
+    let mut out = String::with_capacity(text.len());
+    let mut names = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("::") {
+        let after = &rest[i + 2..];
+        let name_len = after.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).unwrap_or(after.len());
+        let name = &after[..name_len];
+        let body = &after[name_len..];
+        // Directives start a line or follow a space (not `std::fs`).
+        let starts_word = rest[..i].chars().last().or_else(|| out.chars().last()).map_or(true, char::is_whitespace);
+        match (!starts_word || name.is_empty() || !name.starts_with(|c: char| c.is_ascii_lowercase()), body.starts_with('{').then(|| body.find('}')).flatten()) {
+            (false, Some(end)) => {
+                out.push_str(&rest[..i]);
+                names.push(name.strip_prefix("git-").unwrap_or(name).replace('-', " "));
+                rest = &body[end + 1..];
+            }
+            _ => {
+                out.push_str(&rest[..i + 2]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    if names.is_empty() {
+        return (text.to_string(), names);
+    }
+    (out.trim_end().to_string(), names)
 }
 
 /// A tool output with Codex's run header parsed off.
@@ -1503,6 +1570,20 @@ mod tests {
         let u = thread_usage(Some(dir.path()), id).unwrap();
         assert_eq!((u.input_tokens, u.cache_read_tokens, u.output_tokens, u.reasoning_tokens), (100, 200, 9, 3));
         assert!(thread_usage(Some(dir.path()), "01a00000-0000-7000-8000-00000000ffff").is_none());
+    }
+
+    #[test]
+    fn codex_app_files_and_directives() {
+        let (req, files) = mentioned_files("# Files mentioned by the user:\n\n## shot.png: C:/tmp/shot.png\n\n## notes.md: D:/repo/notes.md\n\n## My request for Codex:\nwhat is wrong?\n").unwrap();
+        assert_eq!(req, "what is wrong?");
+        assert_eq!(files, ["C:/tmp/shot.png", "D:/repo/notes.md"]);
+        assert!(mentioned_files("plain prompt").is_none());
+
+        let (text, names) = app_directives("Pushed.\n\n::git-stage{cwd=\"D:\\r\"} ::git-commit{cwd=\"D:\\r\"} ::git-push{cwd=\"D:\\r\" branch=\"main\"}");
+        assert_eq!(text, "Pushed.");
+        assert_eq!(names, ["stage", "commit", "push"]);
+        // Rust paths and C++ scopes stay as they are.
+        assert_eq!(app_directives("use std::fs; a::b{}").0, "use std::fs; a::b{}");
     }
 
     #[test]

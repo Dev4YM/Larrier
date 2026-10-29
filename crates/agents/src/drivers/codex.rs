@@ -113,7 +113,12 @@ impl CodexStream {
         match s(item, "type").unwrap_or("") {
             "agent_message" => {
                 if let Some(t) = s(item, "text") {
-                    self.stream_text(&id, t, false, sink);
+                    // Codex app directives (::git-commit{…}) are not text.
+                    let (text, actions) = larrier_formats::codex::app_directives(t);
+                    self.stream_text(&id, &text, false, sink);
+                    if !actions.is_empty() {
+                        sink.notice(format!("Git: {}", actions.join(", ")));
+                    }
                 }
             }
             "reasoning" => {

@@ -1420,6 +1420,7 @@ fn CommandCard(tool: ToolCall) -> Element {
                 }
             }
         }
+        ToolImages { images: tool.images.clone() }
     }
 }
 

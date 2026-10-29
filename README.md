@@ -25,21 +25,49 @@ Larrier's window is laid out like Cursor 3's Agents Window:
 - **Menu bar:** File / Edit / View / Help, drawn by Larrier and themed like the rest of the window.
 - **Sidebar:**
   - New Agent, Automations and Customize at the top.
-  - Pinned agents below them.
+  - "Needs Input", "In Progress" and "Ready for Review" sections, then pinned agents.
   - Every repository after that, with its agents nested under it, plus "No Repo" for chats without a folder.
+  - The filter menu groups by status, repository or agent, sorts by activity, creation or name, and can show archived agents.
   - Your profile at the bottom, and back / forward navigation.
+- **Tabs:** chats open in tabs next to the repository name, VS Code style.
+  - A single click opens a preview tab (italic) that the next click replaces.
+  - Double-click, Ctrl-click or middle-click keeps a tab. Sending a message keeps it too.
+  - Ctrl+W closes a tab and Ctrl+Tab cycles through them. Right-click a tab to close others, keep it, rename or fork it.
+- **Side by side and drag & drop:** drag any chat from the sidebar or a tab onto the chat area. Drop targets fade in:
+  - **Side by side:** work in both chats at once, each with its own composer.
+  - **Open in new tab** or **Open here** (replace the current tab).
+  - **Add as context:** reference the dropped chat in your next message.
 - **Agent view:**
-  - A title chip with the environment icon, and IDE ↗ to open the folder in Cursor or VS Code.
-  - Prompts sit in sticky cards; click one to edit and resend it into a fork.
+  - IDE ↗ opens the folder in Cursor or VS Code.
+  - Prompts sit in sticky cards. Click one to edit and resend it into a fork.
+    - Only one prompt is edited at a time.
+    - Esc or clicking elsewhere closes the editor; with unsaved changes it asks to keep editing or discard.
   - Finished turns collapse into "Worked for 16s", followed by 👍 👎 copy, fork and the time.
   - A turn navigator runs down the left, with a scroll-to-bottom button.
-- **Composer:** a pill with "+", a combined agent + model picker showing brand logos, and send / stop.
-  - Below it: the branch, "This PC" or a worktree, and token usage.
+  - **Subagents and background tasks:** Claude Code agents, Codex `spawn_agent` children and background shells are tracked live.
+    - A pill above the composer lists the running ones.
+    - Each subagent opens its own transcript in a tab.
+- **Composer:** a pill with "+", the agent + model picker, and send / stop.
+  - The picker lists only enabled agents. Agents are on the left and models on the right, and typing searches every model.
+  - Long or multi-line prompts give the text the full width, with the controls on a row below.
+  - `@` mentions files, folders, other agents and the git diff. `/` runs Larrier commands and the agent's own skills and commands.
+  - Paste or drop images and files. Prompts sent while the agent works are queued.
+  - Below the composer:
+    - the branch;
+    - "This PC" or a worktree;
+    - this chat's token usage (breakdown on hover);
+    - the account's plan quota, such as "5h 70% · wk 14%".
   - Above it: "Changes +N −M" and "Commit & Push ▾".
 - **Tools:** an "On ‹repo›" list of Changes · Browser · Terminal · Files, which opens a side panel with tabs, a "+" menu and launcher tiles.
 - **New agent screen:** a centered composer with repository and environment pickers, "Plan New Idea" (Shift+Tab cycles modes) and **Multitask**, which runs one prompt on several agents in parallel.
 - **Automations:** scheduled, interval and on-commit agent runs, with 13 templates. They run locally with any agent you have installed.
 - **Customize:** every MCP server, skill, subagent, rule, command, hook and plugin across Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Hermes and Droid. It reads them from each agent's real config, and each item is tagged with the agents that use it.
+- **Settings:**
+  - **Appearance:** a live preview, theme presets, accent and per-token colors for light and dark, fonts, sizes, density, sidebar side and **Reduce Motion**.
+  - **Plan & Usage:**
+    - plan limits per account, with reset times;
+    - tokens, cost, sessions and cache hit rate compared with the previous period;
+    - a daily chart, breakdowns by agent, model and workspace, an activity heatmap and your top sessions.
 - **Right-click:** Larrier's own context menu everywhere. It offers cut/copy/paste, "Quote in Follow-up", "Ask a New Agent", open or copy for links, copy for code blocks, and open or reveal for files.
 - **Icons and logos:** the full [Lucide](https://lucide.dev) icon set (2,275 icons) and 81 brand logos for agents, model vendors and tools. Sources are listed in `app/assets/logos/LICENSES.md`.
 
@@ -63,6 +91,11 @@ Larrier's window is laid out like Cursor 3's Agents Window:
   be merged back from the review pane.
 - **Review and ship.** See a file-by-file diff of what the agent changed,
   then discard, commit, push or open a PR (`gh`) without leaving the window.
+- **Fast with huge chats.**
+  - Only the newest turns are mounted; older ones load as you scroll up, and long turns reveal their steps on demand.
+  - Every session has its own reactive state, so a streaming agent re-renders only its own turn.
+  - Saving runs on a background thread, and big sessions load off the UI thread.
+  - A 22 MB Claude Code session opens without a stall, and frames stay under 10 ms while an agent streams.
 - **CLI included.** `larrier sessions | discover | sync | import | export |
   port | show | run`.
 
@@ -106,7 +139,10 @@ Support/Larrier` on macOS, and `~/.local/share/larrier` on Linux. Set
 | New agent | Ctrl N |
 | Command palette | Ctrl K / Ctrl Shift P |
 | Toggle sidebar | Ctrl B |
-| Toggle review pane | Ctrl J |
+| Toggle side panel | Ctrl Shift J |
+| Terminal / Changes / Files / Browser | Ctrl J / Ctrl E / Ctrl G / Ctrl Shift B |
+| Close tab / next tab | Ctrl W / Ctrl Tab |
+| Zoom in / out / reset | Ctrl = / Ctrl − / Ctrl 0 |
 | Focus composer | Ctrl L |
 | Stop agent | Ctrl . |
 | Settings | Ctrl , |

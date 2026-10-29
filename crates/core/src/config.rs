@@ -136,8 +136,75 @@ pub struct Settings {
     pub show_reasoning: bool,
     #[serde(default)]
     pub sidebar_group: SidebarGroup,
+    #[serde(default)]
+    pub sidebar_sort: SidebarSort,
+    /// Show archived agents in the sidebar.
+    #[serde(default)]
+    pub show_archived: bool,
     #[serde(default = "yes")]
     pub notify_on_finish: bool,
+
+    // ---- appearance
+    /// Accent color (`#rrggbb`); empty = theme default.
+    #[serde(default)]
+    pub accent: String,
+    /// UI font family override.
+    #[serde(default)]
+    pub ui_font: Option<String>,
+    /// Code / monospace font family override.
+    #[serde(default)]
+    pub mono_font: Option<String>,
+    #[serde(default)]
+    pub density: Density,
+    /// Put the agents sidebar on the right.
+    #[serde(default)]
+    pub sidebar_right: bool,
+    /// Max width of the transcript column in px.
+    #[serde(default = "default_transcript_width")]
+    pub transcript_width: u32,
+    #[serde(default)]
+    pub reduce_motion: bool,
+    /// Per-theme color overrides: keys like `light.bg`, `dark.sidebar`.
+    #[serde(default)]
+    pub custom_colors: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub code_theme_light: Option<String>,
+    #[serde(default)]
+    pub code_theme_dark: Option<String>,
+    /// Interface zoom (1.0 = 100%).
+    #[serde(default = "default_zoom")]
+    pub zoom: f64,
+
+    // ---- system
+    #[serde(default = "yes")]
+    pub completion_sound: bool,
+    #[serde(default = "yes")]
+    pub tray_icon: bool,
+    #[serde(default = "yes")]
+    pub continue_interrupted: bool,
+    #[serde(default = "yes")]
+    pub show_tips: bool,
+    #[serde(default = "yes")]
+    pub restore_window: bool,
+    /// Queue follow-ups sent while an agent is still working.
+    #[serde(default = "yes")]
+    pub queue_followups: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Density {
+    #[default]
+    Comfortable,
+    Compact,
+}
+
+fn default_transcript_width() -> u32 {
+    860
+}
+
+fn default_zoom() -> f64 {
+    1.0
 }
 
 fn yes() -> bool {
@@ -173,7 +240,26 @@ impl Default for Settings {
             font_size: default_font_size(),
             show_reasoning: true,
             sidebar_group: SidebarGroup::default(),
+            sidebar_sort: SidebarSort::default(),
+            show_archived: false,
             notify_on_finish: true,
+            accent: String::new(),
+            ui_font: None,
+            mono_font: None,
+            density: Density::default(),
+            sidebar_right: false,
+            transcript_width: default_transcript_width(),
+            reduce_motion: false,
+            custom_colors: Default::default(),
+            code_theme_light: None,
+            code_theme_dark: None,
+            zoom: 1.0,
+            completion_sound: true,
+            tray_icon: true,
+            continue_interrupted: true,
+            show_tips: true,
+            restore_window: true,
+            queue_followups: true,
         }
     }
 }
@@ -195,6 +281,16 @@ pub enum SidebarGroup {
     Status,
     Workspace,
     Agent,
+}
+
+/// Order of agents inside each sidebar group.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SidebarSort {
+    #[default]
+    Recent,
+    Created,
+    Name,
 }
 
 /// How much autonomy agents get when Larrier launches them.

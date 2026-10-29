@@ -125,12 +125,12 @@ pub fn Transcript(id: String) -> Element {
             .collect();
         let users: Vec<(usize, String)> = spans.iter().enumerate().filter_map(|(i, t)| t.user_id.clone().map(|u| (i, u))).collect();
         let nav: Vec<(usize, String)> = users[users.len().saturating_sub(NAV_MAX)..].to_vec();
-        let running = app.is_running(&id);
+        let running = app.is_active(&id);
         let waiting = running && s.messages.last().map(|m| m.role == Role::User).unwrap_or(false);
         (rows, nav, total, s.messages.is_empty(), waiting, s.updated_at)
     };
     let first = total - rows.len();
-    let running = app.is_running(&id);
+    let running = app.is_active(&id);
     let permission = app.permissions.read().get(&id).cloned();
     let show_reasoning = app.config.read().settings.show_reasoning;
     let n_rows = rows.len();

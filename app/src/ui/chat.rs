@@ -138,44 +138,7 @@ fn ChatColumn(id: String, input_id: &'static str) -> Element {
             super::tasks::BackgroundTasks { session_id: id.clone() }
         }
         AboveComposer { id: id.clone() }
-        LiveNotice { id: id.clone() }
         Composer { session_id: Some(id.clone()), input_id }
-    }
-}
-
-/// The session is being written by another app right now.
-fn live_in(app: &crate::state::App, id: &str) -> Option<String> {
-    if !app.live.read().contains_key(id) || app.is_running(id) {
-        return None;
-    }
-    app.sessions.read().iter().find(|s| s.id == id).map(|s| s.origin.display_name())
-}
-
-/// Subtle heads-up above the composer while another app runs the session.
-#[component]
-fn LiveNotice(id: String) -> Element {
-    let app = use_app();
-    let Some(agent) = live_in(&app, &id) else { return rsx! {} };
-    rsx! {
-        div { class: "composer-wrap", style: "padding-top: 0; padding-bottom: 6px;",
-            div { class: "live-notice",
-                span { class: "live-dot" }
-                span { "Running in {agent} — sending here starts a parallel turn." }
-            }
-        }
-    }
-}
-
-/// "Live · Claude Code" in the chat header.
-#[component]
-fn LivePill(id: String) -> Element {
-    let app = use_app();
-    let Some(agent) = live_in(&app, &id) else { return rsx! {} };
-    rsx! {
-        span { class: "live-pill", title: "{agent} is writing to this session right now; it updates here live.",
-            span { class: "live-dot" }
-            "Live · {agent}"
-        }
     }
 }
 
@@ -238,7 +201,6 @@ fn ChatHeader(id: String) -> Element {
                 }
             }
             TabStrip {}
-            LivePill { id: id.clone() }
             DragRegion {}
             if h.has_cwd {
                 button { class: "head-link", title: "Open the folder in Cursor / VS Code", onclick: move |_| app.open_in_ide(&id_c),
@@ -293,7 +255,7 @@ fn SplitHeader(id: String) -> Element {
     let mut app = use_app();
     let id_m = id.clone();
     let info = use_memo(move || app.sessions.read().iter().find(|s| s.id == id_m).map(|s| (s.title.clone(), s.agent.clone())));
-    let running = app.running.read().contains_key(&id);
+    let running = app.is_active(&id);
     let (title, agent) = info().unwrap_or_else(|| ("Agent".into(), larrier_core::AgentKind::ClaudeCode));
     let (a, b) = (id.clone(), id.clone());
     rsx! {
@@ -377,8 +339,7 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
     let sid = tab.view.session_id().unwrap_or("").to_string();
     let sid_m = sid.clone();
     let summary = use_memo(move || app.sessions.read().iter().find(|s| s.id == sid_m).map(|s| (s.title.clone(), s.agent.clone(), s.unread)));
-    let running = app.running.read().contains_key(&sid);
-    let live = !running && app.live.read().contains_key(&sid);
+    let running = app.is_active(&sid);
     let sub = match &tab.view {
         View::Subagent { session, tool } => Some(
             app.peek_session(session, |s| {
@@ -448,9 +409,6 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
                 }
             }
             span { class: "t", dir: "auto", "{label}" }
-            if live {
-                span { class: "live-dot", title: "Live — another app is writing this session" }
-            }
             button { class: "x", title: "Close (Ctrl+W)",
                 onclick: move |e| {
                     e.stop_propagation();
@@ -535,7 +493,7 @@ fn AboveComposer(id: String) -> Element {
     let mut nonce = use_signal(|| 0u32);
     let id_m = id.clone();
     let info = use_memo(move || app.with_session(&id_m, |s| (s.cwd(), change_key(s), s.title.clone())));
-    let running = app.is_running(&id);
+    let running = app.is_active(&id);
     let (cwd, ck, title) = info().unwrap_or_default();
     let cwd2 = cwd.clone();
     let stats = use_resource(use_reactive!(|cwd2, ck, running| {

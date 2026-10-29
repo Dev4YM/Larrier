@@ -403,6 +403,29 @@ impl App {
         self.running.read().contains_key(id)
     }
 
+    /// Whether an agent is working on this session right now — run by
+    /// Larrier, or mid-turn in its own app (a terminal CLI, an IDE) as seen
+    /// through live sync. Everything that shows "running" uses this.
+    pub fn is_active(&self, id: &str) -> bool {
+        if self.is_running(id) {
+            return true;
+        }
+        let live = self.live.read().contains_key(id);
+        self.sessions.read().iter().find(|s| s.id == id).map(|s| external_active(s, live)).unwrap_or(false)
+    }
+
+    /// Ids of every session an agent is working on right now.
+    pub fn active_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.running.read().keys().cloned().collect();
+        let live = self.live.read();
+        for s in self.sessions.read().iter() {
+            if !ids.contains(&s.id) && external_active(s, live.contains_key(&s.id)) {
+                ids.push(s.id.clone());
+            }
+        }
+        ids
+    }
+
     pub fn current_id(&self) -> Option<String> {
         match &*self.view.read() {
             View::Agent(id) => Some(id.clone()),
@@ -1424,6 +1447,17 @@ pub fn flush_saves() {
         }
     }
     let _ = ack_rx.recv_timeout(Duration::from_secs(5));
+}
+
+/// An imported session still mid-turn in its agent's own app. Claude Code
+/// and Codex mark turn ends in the transcript (`external_turn`); a turn left
+/// open by a crashed CLI stops counting after a while. Agents without turn
+/// markers count while their files are being written (`live_recent`).
+pub fn external_active(s: &SessionSummary, live_recent: bool) -> bool {
+    if s.external_turn {
+        return chrono::Utc::now() - s.updated_at < chrono::Duration::minutes(45);
+    }
+    live_recent && !matches!(s.origin, AgentKind::ClaudeCode | AgentKind::Codex)
 }
 
 /// Save a pasted / dropped image (a `data:` URL) as an attachment file.

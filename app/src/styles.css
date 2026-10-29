@@ -1179,3 +1179,19 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .tool-link .badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--chip); color: var(--fg-2); font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
 .tools-col.collapsed .tool-link { width: 34px; height: 32px; padding: 0; justify-content: center; position: relative; }
 .tools-col.collapsed .tool-link .badge { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; font-size: 9.5px; }
+
+/* The prompt being edited stays pinned like the others; long drafts
+   scroll inside the card. */
+.user-msg.editing { position: sticky; top: 0; z-index: 5; }
+.user-msg.editing .edit-box { max-height: min(46vh, 360px); overflow: auto; }
+
+/* Softer floating buttons: a light lift, not a dark halo. It sits above
+   the fade at the bottom of the conversation. */
+.transcript > .scroll-bottom { bottom: 22px; }
+.transcript > .scroll-bottom .round-btn { box-shadow: 0 1px 2px rgba(38, 37, 30, .06), 0 2px 8px rgba(38, 37, 30, .06); }
+.app[data-theme="dark"] .transcript > .scroll-bottom .round-btn { box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 2px 8px rgba(0, 0, 0, .2); }
+
+/* The conversation fades out above the composer instead of being cut. */
+.transcript { mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+.transcript-inner { padding-bottom: 36px; }
+.above-composer { padding-top: 6px; }

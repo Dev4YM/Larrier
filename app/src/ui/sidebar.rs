@@ -4,13 +4,13 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use larrier_core::{AgentKind, Part, Role, SessionStatus, SessionSummary, SidebarGroup, SidebarSort, ToolStatus};
+use larrier_core::{AgentKind, SessionStatus, SessionSummary, SidebarGroup, SidebarSort};
 
 use dioxus::html::input_data::MouseButton;
 
 use super::{AgentGlyph, Dropdown, MenuItem};
 use crate::icons::{Icon, I};
-use crate::state::{rel_time, use_app, use_ui, user_name, App, CtxMenu, SettingsTab, View};
+use crate::state::{rel_time, use_app, use_ui, user_name, CtxMenu, SettingsTab, View};
 
 const PAGE: usize = 5;
 const OPEN_IF_ACTIVE_WITHIN_DAYS: i64 = 7;
@@ -102,28 +102,6 @@ fn build_repos(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], 
     sort_items(&mut no_repo.items, sort);
     let no_repo = if no_repo.items.is_empty() { None } else { Some(no_repo) };
     (pinned, no_repo, repos)
-}
-
-/// What a running agent is doing right now ("Reading main.rs", "Thinking").
-pub fn activity(app: &App, id: &str) -> Option<String> {
-    app.with_session(id, |s| {
-        let m = s.messages.last()?;
-        if m.role == Role::User {
-            return Some("Starting".into());
-        }
-        for p in m.parts.iter().rev() {
-            match p {
-                Part::Tool(t) if matches!(t.status, ToolStatus::Running | ToolStatus::Pending | ToolStatus::Approval) => {
-                    return Some(super::transcript::running_label(t));
-                }
-                Part::Reasoning { duration_ms: None, .. } => return Some("Thinking".into()),
-                Part::Text { text } => return Some(larrier_core::lsf::preview_line(text, 80)),
-                _ => {}
-            }
-        }
-        Some("Working".into())
-    })
-    .flatten()
 }
 
 #[component]

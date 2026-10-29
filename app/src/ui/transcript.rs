@@ -1053,12 +1053,6 @@ fn question_text(t: &ToolCall) -> String {
         .unwrap_or_default()
 }
 
-/// Short present-tense label for the sidebar ("Reading main.rs").
-pub fn running_label(t: &ToolCall) -> String {
-    let (v, target) = verb_target(t);
-    format!("{v} {target}").trim().to_string()
-}
-
 /// File (or folder) name a read / list call looked at.
 fn read_target(t: &ToolCall) -> Option<String> {
     let path = ["file_path", "path", "target_file", "filePath", "notebook_path", "relative_workspace_path", "dir_path"]

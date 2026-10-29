@@ -1275,46 +1275,6 @@ fn PlanProposal(tool: ToolCall) -> Element {
     }
 }
 
-/// Questions the agent asked (AskUserQuestion) with the answers given.
-#[component]
-fn QuestionView(tool: ToolCall) -> Element {
-    let qs: Vec<(String, Vec<String>)> = tool
-        .input
-        .get("questions")
-        .and_then(|q| q.as_array())
-        .map(|a| {
-            a.iter()
-                .map(|q| {
-                    let text = q.get("question").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                    let opts = q.get("options").and_then(|o| o.as_array()).map(|o| o.iter().filter_map(|x| x.get("label").and_then(|l| l.as_str()).or_else(|| x.as_str())).map(String::from).collect()).unwrap_or_default();
-                    (text, opts)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if qs.is_empty() {
-        return rsx! { Step { tool } };
-    }
-    let answer = tool.output.clone().unwrap_or_default();
-    rsx! {
-        div { class: "question-card answered",
-            for (i, (q, opts)) in qs.into_iter().enumerate() {
-                div { key: "{i}",
-                    div { class: "q-title", "{q}" }
-                    div { class: "q-opts",
-                        for (j, o) in opts.into_iter().enumerate() {
-                            span { key: "{j}", class: if answer.contains(&o) { "q-chip on" } else { "q-chip" }, "{o}" }
-                        }
-                    }
-                }
-            }
-            if !answer.trim().is_empty() {
-                div { class: "q-answer", "{larrier_core::lsf::first_line(&answer)}" }
-            }
-        }
-    }
-}
-
 #[component]
 fn ToolView(session_id: String, tool: ToolCall) -> Element {
     if tool.kind == ToolKind::Task || !tool.subagent.is_empty() {
@@ -1322,7 +1282,7 @@ fn ToolView(session_id: String, tool: ToolCall) -> Element {
     }
     match tool.name.as_str() {
         "ExitPlanMode" => return rsx! { PlanProposal { tool } },
-        "AskUserQuestion" => return rsx! { QuestionView { tool } },
+        name if super::ask::QUESTION_TOOLS.contains(&name) => return rsx! { super::ask::AskCard { session_id, tool } },
         "BashOutput" | "TaskOutput" | "KillShell" | "KillBash" | "TaskStop" | "Monitor" => return rsx! { Step { tool } },
         _ => {}
     }

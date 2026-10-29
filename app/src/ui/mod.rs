@@ -1,6 +1,7 @@
 //! UI components.
 
 mod appearance;
+mod ask;
 mod automations;
 mod chat;
 mod composer;

@@ -7,6 +7,7 @@ mod icons;
 mod live;
 mod logos;
 mod markdown;
+mod models_sync;
 mod notify;
 mod quota;
 mod state;

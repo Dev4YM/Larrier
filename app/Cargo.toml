@@ -21,6 +21,7 @@ serde_json.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 tokio.workspace = true
+reqwest.workspace = true
 futures.workspace = true
 pulldown-cmark.workspace = true
 open.workspace = true

@@ -526,7 +526,9 @@ fn Models() -> Element {
     let providers = app.config.read().providers.clone();
     rsx! {
         h1 { "Models & API Keys" }
-        div { class: "sub", "Providers for Larrier's built-in Chat agent. Keys live in your OS keychain." }
+        div { class: "sub", "Every model Larrier knows, with context windows and prices, plus providers for the built-in Chat agent. Keys live in your OS keychain." }
+        super::models::ModelRegistry {}
+        div { class: "set-group-title", style: "margin-top: 22px;", "Chat providers" }
         for p in providers {
             ProviderCard { key: "{p.id}", p }
         }

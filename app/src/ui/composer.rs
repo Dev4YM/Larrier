@@ -55,12 +55,66 @@ pub fn mode_label(mode: &str) -> String {
     }
 }
 
+/// Short model name for the composer button ("Opus 5.5", "GPT-6.1 Sol").
 fn model_display(agent: &AgentKind, model: &Option<String>) -> String {
+    use larrier_core::models;
     match model {
-        Some(m) if agent.spec().protocol == Protocol::HttpChat => m.split_once('/').map(|(_, b)| b.to_string()).unwrap_or(m.clone()),
-        Some(m) if m != "default" && m != "auto" => m.clone(),
+        Some(m) if m != "default" && m != "auto" => {
+            let id = if agent.spec().protocol == Protocol::HttpChat { m.split_once('/').map(|(_, b)| b).unwrap_or(m) } else { m.as_str() };
+            if let Some((_, label)) = models::alias(id) {
+                return label.to_string();
+            }
+            models::lookup(id).map(|i| i.short_name()).unwrap_or_else(|| models::pretty_name(id))
+        }
         _ => "Auto".into(),
     }
+}
+
+/// How a model choice reads in the picker: (label, note, "1M · $4 / $20",
+/// tooltip).
+fn model_row_text(m: &Option<String>) -> (String, String, String, String) {
+    use larrier_core::models::{self, money, tokens_short};
+    let Some(id) = m.as_deref() else {
+        return ("Auto".into(), "Agent's default".into(), String::new(), "Let the agent use its default model".into());
+    };
+    let info = models::lookup(id);
+    let meta = info
+        .as_ref()
+        .map(|i| {
+            let mut b = Vec::new();
+            if let Some(c) = i.context {
+                b.push(tokens_short(c));
+            }
+            if let Some(p) = &i.price {
+                b.push(p.short());
+            }
+            b.join(" · ")
+        })
+        .unwrap_or_default();
+    let (label, note) = match models::alias(id) {
+        Some((_, l)) => (l.to_string(), info.as_ref().map(|i| format!("latest · {}", i.short_name())).unwrap_or_else(|| "latest".into())),
+        None => (models::display_name(id), info.as_ref().and_then(|i| i.tag.clone()).unwrap_or_default()),
+    };
+    let tip = match &info {
+        Some(i) => {
+            let mut t = format!("{id}\n{}", i.vendor.name());
+            if let Some(c) = i.context {
+                t.push_str(&format!(" · {} context", tokens_short(c)));
+            }
+            if let Some(o) = i.max_output {
+                t.push_str(&format!(" · {} output", tokens_short(o)));
+            }
+            if let Some(p) = &i.price {
+                t.push_str(&format!("\nInput {} · Output {} per 1M tokens", money(p.input), money(p.output)));
+                if let Some(c) = p.cache_read {
+                    t.push_str(&format!(" · Cache read {}", money(c)));
+                }
+            }
+            t
+        }
+        None => id.to_string(),
+    };
+    (label, note, meta, tip)
 }
 
 const TIPS: &[&str] = &[
@@ -701,8 +755,9 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
         for (k, name, _) in agents.iter() {
             let agent_hit = name.to_lowercase().contains(&q);
             for m in agent_models(&app, k) {
-                let label = m.clone().unwrap_or_else(|| "Auto".into());
-                if agent_hit || label.to_lowercase().contains(&q) {
+                let label = model_row_text(&m).0.to_lowercase();
+                let raw = m.clone().unwrap_or_default().to_lowercase();
+                if agent_hit || label.contains(&q) || raw.contains(&q) {
                     v.push((k.clone(), name.clone(), m));
                 }
             }
@@ -769,18 +824,21 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
                         for m in agent_models(&app, &cur) {
                             {
                                 let checked = cur == agent && model.as_deref() == m.as_deref();
-                                let label = m.clone().unwrap_or_else(|| "Auto".into());
-                                let desc = if m.is_none() { "Agent's default" } else { "" };
+                                let (label, note, meta, tip) = model_row_text(&m);
+                                let row_key = m.clone().unwrap_or_else(|| "auto".into());
                                 let mlogo = m.as_deref().and_then(model_logo);
                                 let k = cur.clone();
                                 let m2 = m.clone();
                                 rsx! {
-                                    button { key: "{label}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" },
+                                    button { key: "{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{tip}",
                                         onclick: move |_| onpick.call((k.clone(), m2.clone())),
                                         span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } else { Icon { i: I::Sparkle, size: 13, stroke: 1.5 } } }
-                                        span { class: "ellipsis", "{label}" }
-                                        if !desc.is_empty() { span { class: "sub", "{desc}" } }
-                                        if checked { span { class: "check", Icon { i: I::Check, size: 13 } } }
+                                        span { class: "mp-name",
+                                            span { class: "ellipsis", "{label}" }
+                                            if !note.is_empty() { span { class: "mp-note", "{note}" } }
+                                        }
+                                        if !meta.is_empty() { span { class: "mp-meta", "{meta}" } }
+                                        span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
                                     }
                                 }
                             }
@@ -792,16 +850,20 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
                     for (k, name, m) in results.clone() {
                         {
                             let checked = k == agent && model.as_deref() == m.as_deref();
-                            let label = m.clone().unwrap_or_else(|| "Auto".into());
+                            let (label, _note, meta, tip) = model_row_text(&m);
+                            let row_key = m.clone().unwrap_or_else(|| "auto".into());
                             let mlogo = m.as_deref().and_then(model_logo).or_else(|| agent_logo(&k));
                             let (k2, m2) = (k.clone(), m.clone());
                             rsx! {
-                                button { key: "{k.id()}-{label}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" },
+                                button { key: "{k.id()}-{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{tip}",
                                     onclick: move |_| onpick.call((k2.clone(), m2.clone())),
                                     span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } }
-                                    span { class: "ellipsis", "{label}" }
-                                    span { class: "sub", "{name}" }
-                                    if checked { span { class: "check", Icon { i: I::Check, size: 13 } } }
+                                    span { class: "mp-name",
+                                        span { class: "ellipsis", "{label}" }
+                                        span { class: "mp-note", "{name}" }
+                                    }
+                                    if !meta.is_empty() { span { class: "mp-meta", "{meta}" } }
+                                    span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
                                 }
                             }
                         }

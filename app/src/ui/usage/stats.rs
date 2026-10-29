@@ -282,6 +282,9 @@ pub fn load_all(list: &[SessionSummary]) -> Arc<HashMap<String, SessionStats>> {
 /// Public API list prices per million tokens: (input, output, cache read,
 /// cache write). Only used when the agent reports no cost itself.
 pub fn price(model: &str) -> Option<(f64, f64, f64, f64)> {
+    if let Some(p) = larrier_core::models::price(model) {
+        return Some((p.input, p.output, p.cache_read.unwrap_or(p.input * 0.1), p.cache_write.unwrap_or(p.input * 1.25)));
+    }
     let m = model.to_lowercase();
     let has = |s: &str| m.contains(s);
     if has("opus") {

@@ -8,6 +8,7 @@ mod customize;
 mod files;
 mod home;
 mod menubar;
+mod models;
 mod overlays;
 mod right;
 mod settings;
@@ -43,6 +44,7 @@ pub fn Root() -> Element {
             }
         }
         crate::highlight::warm_up();
+        crate::models_sync::start();
         crate::automations::start(app);
         app.detect_agents();
         if app.config.read().settings.auto_import {

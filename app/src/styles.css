@@ -1023,3 +1023,46 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .live-pill { height: 22px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px 0 8px; margin-left: 4px; border-radius: 11px; font-size: 11.5px; color: var(--green); background: color-mix(in srgb, var(--green) 10%, transparent); white-space: nowrap; flex-shrink: 0; }
 .live-notice { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 10px; font-size: 12px; color: var(--fg-2); background: color-mix(in srgb, var(--green) 7%, var(--card-2)); border: 1px solid color-mix(in srgb, var(--green) 22%, var(--border)); }
 @media (max-width: 760px) { .live-pill { display: none; } }
+
+/* Model picker rows: name, note, then context and price on the right. */
+.mp-row { gap: 8px; }
+.mp-row .mp-name { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.mp-row .mp-name .ellipsis { flex-shrink: 1; min-width: 0; }
+.mp-row .mp-note { font-size: 11px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 2; min-width: 0; }
+.mp-row .mp-meta { font-size: 11px; color: var(--fg-3); white-space: nowrap; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.mp-row .check { margin-left: 0; padding-left: 2px; width: 15px; flex-shrink: 0; }
+.menu.model-picker { width: 560px; }
+@media (max-width: 620px) { .mp-row .mp-meta { display: none; } }
+
+/* Settings → Models: the registry. */
+.mr-meta { font-size: 11.5px; color: var(--fg-3); font-weight: 400; }
+.mr-note { font-size: 12px; color: var(--fg-3); margin: -2px 2px 8px; line-height: 17px; }
+.mr-card { padding: 0; overflow: hidden; }
+.mr-tools { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.mr-search { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 8px; background: var(--input, var(--card-2)); border: 1px solid var(--border); color: var(--fg-3); }
+.mr-search input { flex: 1; border: none; outline: none; background: transparent; color: var(--fg); font-size: 12.5px; user-select: text; }
+.mr-old { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-2); white-space: nowrap; }
+.mr-vendors { display: flex; gap: 6px; padding: 8px 12px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+.mr-chip { height: 24px; padding: 0 9px; border-radius: 12px; background: var(--chip); color: var(--fg-2); font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; }
+.mr-chip .n { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.mr-chip:hover { color: var(--fg); background: var(--chip-2); }
+.mr-chip.on { background: var(--fg); color: var(--win); }
+.mr-chip.on .n { color: inherit; opacity: .7; }
+.mr-table { display: flex; flex-direction: column; }
+.mr-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 64px 64px 64px 78px; align-items: center; gap: 8px; padding: 0 12px; min-height: 36px; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+.mr-row:last-child { border-bottom: none; }
+.mr-row:hover { background: var(--hover); }
+.mr-row.head { min-height: 30px; font-size: 11px; color: var(--fg-3); background: var(--card); position: sticky; top: 0; }
+.mr-row .c-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--fg-2); white-space: nowrap; }
+.mr-row .c-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mr-row .c-name .lg { width: 16px; display: flex; justify-content: center; flex-shrink: 0; }
+.mr-row .c-name .nm { color: var(--fg); font-weight: 500; flex-shrink: 1; min-width: 0; }
+.mr-row .c-name .id { color: var(--fg-3); font-size: 11px; font-family: var(--mono); flex-shrink: 3; min-width: 0; }
+.mr-tag { font-size: 10.5px; padding: 1px 6px; border-radius: 6px; background: var(--blue-bg, var(--chip)); color: var(--blue); white-space: nowrap; flex-shrink: 0; }
+.mr-tag.old { background: var(--chip); color: var(--fg-3); }
+.mr-empty { padding: 18px; text-align: center; color: var(--fg-3); font-size: 12.5px; }
+@media (max-width: 760px) {
+  .mr-row { grid-template-columns: minmax(0, 1fr) 54px 60px 60px; }
+  .mr-row > .c-num:nth-child(3), .mr-row > .c-num:nth-child(6) { display: none; }
+  .mr-row .c-name .id { display: none; }
+}

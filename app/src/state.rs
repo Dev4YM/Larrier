@@ -51,9 +51,11 @@ impl View {
     }
 }
 
-/// A chat tab. Like VS Code: a single click opens a preview tab (italic)
-/// that the next single click replaces; double-click, sending a message or
-/// "Open in New Tab" keeps it.
+/// A subagent chat open next to its session. A window shows one session:
+/// its own tab always comes first and is never replaced; its subagents open
+/// beside it, VS Code style: a single click opens a preview tab (italic)
+/// that the next one replaces, and double-click keeps it. Another session
+/// never joins as a tab; it opens side by side instead.
 #[derive(Clone, PartialEq, Debug)]
 pub struct ChatTab {
     pub view: View,
@@ -606,10 +608,10 @@ impl App {
 
     // ------------------------------------------------------------- tabs
 
-    /// Make sure a tab shows `v`: an existing tab is reused, otherwise the
-    /// preview tab is replaced (or a new tab added after the active one).
+    /// Make sure a subagent tab shows `v`: an existing tab is reused,
+    /// otherwise the session's preview tab is replaced (or one is added).
     pub fn ensure_tab(mut self, v: &View, keep: bool) {
-        let active = self.view.peek().clone();
+        let View::Subagent { session, .. } = v else { return };
         let mut tabs = self.tabs.write();
         if let Some(t) = tabs.iter_mut().find(|t| &t.view == v) {
             if keep {
@@ -619,13 +621,21 @@ impl App {
         }
         let tab = ChatTab { view: v.clone(), preview: !keep };
         if !keep {
-            if let Some(p) = tabs.iter().position(|t| t.preview) {
+            if let Some(p) = tabs.iter().position(|t| t.preview && t.view.session_id() == Some(session)) {
                 tabs[p] = tab;
                 return;
             }
         }
-        let at = tabs.iter().position(|t| t.view == active).map(|i| i + 1).unwrap_or(tabs.len());
-        tabs.insert(at, tab);
+        tabs.push(tab);
+    }
+
+    /// The tabs of the window: the session's own tab, then its subagents.
+    pub fn window_tabs(&self) -> Vec<ChatTab> {
+        let view = self.view.read().clone();
+        let Some(session) = view.session_id().map(str::to_string) else { return Vec::new() };
+        let mut out = vec![ChatTab { view: View::Agent(session.clone()), preview: false }];
+        out.extend(self.tabs.read().iter().filter(|t| t.view.session_id() == Some(session.as_str())).cloned());
+        out
     }
 
     /// Turn a preview tab into a regular one.
@@ -635,34 +645,6 @@ impl App {
         }
     }
 
-    /// Open a session in its own (kept) tab.
-    pub fn open_session_tab(self, id: &str) {
-        if !self.ensure_loaded(id) {
-            return;
-        }
-        let v = View::Agent(id.to_string());
-        self.ensure_tab(&v, true);
-        self.open_session(id);
-    }
-
-    /// Show a session in the current tab (replacing what it shows).
-    pub fn open_here(mut self, id: &str) {
-        if !self.ensure_loaded(id) {
-            return;
-        }
-        let v = View::Agent(id.to_string());
-        let cur = self.view.peek().clone();
-        {
-            let mut tabs = self.tabs.write();
-            if !tabs.iter().any(|t| t.view == v) {
-                if let Some(t) = tabs.iter_mut().find(|t| t.view == cur) {
-                    t.view = v.clone();
-                    t.preview = false;
-                }
-            }
-        }
-        self.show_session(id);
-    }
 
     /// Open a subagent's transcript in a tab.
     pub fn open_subagent(self, session_id: &str, tool_id: &str) {
@@ -672,7 +654,9 @@ impl App {
         self.navigate(View::Subagent { session: session_id.to_string(), tool: tool_id.to_string() });
     }
 
+    /// Close a subagent tab. The session's own tab stays.
     pub fn close_tab(mut self, v: &View) {
+        let View::Subagent { session, .. } = v else { return };
         let next = {
             let mut tabs = self.tabs.write();
             let Some(i) = tabs.iter().position(|t| &t.view == v) else { return };
@@ -680,28 +664,41 @@ impl App {
             if *self.view.peek() != *v {
                 return;
             }
-            tabs.get(i).or_else(|| tabs.get(i.wrapping_sub(1))).or_else(|| tabs.last()).map(|t| t.view.clone())
+            let same: Vec<&ChatTab> = tabs.iter().filter(|t| t.view.session_id() == Some(session.as_str())).collect();
+            let at = tabs[..i].iter().filter(|t| t.view.session_id() == Some(session.as_str())).count();
+            same.get(at).or_else(|| at.checked_sub(1).and_then(|j| same.get(j))).map(|t| t.view.clone())
         };
-        match next {
-            Some(n) => self.navigate(n),
-            None => self.navigate(View::Home),
-        }
+        self.navigate(next.unwrap_or_else(|| View::Agent(session.clone())));
     }
 
-    /// Close every tab except `v` ("others") or after it ("right").
+    /// Close the session's subagent tabs other than `v` ("others"), after
+    /// it ("right") or all of them ("all").
     pub fn close_tabs(mut self, v: &View, which: &str) {
+        let Some(session) = v.session_id().map(str::to_string) else { return };
         {
             let mut tabs = self.tabs.write();
-            let Some(i) = tabs.iter().position(|t| &t.view == v) else { return };
-            match which {
-                "right" => tabs.truncate(i + 1),
-                "all" => tabs.clear(),
-                _ => tabs.retain(|t| &t.view == v),
-            }
+            let mine = |t: &ChatTab| t.view.session_id() == Some(session.as_str());
+            let keep_until = match v {
+                View::Agent(_) => None,
+                _ => tabs.iter().filter(|t| mine(t)).position(|t| &t.view == v),
+            };
+            let mut seen = 0usize;
+            tabs.retain(|t| {
+                if !mine(t) {
+                    return true;
+                }
+                let idx = seen;
+                seen += 1;
+                match which {
+                    "right" => keep_until.map(|k| idx <= k).unwrap_or(false),
+                    "all" => false,
+                    _ => &t.view == v,
+                }
+            });
         }
         let cur = self.view.peek().clone();
-        if cur.is_tab() && !self.tabs.peek().iter().any(|t| t.view == cur) {
-            self.navigate(if which == "all" { View::Home } else { v.clone() });
+        if matches!(cur, View::Subagent { .. }) && cur.session_id() == Some(session.as_str()) && !self.tabs.peek().iter().any(|t| t.view == cur) {
+            self.navigate(View::Agent(session));
         }
     }
 
@@ -722,7 +719,7 @@ impl App {
             return;
         }
         if self.current_id().is_none() {
-            return self.open_session_tab(id);
+            return self.open_session(id);
         }
         self.split.set(Some(id.to_string()));
     }
@@ -753,8 +750,8 @@ impl App {
         }
     }
 
-    /// Open a session in the preview tab. Big sessions load off the UI
-    /// thread so the window never freezes.
+    /// Show a session in the window. Big sessions load off the UI thread so
+    /// the window never freezes.
     pub fn open_session(self, id: &str) {
         if self.is_loaded(id) {
             return self.show_session(id);
@@ -859,7 +856,6 @@ impl App {
         if self.split.peek().as_deref() != Some(id.as_str()) {
             self.navigate(View::Agent(id.clone()));
         }
-        self.keep_tab(&View::Agent(id.clone()));
 
         let cfg = self.config.read().clone();
         let request = self.peek_session(&id, |s| larrier_agents::build_request(&cfg, s, &agent)).expect("loaded");
@@ -1128,7 +1124,7 @@ impl App {
             let fid = f.id.clone();
             self.save_session(&f);
             self.put_session(f);
-            self.open_session_tab(&fid);
+            self.open_session(&fid);
             self.toast("Forked into a new agent");
         }
     }

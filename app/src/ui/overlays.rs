@@ -211,9 +211,10 @@ pub fn TabMenu() -> Element {
         }
     }));
     let Some(c) = app.ui.read().tab_ctx.clone() else { return rsx! {} };
-    let preview = app.tabs.read().iter().find(|t| t.view == c.view).map(|t| t.preview).unwrap_or(false);
-    let n = app.tabs.read().len();
-    let is_last = app.tabs.read().last().map(|t| t.view == c.view).unwrap_or(true);
+    let tabs = app.window_tabs();
+    let preview = tabs.iter().find(|t| t.view == c.view).map(|t| t.preview).unwrap_or(false);
+    let n = tabs.len();
+    let is_last = tabs.last().map(|t| t.view == c.view).unwrap_or(true);
     let session = c.view.session_id().map(|s| s.to_string());
     let is_agent = matches!(c.view, crate::state::View::Agent(_));
     let active = *app.view.read() == c.view;
@@ -237,10 +238,14 @@ pub fn TabMenu() -> Element {
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().tab_ctx = None; },
         }
         div { id: "tab-menu", class: "menu ctx-menu", style: "left: {c.x}px; top: {c.y}px; visibility: hidden;",
-            {item("Close", I::X, "Ctrl+W", true, Box::new(move || app.close_tab(&v1)))}
-            {item("Close Others", I::X, "", n > 1, Box::new(move || app.close_tabs(&v2, "others")))}
-            {item("Close to the Right", I::X, "", !is_last, Box::new(move || app.close_tabs(&v3, "right")))}
-            {item("Close All", I::X, "", true, Box::new(move || app.close_tabs(&v4, "all")))}
+            if !is_agent {
+                {item("Close", I::X, "Ctrl+W", true, Box::new(move || app.close_tab(&v1)))}
+            }
+            {item(if is_agent { "Close Subagent Tabs" } else { "Close Others" }, I::X, "", n > if is_agent { 1 } else { 2 }, Box::new(move || app.close_tabs(&v2, "others")))}
+            if !is_agent {
+                {item("Close to the Right", I::X, "", !is_last, Box::new(move || app.close_tabs(&v3, "right")))}
+                {item("Close All", I::X, "", true, Box::new(move || app.close_tabs(&v4, "all")))}
+            }
             div { class: "menu-sep" }
             if preview {
                 {item("Keep Open", I::Pin, "Double-click", true, Box::new(move || app.keep_tab(&v5)))}
@@ -294,7 +299,7 @@ pub fn ContextMenu() -> Element {
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().ctx = None; } }
         div { id: "ctx-menu", class: "menu", style: "position: fixed; left: {x}px; top: {y}px; visibility: hidden;",
             {item("Open", I::Message, Box::new(move || app.open_session(&i1)))}
-            {item("Open in New Tab", I::CopyPlus, { let i = id.clone(); Box::new(move || app.open_session_tab(&i)) })}
+            {item("Open Side by Side", I::Columns, { let i = id.clone(); Box::new(move || app.open_split(&i)) })}
             if app.current_id().is_some_and(|c| c != id) {
                 {item("Open Side by Side", I::Columns, { let i = id.clone(); Box::new(move || app.open_split(&i)) })}
             }

@@ -375,7 +375,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                     }
                 }
                 ("tab", back) => {
-                    let tabs = app.tabs.read().clone();
+                    let tabs = app.window_tabs();
                     if !tabs.is_empty() {
                         let v = app.view.read().clone();
                         let i = tabs.iter().position(|t| t.view == v);
@@ -406,9 +406,9 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
             }
             let target = v["target"].as_str().map(|s| s.to_string()).filter(|s| !s.is_empty());
             match v["zone"].as_str() {
-                Some("tab") | Some("tabstrip") => app.open_session_tab(&id),
-                Some("here") => app.open_here(&id),
-                Some("split") => app.open_split(&id),
+                Some("here") => app.open_session(&id),
+                // Onto the tab bar: next to the open chat, never inside it.
+                Some("split") | Some("tabstrip") => app.open_split(&id),
                 Some("context") => {
                     let short = id[id.len().saturating_sub(8)..].to_string();
                     app.ui.write().compose_inbox.push((target, format!("@agent:{short}")));

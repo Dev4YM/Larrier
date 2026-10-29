@@ -283,14 +283,14 @@ fn SplitHeader(id: String) -> Element {
                 onclick: move |_| {
                     let main = app.current_id();
                     app.split.set(main);
-                    app.open_session_tab(&a);
+                    app.open_session(&a);
                 },
                 Icon { i: I::Swap, size: 15, stroke: 1.5 }
             }
-            button { class: "icon-btn", title: "Open in its own tab",
+            button { class: "icon-btn", title: "Open in the whole window",
                 onclick: move |_| {
                     app.split.set(None);
-                    app.open_session_tab(&b);
+                    app.open_session(&b);
                 },
                 Icon { i: I::AppWindow, size: 15, stroke: 1.5 }
             }
@@ -311,14 +311,13 @@ fn tab_key(v: &View) -> String {
     }
 }
 
-/// The chat tabs, Cursor / VS Code style. Single-click opens a preview tab
-/// (italic) that the next open replaces; double-click keeps it.
+/// The window's tabs: the session's own tab, then the subagent chats opened
+/// from it (single-click opens a preview tab, double-click keeps it).
 #[component]
 pub fn TabStrip() -> Element {
     let app = use_app();
-    let tabs = app.tabs.read().clone();
+    let tabs = app.window_tabs();
     let view = app.view.read().clone();
-    let home = view == View::Home;
     let active = tabs.iter().position(|t| t.view == view);
     use_effect(use_reactive!(|active| {
         if active.is_some() {
@@ -336,10 +335,6 @@ pub fn TabStrip() -> Element {
             },
             for t in tabs {
                 ChatTabChip { key: "{tab_key(&t.view)}", active: t.view == view, tab: t }
-            }
-            button { class: if home { "icon-btn tab-new on" } else { "icon-btn tab-new" }, title: "New Agent (Ctrl+N)",
-                onclick: move |_| app.new_agent(),
-                Icon { i: I::Plus, size: 15, stroke: 1.6 }
             }
         }
     }
@@ -369,10 +364,11 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
     let (title, agent, unread) = summary().unwrap_or_else(|| ("Agent".into(), larrier_core::AgentKind::ClaudeCode, false));
     let label = sub.clone().unwrap_or_else(|| title.clone());
     let tip = match &sub {
-        Some(s) => format!("{s} · subagent of {title}"),
-        None => format!("{} · {title}{}", agent.display_name(), if tab.preview { "\nPreview — double-click to keep open" } else { "" }),
+        Some(s) => format!("{s} · subagent of {title}{}", if tab.preview { "\nPreview — double-click to keep open" } else { "" }),
+        None => format!("{} · {title}", agent.display_name()),
     };
     let preview = tab.preview;
+    let sub_tab = sub.is_some();
     let (v1, v2, v3, v4, v5) = (tab.view.clone(), tab.view.clone(), tab.view.clone(), tab.view.clone(), tab.view.clone());
     let mut cls = String::from("ctab");
     if active {
@@ -401,7 +397,7 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
                 }
             },
             onmousedown: move |e| {
-                if e.trigger_button() == Some(MouseButton::Auxiliary) {
+                if e.trigger_button() == Some(MouseButton::Auxiliary) && sub_tab {
                     e.prevent_default();
                     app.close_tab(&v3);
                 }
@@ -421,12 +417,15 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
                 }
             }
             span { class: "t", dir: "auto", "{label}" }
-            button { class: "x", title: "Close (Ctrl+W)",
-                onclick: move |e| {
-                    e.stop_propagation();
-                    app.close_tab(&v5);
-                },
-                Icon { i: I::X, size: 12, stroke: 1.8 }
+            // The session's own tab stays; only subagent tabs close.
+            if sub_tab {
+                button { class: "x", title: "Close (Ctrl+W)",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                        app.close_tab(&v5);
+                    },
+                    Icon { i: I::X, size: 12, stroke: 1.8 }
+                }
             }
         }
     }
@@ -454,10 +453,7 @@ pub fn DropZones(target: Option<String>) -> Element {
                     if target.is_some() {
                         DropCard { zone: "split", target: t.clone(), icon: I::Columns, label: "Side by side", sub: "Work in both chats at once".to_string() }
                     }
-                    DropCard { zone: "tab", target: t.clone(), icon: I::CopyPlus, label: "Open in new tab", sub: if target.is_some() { "Keep this chat open too".to_string() } else { "Open it next to your tabs".to_string() } }
-                    if target.is_some() {
-                        DropCard { zone: "here", target: t.clone(), icon: I::AppWindow, label: "Open here", sub: "Replace this tab".to_string() }
-                    }
+                    DropCard { zone: "here", target: t.clone(), icon: I::AppWindow, label: "Open here", sub: if target.is_some() { "Replace this chat".to_string() } else { "Show this chat".to_string() } }
                     DropCard { zone: "context", target: t.clone(), icon: I::Link, label: "Add as context", sub: if target.is_some() { "Reference it in your next message".to_string() } else { "Start a new agent with it".to_string() } }
                 }
             }

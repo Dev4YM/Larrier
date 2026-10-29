@@ -401,19 +401,19 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             "data-ctx": "session",
             "data-drag-session": "{s.id}",
             "data-drag-title": "{s.title}",
-            // Click: preview tab. Double / Ctrl / middle click: a kept tab.
+            // Click: show it. Ctrl / middle click: side by side.
             onclick: move |e| {
                 if e.modifiers().ctrl() || e.modifiers().meta() {
-                    app.open_session_tab(&id);
+                    app.open_split(&id);
                 } else {
                     app.open_session(&id);
                 }
             },
-            ondoubleclick: move |_| app.open_session_tab(&id4),
+            ondoubleclick: move |_| app.open_session(&id4),
             onmousedown: move |e| {
                 if e.trigger_button() == Some(MouseButton::Auxiliary) {
                     e.prevent_default();
-                    app.open_session_tab(&id5);
+                    app.open_split(&id5);
                 }
             },
             oncontextmenu: move |e| {

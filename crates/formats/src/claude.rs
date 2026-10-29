@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use chrono::Utc;
 use larrier_core::lsf::{close_active_tools, find_tool_deep_mut, slim_transcript, title_from_prompt};
-use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolStatus, Usage};
+use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -144,6 +144,7 @@ pub fn clean_user_text(text: &str) -> String {
         || t.starts_with("<bash-stderr>")
         || t.starts_with("<task-notification>")
         || t.starts_with("<local-command-caveat>")
+        || is_envelope(t)
     {
         return String::new();
     }
@@ -174,6 +175,153 @@ fn strip_tag(t: &str, tag: &str) -> String {
         }
     }
     out
+}
+
+/// `<agent-message from=…>` (a subagent or another session reporting back)
+/// or `<cross-session-message …>`, optionally after the "Another Claude
+/// session sent a message:" lead-in.
+fn is_envelope(t: &str) -> bool {
+    let t = t.trim_start();
+    let t = t.strip_prefix("Another Claude session sent a message").map(|r| r.split_once('\n').map(|(_, b)| b).unwrap_or("").trim_start()).unwrap_or(t);
+    t.starts_with("<agent-message") || t.starts_with("<cross-session-message")
+}
+
+/// Notice for a message another session or a subagent delivered into this
+/// one (`origin.kind == "peer"`, or a bare envelope from older versions).
+/// These arrive mid-turn: they are not prompts and don't open a turn.
+fn peer_notice(text: &str, origin: &Value) -> Option<String> {
+    if s(origin, "kind") != Some("peer") && !is_envelope(text) {
+        return None;
+    }
+    let handback = origin["handback"].as_bool().unwrap_or(false) || text.contains("[Subagent hand-back]");
+    let name = s(origin, "name").map(str::trim).filter(|n| !n.is_empty());
+    Some(match (handback, name) {
+        (true, Some(n)) => format!("Subagent reported back: {n}"),
+        (true, None) => "Subagent reported back".to_string(),
+        (false, Some(n)) => format!("Message from {n}"),
+        (false, None) => "Message from another session".to_string(),
+    })
+}
+
+/// First line of a slash command's output (`/model`, `/goal`, …), without
+/// the `<local-command-stdout>` wrapper or terminal colour codes.
+fn local_output(text: &str) -> Option<String> {
+    if text.contains("<command-name>") {
+        // The command itself (recorded this way for some local commands).
+        return Some(clean_user_text(text)).filter(|c| !c.is_empty());
+    }
+    let t = strip_ansi(text);
+    let t = between(&t, "<local-command-stdout>", "</local-command-stdout>").or_else(|| between(&t, "<local-command-stderr>", "</local-command-stderr>")).unwrap_or(t);
+    let first = t.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if matches!(first, "{" | "[") {
+        // JSON output: one squeezed line instead of a lone brace.
+        return Some(short(&t.split_whitespace().collect::<Vec<_>>().join(" "), 160));
+    }
+    Some(short(first, 300))
+}
+
+fn strip_ansi(t: &str) -> String {
+    let mut out = String::with_capacity(t.len());
+    let mut chars = t.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn short(t: &str, max: usize) -> String {
+    let t = t.trim();
+    if t.chars().count() <= max {
+        return t.to_string();
+    }
+    t.chars().take(max - 1).collect::<String>() + "…"
+}
+
+/// Notice for a `system` record, or `None` for subtypes ignored on purpose:
+/// `api_error` (a retry attempt; a final failure is an `isApiErrorMessage`
+/// assistant record), `turn_duration`, `stop_hook_summary` without errors.
+fn system_notice(v: &Value) -> Option<String> {
+    let content = s(v, "content").map(str::trim).filter(|c| !c.is_empty());
+    match s(v, "subtype")? {
+        "compact_boundary" => Some("Context compacted".to_string()),
+        "local_command" => content.and_then(local_output),
+        "informational" => content.map(|c| short(c, 300)),
+        "model_refusal_fallback" => Some(content.map(|c| short(c, 300)).unwrap_or_else(|| "Safeguards flagged this message; switched to the fallback model".to_string())),
+        "model_refusal_no_fallback" => Some(content.map(|c| short(c, 300)).unwrap_or_else(|| {
+            let why = s(v, "apiRefusalExplanation").map(|e| format!(": {}", short(e, 200))).unwrap_or_default();
+            format!("Safeguards stopped this response{why}")
+        })),
+        "away_summary" => content.map(|c| format!("Recap: {}", short(c.trim_end_matches("(disable recaps in /config)").trim(), 400))),
+        "stop_hook_summary" => {
+            let errors = v["hookErrors"].as_array().filter(|e| !e.is_empty());
+            if let Some(e) = errors {
+                let first = content_text(&e[0]);
+                let first = if first.is_empty() { e[0].to_string() } else { first };
+                Some(format!("Stop hook error: {}", short(&first, 200)))
+            } else if v["preventedContinuation"].as_bool().unwrap_or(false) {
+                Some(s(v, "stopReason").filter(|r| !r.trim().is_empty()).map(|r| format!("Stopped by hook: {}", short(r, 200))).unwrap_or_else(|| "Stopped by hook".to_string()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Claude Code tools the generic classifier gets wrong: the task-list, team
+/// and cron tools read as file writes, `ToolSearch` loads tool schemas and
+/// `ReadNotifications` / `ReadMcpResourceTool` read no file.
+pub fn fix_tool_kind(t: &mut ToolCall) {
+    const OTHER: [&str; 13] = [
+        "TaskCreate", "TaskUpdate", "TaskGet", "TaskList", "TeamCreate", "TeamDelete", "CronCreate", "CronDelete", "CronList", "ToolSearch", "ReadNotifications", "ReadMcpResourceTool", "ListMcpResourcesTool",
+    ];
+    if OTHER.contains(&t.name.as_str()) && t.kind != ToolKind::Other {
+        t.kind = ToolKind::Other;
+        t.diffs.clear();
+        t.title = Some(t.describe());
+    }
+}
+
+/// `tool_reference` blocks (ToolSearch loading deferred tools) as text.
+pub fn loaded_tools(content: &Value) -> Option<String> {
+    let names: Vec<&str> = content.as_array()?.iter().filter(|b| s(b, "type") == Some("tool_reference")).filter_map(|b| s(b, "tool_name")).collect();
+    (!names.is_empty()).then(|| format!("Loaded {}", names.join(", ")))
+}
+
+/// A server tool's result embedded in the assistant message
+/// (`web_search_tool_result`, `web_fetch_tool_result`, …): tool id, text,
+/// and whether it failed.
+pub fn server_tool_result(b: &Value) -> Option<(String, String, bool)> {
+    if !s(b, "type")?.ends_with("_tool_result") {
+        return None;
+    }
+    let id = s(b, "tool_use_id")?.to_string();
+    let c = &b["content"];
+    let is_error = c.get("error_code").is_some() || s(c, "type").is_some_and(|t| t.ends_with("_error"));
+    let text = match c.as_array() {
+        Some(items) => items
+            .iter()
+            .map(|i| match (s(i, "title"), s(i, "url")) {
+                (Some(t), Some(u)) => format!("{t} — {u}"),
+                (None, Some(u)) => u.to_string(),
+                _ => content_text(i),
+            })
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        None if is_error => s(c, "error_code").unwrap_or("error").replace('_', " "),
+        None => content_text(c),
+    };
+    Some((id, text, is_error))
 }
 
 /// Parse a Claude Code session JSONL.
@@ -274,6 +422,10 @@ fn turn_open(lines: &[Value]) -> bool {
                     Value::Array(b) => b.iter().filter_map(|x| s(x, "text")).collect::<Vec<_>>().join(" "),
                     _ => String::new(),
                 };
+                // Reports from subagents / other sessions are delivered mid-turn.
+                if peer_notice(&text, &v["origin"]).is_some() {
+                    continue;
+                }
                 if text.contains("[Request interrupted") {
                     open = false;
                 } else {
@@ -286,7 +438,7 @@ fn turn_open(lines: &[Value]) -> bool {
             Some("system") if s(v, "subtype") == Some("stop_hook_summary") => open = false,
             Some("attachment") => {
                 let a = &v["attachment"];
-                if s(a, "type") == Some("queued_command") && s(a, "commandMode") != Some("task-notification") {
+                if s(a, "type") == Some("queued_command") && is_queued_prompt(a) {
                     open = true;
                 }
             }
@@ -294,6 +446,17 @@ fn turn_open(lines: &[Value]) -> bool {
         }
     }
     open
+}
+
+/// A `queued_command` attachment the user typed while the agent worked, not
+/// a task notification, a peer report or another harness-injected message.
+fn is_queued_prompt(a: &Value) -> bool {
+    let prompt = content_text(&a["prompt"]);
+    s(a, "commandMode") != Some("task-notification")
+        && s(&a["origin"], "kind") != Some("task-notification")
+        && !prompt.trim_start().starts_with("<task-notification>")
+        && !a["isMeta"].as_bool().unwrap_or(false)
+        && peer_notice(&prompt, &a["origin"]).is_none()
 }
 
 /// Result fields that describe subagents and background tasks.
@@ -308,27 +471,69 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
     let mut usage_by_msg: Vec<(String, Usage, usize)> = Vec::new();
     let mut results: Vec<(String, Value)> = Vec::new();
     let mut notes: Vec<TaskNote> = Vec::new();
+    // A safeguard-refusal fallback already announced the model switch that
+    // the next assistant record's `fallback` block repeats.
+    let mut switch_noted = false;
+    let mut stop_noted: HashSet<String> = HashSet::new();
+    // System records after the newest message hang off the active branch
+    // without being on its parent chain.
+    let uuid_idx: HashMap<&str, usize> = if active.is_some() { lines.iter().enumerate().filter_map(|(i, v)| s(v, "uuid").map(|u| (u, i))).collect() } else { HashMap::new() };
+    let on_branch = |i: usize| -> bool {
+        let Some(a) = active else { return true };
+        let mut cur = i;
+        for _ in 0..64 {
+            if a.contains(&cur) {
+                return true;
+            }
+            if cur != i && matches!(s(&lines[cur], "type"), Some("user") | Some("assistant")) {
+                return false;
+            }
+            match s(&lines[cur], "parentUuid").and_then(|p| uuid_idx.get(p)) {
+                Some(&j) => cur = j,
+                None => return false,
+            }
+        }
+        false
+    };
     for (i, v) in lines.iter().enumerate() {
         let ty = s(v, "type").unwrap_or("");
         if ty == "system" {
-            if s(v, "subtype") == Some("compact_boundary") && active.as_ref().map(|a| a.contains(&i)).unwrap_or(true) {
-                conv.notice("Context compacted", s(v, "timestamp").and_then(parse_ts));
+            if on_branch(i) {
+                if let Some(n) = system_notice(v) {
+                    conv.notice(n, s(v, "timestamp").and_then(parse_ts));
+                    switch_noted |= s(v, "subtype") == Some("model_refusal_fallback");
+                }
             }
             continue;
         }
-        // Prompts sent while the agent was working arrive as queued commands
-        // (never as user records): show them where they were sent.
+        // Attachments are context Claude Code adds around a turn (hook output,
+        // edited-file snippets, @-mentioned file contents already named in the
+        // prompt, reminders, mode and skill listings): ignored on purpose,
+        // except queued prompts and background task status.
         if ty == "attachment" && !sidechain {
             let a = &v["attachment"];
+            if s(a, "type") == Some("task_status") {
+                // Status of background work, written when it changes state
+                // (and again after compaction).
+                let status = s(a, "status").map(str::to_lowercase).filter(|st| !matches!(st.as_str(), "running" | "pending"));
+                if let Some(status) = status {
+                    notes.push(TaskNote { task_id: string(a, "taskId"), tool_use_id: string(&a["shell"], "toolUseId"), status: Some(status) });
+                }
+            }
+            // Prompts sent while the agent was working arrive as queued commands
+            // (never as user records): show them where they were sent.
             if s(a, "type") == Some("queued_command") {
                 // A plain string, or content blocks when the prompt carries
                 // images ([{type: image, …}, {type: text, …}]).
                 let prompt = content_text(&a["prompt"]);
                 let blocks_images = image_parts(&a["prompt"]);
                 let ts = s(a, "timestamp").or_else(|| s(v, "timestamp")).and_then(parse_ts);
-                if s(a, "commandMode") == Some("task-notification") || prompt.trim_start().starts_with("<task-notification>") {
+                if let Some(n) = peer_notice(&prompt, &a["origin"]) {
+                    conv.notice(n, ts);
+                } else if s(a, "commandMode") == Some("task-notification") || prompt.trim_start().starts_with("<task-notification>") {
                     notes.extend(task_notes(&prompt));
-                } else {
+                } else if is_queued_prompt(a) {
+                    switch_noted = false;
                     let (text, images) = image_refs(&clean_user_text(&prompt));
                     let text = if blocks_images.is_empty() { text } else { text.lines().filter(|l| l.trim() != "[image]").collect::<Vec<_>>().join("\n").trim().to_string() };
                     let mut parts = Vec::new();
@@ -354,6 +559,17 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
         }
         let ts = s(v, "timestamp").and_then(parse_ts);
         if ty == "user" {
+            let first_text = match &v["message"]["content"] {
+                Value::String(t) => t.as_str(),
+                Value::Array(b) => b.iter().find_map(|x| s(x, "text")).unwrap_or(""),
+                _ => "",
+            };
+            if let Some(n) = peer_notice(first_text, &v["origin"]) {
+                conv.notice(n, ts);
+                continue;
+            }
+            // Harness-injected text: skill bodies, image metadata
+            // ("[Image: original …]"), usage-limit notes, reminders.
             if v["isMeta"].as_bool().unwrap_or(false) {
                 continue;
             }
@@ -400,6 +616,9 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
                                 if !images.is_empty() {
                                     out = out.lines().filter(|l| l.trim() != "[image]").collect::<Vec<_>>().join("\n");
                                 }
+                                if let Some(loaded) = loaded_tools(&b["content"]) {
+                                    out = if out.trim().is_empty() { loaded } else { format!("{out}\n{loaded}") };
+                                }
                                 let is_err = b["is_error"].as_bool().unwrap_or(false);
                                 let diffs = tool_meta.map(diffs_from_result).unwrap_or_default();
                                 conv.tool_result(id, Some(out), is_err, diffs);
@@ -415,6 +634,7 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
                 _ => {}
             }
             if !parts.is_empty() {
+                switch_noted = false;
                 conv.user_parts(parts, ts);
             }
             continue;
@@ -439,10 +659,25 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
                     }
                     Some("tool_use") | Some("server_tool_use") => {
                         let mut t = ToolCall::new(s(b, "id").unwrap_or(""), s(b, "name").unwrap_or("tool"), b.get("input").cloned().unwrap_or(Value::Null));
+                        fix_tool_kind(&mut t);
                         t.started_at = ts;
                         conv.tool(t, ts, model);
                     }
-                    _ => {}
+                    // Model switch (`--fallback-model`, or a safeguard
+                    // refusal already announced by its system record).
+                    Some("fallback") => {
+                        if !std::mem::take(&mut switch_noted) {
+                            let from = s(&b["from"], "model").unwrap_or("the requested model");
+                            let to = s(&b["to"], "model").unwrap_or("a fallback model");
+                            conv.notice(format!("Switched from {from} to {to}"), ts);
+                        }
+                    }
+                    // `redacted_thinking` is encrypted: nothing to show.
+                    _ => {
+                        if let Some((id, out, is_err)) = server_tool_result(b) {
+                            conv.tool_result(&id, Some(out), is_err, Vec::new());
+                        }
+                    }
                 }
             }
         } else if let Some(t) = msg["content"].as_str() {
@@ -457,12 +692,22 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
                 reasoning_tokens: 0,
                 cost_usd: None,
             };
-            let idx = conv.messages.len().saturating_sub(1);
+            let idx = conv.messages.iter().rposition(|m| m.role == Role::Assistant).unwrap_or(0);
             if let Some(e) = usage_by_msg.iter_mut().find(|e| e.0 == mid) {
                 e.1 = usage;
                 e.2 = idx;
             } else {
                 usage_by_msg.push((mid.to_string(), usage, idx));
+            }
+        }
+        // Every block record of a message repeats its final stop reason:
+        // note the cut-off once, after the message's last block. Refusals
+        // come with their own system records.
+        if s(msg, "stop_reason") == Some("max_tokens") {
+            let mid = s(msg, "id").unwrap_or("");
+            let more = lines[i + 1..].iter().find(|x| s(x, "type") == Some("assistant")).is_some_and(|x| s(&x["message"], "id") == Some(mid));
+            if !more && stop_noted.insert(mid.to_string()) {
+                conv.notice("Response hit the output token limit", ts);
             }
         }
     }
@@ -914,6 +1159,75 @@ mod tests {
         assert_eq!(t.subagent.len(), 1);
         assert_eq!(t.subagent[0].text(), "3 crates");
         assert_eq!(s.messages.len(), 2, "sidechain lines stay out of the main transcript");
+    }
+
+    #[test]
+    fn peer_messages_are_notices_not_prompts() {
+        let mut lines = vec![
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"coordinate the audit"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","timestamp":"2026-10-01T10:00:01Z","message":{"id":"m1","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Started the workers."}]}}"#,
+            // Mid-turn hand-back, queued as an attachment.
+            r#"{"type":"attachment","uuid":"x1","parentUuid":"a1","sessionId":"S","timestamp":"2026-10-01T10:00:02Z","attachment":{"type":"queued_command","commandMode":"prompt","isMeta":true,"prompt":"<agent-message from=\"local_1\">\n[Subagent hand-back] The text below is the final report of a subagent.\nAll checks pass.\n</agent-message>","origin":{"kind":"peer","from":"local_1","name":"Audit worker","handback":true,"body":"All checks pass."}}}"#,
+            // Delivered while idle, as a meta user record.
+            r#"{"type":"user","uuid":"u2","parentUuid":"x1","isMeta":true,"sessionId":"S","timestamp":"2026-10-01T10:00:03Z","origin":{"kind":"peer","from":"local_2","body":"ping"},"message":{"role":"user","content":"Another Claude session sent a message:\n<agent-message from=\"local_2\">ping</agent-message>"}}"#,
+            // An older bare envelope with no origin.
+            r#"{"type":"user","uuid":"u3","parentUuid":"u2","sessionId":"S","timestamp":"2026-10-01T10:00:04Z","message":{"role":"user","content":[{"type":"text","text":"<cross-session-message from=\"local_3\">status?</cross-session-message>"}]}}"#,
+        ];
+        let s = parse(&lines.join("\n"), None, "S").unwrap();
+        let users: Vec<String> = s.messages.iter().filter(|m| m.role == Role::User).map(|m| m.text()).collect();
+        assert_eq!(users, vec!["coordinate the audit".to_string()], "envelopes are not prompts");
+        let notices: Vec<&str> = s.messages.iter().flat_map(|m| &m.parts).filter_map(|p| match p { Part::Notice { text } => Some(text.as_str()), _ => None }).collect();
+        assert_eq!(notices, vec!["Subagent reported back: Audit worker", "Message from another session", "Message from another session"]);
+        assert!(!s.external_turn, "peer reports don't open a turn");
+        assert_eq!(clean_user_text("<agent-message from=\"x\">hi</agent-message>"), "");
+
+        // A real queued prompt still opens one.
+        lines.push(r#"{"type":"attachment","uuid":"x2","parentUuid":"u3","sessionId":"S","timestamp":"2026-10-01T10:00:05Z","attachment":{"type":"queued_command","commandMode":"prompt","prompt":"and the docs","origin":{"kind":"human"}}}"#);
+        let s = parse(&lines.join("\n"), None, "S").unwrap();
+        assert!(s.external_turn);
+        assert!(s.messages.iter().any(|m| m.role == Role::User && m.text() == "and the docs"));
+    }
+
+    #[test]
+    fn system_records_cutoffs_and_tool_fixups() {
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-args>opus</command-args>"}}"#,
+            r#"{"type":"system","subtype":"local_command","uuid":"y1","parentUuid":"u1","sessionId":"S","timestamp":"2026-10-01T10:00:01Z","content":"<local-command-stdout>Set model to \u001b[1mOpus\u001b[22m</local-command-stdout>","level":"info"}"#,
+            r#"{"type":"system","subtype":"api_error","uuid":"y2","parentUuid":"y1","sessionId":"S","timestamp":"2026-10-01T10:00:02Z","level":"error","error":{"status":529,"message":"Overloaded"},"retryInMs":500,"retryAttempt":1,"maxRetries":10}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"y2","sessionId":"S","timestamp":"2026-10-01T10:00:03Z","message":{"role":"user","content":"plan the work"}}"#,
+            r#"{"type":"system","subtype":"model_refusal_fallback","uuid":"y3","parentUuid":"u2","sessionId":"S","timestamp":"2026-10-01T10:00:04Z","content":"Safeguards flagged this message. Switched to Opus.","direction":"retry"}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"y3","sessionId":"S","timestamp":"2026-10-01T10:00:05Z","message":{"id":"m1","role":"assistant","stop_reason":"max_tokens","content":[{"type":"fallback","from":{"model":"claude-fable-5"},"to":{"model":"claude-opus-5"}},{"type":"tool_use","id":"t1","name":"TaskCreate","input":{"subject":"Write tests","description":"cover the importer"}}]}}"#,
+            r#"{"type":"user","uuid":"u3","parentUuid":"a1","sessionId":"S","timestamp":"2026-10-01T10:00:06Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Task #1 created"}]}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"u3","sessionId":"S","timestamp":"2026-10-01T10:00:07Z","message":{"id":"m1","role":"assistant","stop_reason":"max_tokens","content":[{"type":"tool_use","id":"t2","name":"ToolSearch","input":{"query":"select:Monitor"}}]}}"#,
+            r#"{"type":"user","uuid":"u4","parentUuid":"a2","sessionId":"S","timestamp":"2026-10-01T10:00:08Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"tool_reference","tool_name":"Monitor"}]}]}}"#,
+            r#"{"type":"assistant","uuid":"a3","parentUuid":"u4","sessionId":"S","timestamp":"2026-10-01T10:00:09Z","message":{"id":"m2","role":"assistant","stop_reason":"tool_use","content":[{"type":"fallback","from":{"model":"claude-opus-5"},"to":{"model":"claude-sonnet-5"}},{"type":"tool_use","id":"t3","name":"Bash","input":{"command":"npm test","run_in_background":true}}]}}"#,
+            r#"{"type":"user","uuid":"u5","parentUuid":"a3","sessionId":"S","timestamp":"2026-10-01T10:00:10Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t3","content":"Command running in background with ID: bt1"}]},"toolUseResult":{"backgroundTaskId":"bt1"}}"#,
+            r#"{"type":"attachment","uuid":"x1","parentUuid":"u5","sessionId":"S","timestamp":"2026-10-01T10:00:11Z","attachment":{"type":"task_status","taskId":"bt1","taskType":"local_bash","status":"failed","description":"npm test","outputFilePath":"/tmp/bt1.output"}}"#,
+            r#"{"type":"system","subtype":"informational","uuid":"y4","parentUuid":"x1","sessionId":"S","timestamp":"2026-10-01T10:00:12Z","content":"Backgrounding after the current tool finishes…","level":"warning"}"#,
+            r#"{"type":"system","subtype":"turn_duration","uuid":"y5","parentUuid":"y4","sessionId":"S","timestamp":"2026-10-01T10:00:13Z","durationMs":13000}"#,
+        ];
+        let s = parse(&lines.join("\n"), None, "S").unwrap();
+        let notices: Vec<&str> = s.messages.iter().flat_map(|m| &m.parts).filter_map(|p| match p { Part::Notice { text } => Some(text.as_str()), _ => None }).collect();
+        assert_eq!(
+            notices,
+            vec![
+                "Set model to Opus",
+                "Safeguards flagged this message. Switched to Opus.",
+                "Response hit the output token limit",
+                "Switched from claude-opus-5 to claude-sonnet-5",
+                "Backgrounding after the current tool finishes…",
+            ],
+            "api_error retries and turn_duration stay silent; the refusal's fallback block isn't repeated; one cut-off note per message"
+        );
+        assert_eq!(s.messages[0].text(), "/model opus");
+        let tools: Vec<&ToolCall> = s.messages.iter().flat_map(|m| m.tool_calls()).collect();
+        let create = tools.iter().find(|t| t.id == "t1").unwrap();
+        assert_eq!(create.kind, ToolKind::Other, "TaskCreate is not a file write");
+        assert!(!create.kind.is_mutation());
+        let search = tools.iter().find(|t| t.id == "t2").unwrap();
+        assert_eq!((search.kind, search.output.as_deref()), (ToolKind::Other, Some("Loaded Monitor")));
+        let bg = tools.iter().find(|t| t.id == "t3").unwrap();
+        assert_eq!(bg.status, ToolStatus::Failed, "task_status attachment closes background work");
     }
 
     #[test]

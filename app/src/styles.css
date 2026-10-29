@@ -217,8 +217,7 @@ svg { flex-shrink: 0; display: block; }
 .transcript-inner { padding: 0 12px 20px; max-width: 760px; margin: 0 auto; }
 .chat-pane.split .transcript-inner { max-width: none; }
 
-.user-msg { position: sticky; top: 0; z-index: 3; padding: 0 0 8px; background: var(--win); }
-.user-msg::after { content: ""; position: absolute; left: 0; right: 0; bottom: -8px; height: 8px; background: linear-gradient(var(--win), transparent); pointer-events: none; }
+.user-msg { position: sticky; top: 0; z-index: 3; }
 .user-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
   font-size: 13px; line-height: 18px; white-space: pre-wrap; word-wrap: break-word; max-height: 98px; overflow: hidden; position: relative;
@@ -630,8 +629,9 @@ select.input { cursor: pointer; padding-right: 4px; }
 /* transcript */
 .transcript-inner { max-width: 860px; padding: 0 28px 28px; }
 .chat-pane.split .transcript-inner { max-width: 860px; }
-.user-msg { padding: 2px 0 12px; background: transparent; }
-.user-msg::after { display: none; }
+/* Only the card is painted: the sticky wrapper is transparent, so there is
+   no band around or under the prompt. */
+.user-msg { padding: 0; margin-bottom: 12px; background: none; }
 .user-card { background: var(--card-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 14px; line-height: 22px; max-height: 132px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.04);
   -webkit-mask-image: linear-gradient(#000 72%, transparent); mask-image: linear-gradient(#000 72%, transparent); }
 .user-card.expanded, .user-card.short { -webkit-mask-image: none; mask-image: none; }
@@ -822,7 +822,6 @@ select.input { cursor: pointer; padding-right: 4px; }
 
 /* Sticky prompt card: opaque, with the fade drawn on top of its own
    background so nothing behind it shows through. */
-.user-msg { background: linear-gradient(var(--win) 0, var(--win) calc(100% - 12px), transparent); }
 .user-card { -webkit-mask-image: none !important; mask-image: none !important; overflow: hidden; position: relative; }
 .user-card:not(.expanded)::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 30px; background: linear-gradient(transparent, var(--card-2)); pointer-events: none; border-radius: 0 0 12px 12px; }
 .user-card.expanded::after { display: none; }
@@ -979,10 +978,9 @@ button:not(:disabled), [role="button"], [role="tab"], a[href], .chat-row, .repo-
 button:disabled, .menu-item.disabled { cursor: not-allowed; }
 
 /* Prompt card: flat like Cursor's — a hairline border and the faintest lift. */
-.user-card { box-shadow: 0 1px 1.5px rgba(0, 0, 0, .035); border-color: var(--border); }
+.user-card { box-shadow: none; border-color: var(--border); }
 .user-card:hover { border-color: var(--border-2); }
 .user-card:not(.expanded)::after { height: 22px; }
-.user-msg { background: var(--win); padding-bottom: 10px; }
 .edit-box { box-shadow: 0 1px 1.5px rgba(0, 0, 0, .035); }
 
 /* The prompt being edited scrolls with the conversation (not sticky). */

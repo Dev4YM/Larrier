@@ -1,0 +1,21 @@
+[package]
+name = "larrier-cli"
+description = "Larrier command line: list, import, export and port agent sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "larrier"
+path = "src/main.rs"
+
+[dependencies]
+larrier-core.workspace = true
+larrier-formats.workspace = true
+larrier-agents.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+chrono.workspace = true

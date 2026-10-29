@@ -1,0 +1,32 @@
+[package]
+name = "larrier-app"
+description = "Larrier desktop: the agents window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "larrier-desktop"
+path = "src/main.rs"
+
+[dependencies]
+larrier-core.workspace = true
+larrier-formats.workspace = true
+larrier-agents.workspace = true
+dioxus.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+futures.workspace = true
+pulldown-cmark.workspace = true
+open.workspace = true
+rfd.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dirs.workspace = true
+similar.workspace = true
+arboard = "3"

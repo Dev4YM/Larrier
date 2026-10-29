@@ -549,6 +549,28 @@ pub fn Stepper(value: u32, min: u32, max: u32, #[props(default = 1)] step: u32, 
     }
 }
 
+/// Sidebar width that suits a window `win_w` CSS px wide (double-click on
+/// its edge).
+pub fn auto_sidebar_width(win_w: f64) -> u32 {
+    (win_w * 0.2).round().clamp(240.0, 320.0) as u32
+}
+
+/// Chat column width beside the side panel that suits the window: a little
+/// over half of what the sidebar leaves, so both stay usable.
+pub fn auto_chat_width(win_w: f64, sidebar: Option<u32>) -> u32 {
+    let room = win_w - sidebar.map(|w| w as f64).unwrap_or(0.0);
+    (room * 0.54).round().clamp(420.0, (room - 360.0).max(420.0)).min(1000.0) as u32
+}
+
+/// Whether a press on a resize handle is the second of a double-click
+/// (the drag overlay swallows the browser's own dblclick).
+pub fn second_press(last: &mut Option<std::time::Instant>) -> bool {
+    let now = std::time::Instant::now();
+    let double = last.map(|t| now.duration_since(t) < std::time::Duration::from_millis(350)).unwrap_or(false);
+    *last = if double { None } else { Some(now) };
+    double
+}
+
 /// CSS variables for the text sizes (Settings → Appearance → Text).
 pub fn text_size_vars(s: &larrier_core::Settings) -> String {
     let t = &s.text_sizes;

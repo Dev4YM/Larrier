@@ -109,6 +109,7 @@ pub fn Sidebar() -> Element {
     let mut app = use_app();
     let mut searching = use_signal(|| false);
     let mut dragging = use_signal(|| false);
+    let mut last_press = use_signal(|| None::<std::time::Instant>);
     let query_raw = use_ui(|u| u.sidebar_query.clone())();
     let query = query_raw.to_lowercase();
     let running: Vec<String> = app.active_ids();
@@ -280,7 +281,15 @@ pub fn Sidebar() -> Element {
             }
             div {
                 class: if dragging() { "resizer dragging" } else { "resizer" },
-                onmousedown: move |_| dragging.set(true),
+                title: "Drag to resize · double-click to fit the window",
+                onmousedown: move |_| {
+                    if super::second_press(&mut last_press.write()) {
+                        let w = super::auto_sidebar_width(app.ui.peek().win_w);
+                        app.update_config(|c| c.settings.sidebar_width = w);
+                    } else {
+                        dragging.set(true);
+                    }
+                },
             }
             if dragging() {
                 div {

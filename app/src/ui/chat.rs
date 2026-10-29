@@ -75,6 +75,7 @@ pub fn AgentView(id: String) -> Element {
     let loaded = app.open.read().contains_key(&id);
     let split = app.split.read().clone().filter(|s| *s != id && app.open.read().contains_key(s));
     let mut dragging = use_signal(|| false);
+    let mut last_press = use_signal(|| None::<std::time::Instant>);
     if !loaded {
         return rsx! { div { class: "empty-state", "Loading…" } };
     }
@@ -88,7 +89,17 @@ pub fn AgentView(id: String) -> Element {
                 if right_open && split.is_none() {
                     div {
                         class: if dragging() { "resizer dragging" } else { "resizer" },
-                        onmousedown: move |_| dragging.set(true),
+                        title: "Drag to resize · double-click to fit the window",
+                        onmousedown: move |_| {
+                            if super::second_press(&mut last_press.write()) {
+                                let (win_w, side) = { let ui = app.ui.peek(); (ui.win_w, ui.sidebar_open) };
+                                let sidebar = side.then(|| app.config.peek().settings.sidebar_width);
+                                let w = super::auto_chat_width(win_w, sidebar);
+                                app.update_config(|c| c.settings.chat_width = w);
+                            } else {
+                                dragging.set(true);
+                            }
+                        },
                     }
                 }
             }

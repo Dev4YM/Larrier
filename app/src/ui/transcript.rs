@@ -215,17 +215,26 @@ pub fn Transcript(id: String) -> Element {
                         tn.querySelectorAll('.tn-item.hot').forEach(x => {{ if (x !== it) x.classList.remove('hot'); }});
                         if (it) it.classList.add('hot');
                     }};
+                    // Telescope: each dash's distance (in dashes) from the
+                    // hot one sets its length, like a dock magnifying.
                     tn.addEventListener('pointermove', (e) => {{
                         if (e.target.closest && e.target.closest('.tn-card')) return;
-                        let best = null, bd = 1e9;
-                        for (const it of tn.querySelectorAll('.tn-item')) {{
+                        const items = [...tn.querySelectorAll('.tn-item')];
+                        let bi = -1, bd = 1e9;
+                        items.forEach((it, i) => {{
                             const r = it.getBoundingClientRect();
                             const d = Math.abs(r.top + r.height / 2 - e.clientY);
-                            if (d < bd) {{ bd = d; best = it; }}
-                        }}
-                        hot(best);
+                            if (d < bd) {{ bd = d; bi = i; }}
+                        }});
+                        items.forEach((it, i) => it.style.setProperty('--d', String(Math.min(Math.abs(i - bi), 6))));
+                        tn.classList.add('scoping');
+                        hot(items[bi] || null);
                     }});
-                    tn.addEventListener('pointerleave', () => hot(null));
+                    tn.addEventListener('pointerleave', () => {{
+                        tn.classList.remove('scoping');
+                        tn.querySelectorAll('.tn-item').forEach(it => it.style.removeProperty('--d'));
+                        hot(null);
+                    }});
                     tn.addEventListener('click', (e) => {{
                         if (e.target.closest && e.target.closest('.tn-item')) return;
                         const h = tn.querySelector('.tn-item.hot');

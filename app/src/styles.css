@@ -1106,9 +1106,13 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
    them opens the full list (prompt + answer preview) to scan and jump. */
 .turn-nav { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 8; padding: 24px 34px 24px 12px; display: flex; flex-direction: column; max-height: 76vh; }
 .tn-item { position: relative; display: flex; align-items: center; height: 8px; width: 26px; padding: 0; background: none; border: none; flex-shrink: 0; }
-.tn-dash { width: 12px; height: 2px; border-radius: 2px; background: var(--fg-4); transition: width .16s ease, background-color .16s ease; }
-.tn-item.on .tn-dash { width: 18px; background: var(--fg-2); }
-.tn-item.hot .tn-dash { width: 22px; background: var(--fg); }
+.tn-dash { width: 8px; height: 2px; border-radius: 2px; background: var(--fg-4); transition: width .18s cubic-bezier(.2, .8, .2, 1), background-color .18s ease; }
+.tn-item.on .tn-dash { width: 15px; background: var(--fg); }
+/* Hovering: the dash under the pointer is longest, its neighbours step
+   down to the normal length (--d is the distance in dashes). */
+.turn-nav.scoping .tn-dash { width: max(8px, calc(20px - var(--d, 6) * 4px)); }
+.turn-nav.scoping .tn-item.on .tn-dash { background: var(--fg-3); }
+.turn-nav.scoping .tn-item.hot .tn-dash { background: var(--fg); }
 .tn-card { position: absolute; left: 32px; top: 50%; width: min(360px, 60vw); display: flex; flex-direction: column; gap: 4px; padding: 11px 14px 10px; text-align: left;
   background: var(--card-2); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 10px 30px rgba(0, 0, 0, .10);
   opacity: 0; pointer-events: none; transform: translate(-6px, -50%); transition: opacity .12s ease, transform .16s cubic-bezier(.2, .8, .2, 1); cursor: pointer; }

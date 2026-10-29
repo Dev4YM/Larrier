@@ -216,9 +216,18 @@ pub struct Usage {
     pub reasoning_tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// Tokens in the model's context at the latest call (prompt, cached
+    /// prompt and cache writes), when the agent reports calls one by one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
+    /// The model's context window, when the agent reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
 }
 
 impl Usage {
+    /// Add `other`'s tokens and cost; its context figures replace ours (they
+    /// describe the latest call, not a sum).
     pub fn add(&mut self, other: &Usage) {
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
@@ -227,6 +236,12 @@ impl Usage {
         self.reasoning_tokens += other.reasoning_tokens;
         if let Some(c) = other.cost_usd {
             self.cost_usd = Some(self.cost_usd.unwrap_or(0.0) + c);
+        }
+        if other.context_tokens.is_some() {
+            self.context_tokens = other.context_tokens;
+        }
+        if other.context_window.is_some() {
+            self.context_window = other.context_window;
         }
     }
     pub fn total_tokens(&self) -> u64 {

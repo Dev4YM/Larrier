@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use larrier_core::{AgentKind, FileDiff, Part, ToolCall, ToolStatus};
+use larrier_core::{AgentKind, FileDiff, Part, ToolCall, ToolStatus, Usage};
 use larrier_formats::claude::{fix_tool_kind, loaded_tools, server_tool_result};
 use larrier_formats::util::image_parts;
 use serde_json::Value;
@@ -271,6 +271,14 @@ impl ClaudeStream {
             return;
         }
         let mid = s(msg, "id").unwrap_or("").to_string();
+        // Each API call's usage tells how full the context is now (token
+        // totals come with the result).
+        if let Some(us) = msg.get("usage").filter(|u| u.is_object()) {
+            let context = u(us, "input_tokens") + u(us, "cache_read_input_tokens") + u(us, "cache_creation_input_tokens");
+            if context > 0 {
+                sink.send(AgentEvent::Usage { usage: Usage { context_tokens: Some(context), ..Default::default() } });
+            }
+        }
         let streamed = self.streamed.contains(&mid);
         let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else { return };
         for b in blocks {

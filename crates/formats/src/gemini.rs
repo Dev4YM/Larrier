@@ -173,6 +173,8 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                         output_tokens: t["output"].as_u64().unwrap_or(0),
                         cache_read_tokens: t["cached"].as_u64().unwrap_or(0),
                         reasoning_tokens: t["thoughts"].as_u64().unwrap_or(0),
+                        // Gemini's input count includes the cached part.
+                        context_tokens: t["input"].as_u64(),
                         ..Default::default()
                     });
                 }

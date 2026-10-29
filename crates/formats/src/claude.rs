@@ -729,6 +729,8 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
                 cache_write_tokens: u["cache_creation_input_tokens"].as_u64().unwrap_or(0),
                 reasoning_tokens: 0,
                 cost_usd: None,
+                context_tokens: Some(["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].iter().map(|k| u[*k].as_u64().unwrap_or(0)).sum()),
+                ..Default::default()
             };
             let idx = conv.messages.iter().rposition(|m| m.role == Role::Assistant).unwrap_or(0);
             if let Some(e) = usage_by_msg.iter_mut().find(|e| e.0 == mid) {

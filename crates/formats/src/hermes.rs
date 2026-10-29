@@ -161,6 +161,7 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
             cache_write_tokens: cw as u64,
             reasoning_tokens: r as u64,
             cost_usd: Some(if actual > 0.0 { actual } else { est }).filter(|c| *c > 0.0),
+            ..Default::default()
         });
     let col = |c: &str| if has_m(c) { c.to_string() } else { format!("NULL AS {c}") };
     let active = if has_m("active") { "AND (active IS NULL OR active = 1)" } else { "" };

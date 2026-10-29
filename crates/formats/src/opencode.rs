@@ -257,6 +257,8 @@ fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta, children: &dyn Fn(&str) -> 
                         cache_write_tokens: t["cache"]["write"].as_u64().unwrap_or(0),
                         reasoning_tokens: t["reasoning"].as_u64().unwrap_or(0),
                         cost_usd: p["cost"].as_f64().filter(|c| *c > 0.0),
+                        context_tokens: Some(t["input"].as_u64().unwrap_or(0) + t["cache"]["read"].as_u64().unwrap_or(0) + t["cache"]["write"].as_u64().unwrap_or(0)),
+                        ..Default::default()
                     };
                     conv.add_usage(&u);
                 }

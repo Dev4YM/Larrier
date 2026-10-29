@@ -167,6 +167,7 @@ pub fn compute(path: &std::path::Path, summary: &SessionSummary) -> SessionStats
         cache_write_tokens: sub(header_usage.cache_write_tokens, msg_total.cache_write_tokens),
         reasoning_tokens: 0,
         cost_usd: Some((header_usage.cost_usd.unwrap_or(0.0) - msg_total.cost_usd.unwrap_or(0.0)).max(0.0)),
+        ..Default::default()
     };
     let rem_cost = rem.cost_usd.unwrap_or(0.0);
     if rem.total_tokens() > 0 || rem_cost > 0.0001 {

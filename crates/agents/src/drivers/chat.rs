@@ -279,6 +279,8 @@ impl Decoder {
                         cache_write_tokens: 0,
                         reasoning_tokens: u(&us["completion_tokens_details"], "reasoning_tokens"),
                         cost_usd: us["cost"].as_f64(),
+                        context_tokens: Some(u(us, "prompt_tokens")),
+                        ..Default::default()
                     });
                 }
             }
@@ -288,6 +290,7 @@ impl Decoder {
                     usage.input_tokens = u(us, "input_tokens");
                     usage.cache_read_tokens = u(us, "cache_read_input_tokens");
                     usage.cache_write_tokens = u(us, "cache_creation_input_tokens");
+                    usage.context_tokens = Some(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens);
                 }
                 "content_block_delta" => {
                     let d = &v["delta"];
@@ -327,6 +330,8 @@ impl Decoder {
                         cache_write_tokens: 0,
                         reasoning_tokens: u(um, "thoughtsTokenCount"),
                         cost_usd: None,
+                        context_tokens: Some(u(um, "promptTokenCount")),
+                        ..Default::default()
                     });
                 }
             }

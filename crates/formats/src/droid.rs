@@ -167,6 +167,7 @@ fn usage(u: &Value) -> Option<Usage> {
         cache_write_tokens: n("cacheCreationTokens"),
         reasoning_tokens: n("thinkingTokens"),
         cost_usd: None,
+        ..Default::default()
     };
     (usage.input_tokens + usage.output_tokens > 0).then_some(usage)
 }

@@ -159,6 +159,7 @@ fn token_totals(u: &Value) -> Option<Usage> {
         cache_write_tokens: n("cache_write_input_tokens"),
         reasoning_tokens: n("reasoning_output_tokens"),
         cost_usd: None,
+        ..Default::default()
     })
 }
 
@@ -468,7 +469,11 @@ fn convert(lines: &[Value], path: Option<&Path>, meta: &mut Meta) -> (Conv, Vec<
             },
             "event_msg" => match s(pl, "type").unwrap_or("") {
                 "token_count" => {
-                    if let Some(u) = token_totals(&pl["info"]["total_token_usage"]) {
+                    if let Some(mut u) = token_totals(&pl["info"]["total_token_usage"]) {
+                        // The latest call's prompt (cached part included) and
+                        // the model's window.
+                        u.context_tokens = pl["info"]["last_token_usage"]["input_tokens"].as_u64();
+                        u.context_window = pl["info"]["model_context_window"].as_u64();
                         usage_total = Some(u);
                     }
                 }

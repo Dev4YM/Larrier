@@ -218,7 +218,7 @@ pub fn plan_entries(items: &Value) -> Option<Vec<PlanEntry>> {
 }
 
 pub fn usage_from(input: u64, output: u64, cache_read: u64, cache_write: u64, reasoning: u64, cost: Option<f64>) -> Usage {
-    Usage { input_tokens: input, output_tokens: output, cache_read_tokens: cache_read, cache_write_tokens: cache_write, reasoning_tokens: reasoning, cost_usd: cost }
+    Usage { input_tokens: input, output_tokens: output, cache_read_tokens: cache_read, cache_write_tokens: cache_write, reasoning_tokens: reasoning, cost_usd: cost, ..Default::default() }
 }
 
 /// `@path` mentions for attached files, appended to text prompts.

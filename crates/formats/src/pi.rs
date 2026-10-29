@@ -162,6 +162,8 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                                 cache_write_tokens: u["cacheWrite"].as_u64().unwrap_or(0),
                                 reasoning_tokens: 0,
                                 cost_usd: u["cost"]["total"].as_f64().filter(|c| *c > 0.0),
+                                context_tokens: Some(u["input"].as_u64().unwrap_or(0) + u["cacheRead"].as_u64().unwrap_or(0) + u["cacheWrite"].as_u64().unwrap_or(0)),
+                                ..Default::default()
                             });
                         }
                         match s(m, "stopReason") {

@@ -1308,10 +1308,14 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
     let mut app = use_app();
     let mut open = use_signal(|| false);
     let name = std::path::Path::new(&diff.path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or(diff.path.clone());
-    let lines = preview_lines(&diff);
+    let mut lines = preview_lines(&diff);
+    // While it is being written, follow the newest lines.
+    if running && lines.len() > 4 {
+        lines.drain(..lines.len() - 4);
+    }
     let path = diff.path.clone();
     rsx! {
-        div { class: "tool-card",
+        div { class: if running { "tool-card live" } else { "tool-card" },
             div { class: "tool-card-head", title: "{diff.path}", "data-path": "{diff.path}",
                 onclick: move |_| {
                     let mut ui = app.ui.write();
@@ -1320,9 +1324,10 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
                 },
                 span { class: "ic", if running { super::Spinner { size: 13 } } else { Icon { i: I::Lines, size: 13 } } }
                 span { class: "name", "{name}" }
+                // The counts count up as lines arrive (an animated CSS property).
                 span { class: "stats",
-                    if diff.added > 0 || diff.removed == 0 { span { class: "add", "+{diff.added}" } }
-                    if diff.removed > 0 { span { class: "del", "-{diff.removed}" } }
+                    if diff.added > 0 || diff.removed == 0 { span { class: "add cnt", style: "--n: {diff.added};", "aria-label": "+{diff.added}" } }
+                    if diff.removed > 0 { span { class: "del cnt", style: "--n: {diff.removed};", "aria-label": "-{diff.removed}" } }
                 }
             }
             if !lines.is_empty() {
@@ -1420,7 +1425,7 @@ fn CommandCard(tool: ToolCall) -> Element {
                 }
                 match description {
                     Some(d) => rsx! {
-                        span { class: "desc", "{d}" }
+                        span { class: if running { "desc shimmer" } else { "desc" }, "{d}" }
                         span { class: "meta", "{programs}" }
                     },
                     None => rsx! { span { class: "desc mono", style: "font-size: 11px;", "{larrier_core::lsf::first_line(&command)}" } },

@@ -1295,3 +1295,15 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .ask-other:focus { border-color: var(--accent-c, var(--blue)); }
 .ask-actions { display: flex; align-items: center; gap: 8px; padding: 6px 14px 4px; }
 .ask-actions .hint { font-size: 11.5px; color: var(--fg-3); }
+
+/* Tools at work: a file being written shimmers, its line counts count up
+   smoothly and its preview follows the newest lines. */
+@property --n { syntax: "<integer>"; inherits: false; initial-value: 0; }
+.tool-card-head .stats .cnt { counter-reset: n var(--n); transition: --n .45s cubic-bezier(.2, .8, .2, 1); font-variant-numeric: tabular-nums; }
+.tool-card-head .stats .cnt.add::after { content: "+" counter(n); }
+.tool-card-head .stats .cnt.del::after { content: "-" counter(n); }
+.tool-card.live .tool-card-head .name { background: linear-gradient(90deg, var(--fg-3) 0%, var(--fg) 45%, var(--fg-3) 90%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.8s linear infinite; }
+.tool-card.live { border-color: color-mix(in srgb, var(--accent-c, var(--blue)) 30%, var(--border)); }
+.tool-card.live .preview .pv-line:last-child { animation: pv-in .25s ease-out; }
+@keyframes pv-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.tool-card .desc.shimmer { color: transparent; }

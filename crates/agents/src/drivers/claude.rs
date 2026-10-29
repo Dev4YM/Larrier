@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use larrier_core::{AgentKind, FileDiff, Part, ToolCall, ToolStatus, Usage};
 use larrier_formats::claude::{fix_tool_kind, loaded_tools, server_tool_result};
 use larrier_formats::util::image_parts;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{content_text, json_line, plan_entries, run_stream, s, tool, u, usage_from, with_file_mentions, LineParser};
@@ -101,7 +101,24 @@ pub struct ClaudeStream {
     switch_noted: bool,
     /// The output-token cut-off was announced.
     cutoff_noted: bool,
+    /// Tool calls the model is still writing, by content block index.
+    writing: HashMap<u64, Writing>,
+    /// Tool calls shown while being written: their full input still has
+    /// to replace the partial one.
+    partial_tools: HashSet<String>,
 }
+
+/// A tool call whose input is still streaming in.
+struct Writing {
+    id: String,
+    name: String,
+    json: String,
+    shown_len: usize,
+    shown_at: Option<std::time::Instant>,
+}
+
+/// How often a tool call being written is redrawn.
+const WRITING_EVERY: std::time::Duration = std::time::Duration::from_millis(120);
 
 impl LineParser for ClaudeStream {
     fn handle(&mut self, line: &str, sink: &EventSink) {
@@ -236,6 +253,23 @@ impl ClaudeStream {
             "message_start" => {
                 self.current_msg = ev["message"]["id"].as_str().map(|s| s.to_string());
                 self.retrying = false;
+                self.writing.clear();
+            }
+            // A tool call starts: show it right away, then as it is written.
+            "content_block_start" => {
+                let b = &ev["content_block"];
+                if let (Some("tool_use"), Some(id), Some(name), Some(i)) = (s(b, "type"), s(b, "id"), s(b, "name"), ev["index"].as_u64()) {
+                    if self.seen_tools.insert(id.to_string()) {
+                        self.partial_tools.insert(id.to_string());
+                        self.writing.insert(i, Writing { id: id.to_string(), name: name.to_string(), json: String::new(), shown_len: 0, shown_at: None });
+                        sink.send(AgentEvent::ToolStart { tool: claude_tool(id.to_string(), name, json!({})) });
+                    }
+                }
+            }
+            "content_block_stop" => {
+                if let Some(i) = ev["index"].as_u64() {
+                    self.writing.remove(&i);
+                }
             }
             "message_delta" if s(&ev["delta"], "stop_reason") == Some("max_tokens") && !self.cutoff_noted => {
                 self.cutoff_noted = true;
@@ -254,6 +288,21 @@ impl ClaudeStream {
                         if let Some(t) = d["thinking"].as_str() {
                             self.mark_streamed();
                             sink.send(AgentEvent::ReasoningDelta { text: t.to_string() });
+                        }
+                    }
+                    // A tool call's input as it is written (a command, a
+                    // file's new content): redrawn a few times a second.
+                    "input_json_delta" => {
+                        let (Some(i), Some(part)) = (ev["index"].as_u64(), d["partial_json"].as_str()) else { return };
+                        let Some(w) = self.writing.get_mut(&i) else { return };
+                        w.json.push_str(part);
+                        let due = w.shown_at.map_or(true, |t| t.elapsed() >= WRITING_EVERY);
+                        if due && w.json.len() > w.shown_len {
+                            if let Some(input) = complete_json(&w.json) {
+                                w.shown_len = w.json.len();
+                                w.shown_at = Some(std::time::Instant::now());
+                                sink.send(AgentEvent::ToolStart { tool: claude_tool(w.id.clone(), &w.name, input) });
+                            }
                         }
                     }
                     _ => {}
@@ -295,7 +344,8 @@ impl ClaudeStream {
                 }
                 "tool_use" | "server_tool_use" => {
                     let id = s(b, "id").unwrap_or("").to_string();
-                    if self.seen_tools.insert(id.clone()) {
+                    // New, or shown while it was written: the full input now.
+                    if self.seen_tools.insert(id.clone()) || self.partial_tools.remove(&id) {
                         let name = s(b, "name").unwrap_or("tool");
                         let input = b.get("input").cloned().unwrap_or(Value::Null);
                         if name == "TodoWrite" {
@@ -642,6 +692,65 @@ fn task_status(status: &str) -> Option<ToolStatus> {
     })
 }
 
+/// A JSON object cut off mid-stream, closed so it parses: an open string
+/// is ended, open arrays and objects are closed, and a key or comma left
+/// hanging is dropped. None while nothing usable has arrived yet.
+pub fn complete_json(partial: &str) -> Option<Value> {
+    fn close(s: &str) -> Option<Value> {
+        let mut stack = Vec::new();
+        let (mut in_str, mut esc) = (false, false);
+        for c in s.chars() {
+            if in_str {
+                match (esc, c) {
+                    (true, _) => esc = false,
+                    (false, '\\') => esc = true,
+                    (false, '"') => in_str = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match c {
+                '"' => in_str = true,
+                '{' => stack.push('}'),
+                '[' => stack.push(']'),
+                '}' | ']' => {
+                    stack.pop();
+                }
+                _ => {}
+            }
+        }
+        let mut out = s.to_string();
+        if in_str {
+            if esc {
+                out.pop();
+            }
+            out.push('"');
+        }
+        out.extend(stack.iter().rev());
+        serde_json::from_str(&out).ok()
+    }
+    if let Some(v) = close(partial) {
+        return Some(v);
+    }
+    // A key or value cut short: go back to the last complete member.
+    let (mut in_str, mut esc, mut last_comma) = (false, false, None);
+    for (i, c) in partial.char_indices() {
+        if in_str {
+            match (esc, c) {
+                (true, _) => esc = false,
+                (false, '\\') => esc = true,
+                (false, '"') => in_str = false,
+                _ => {}
+            }
+        } else if c == '"' {
+            in_str = true;
+        } else if c == ',' {
+            last_comma = Some(i);
+        }
+    }
+    close(&partial[..last_comma?])
+}
+
 /// `rate_limit_event`: the window's usage for the plan-limit chip, and a
 /// notice when the limit stops the turn.
 fn rate_limit(info: &Value, sink: &EventSink) {
@@ -745,6 +854,33 @@ pub fn todo_entries(input: &Value) -> Option<Vec<larrier_core::PlanEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closes_partial_json() {
+        assert_eq!(complete_json(r#"{"file_path":"a.rs","content":"one\ntwo"#), Some(json!({"file_path": "a.rs", "content": "one\ntwo"})));
+        assert_eq!(complete_json(r#"{"file_path":"a.rs","cont"#), Some(json!({"file_path": "a.rs"})));
+        assert_eq!(complete_json(r#"{"todos":[{"content":"x","st"#), Some(json!({"todos": [{"content": "x"}]})));
+        assert_eq!(complete_json(r#"{"command":"echo \"#), Some(json!({"command": "echo "})));
+        assert_eq!(complete_json(""), None);
+    }
+
+    #[test]
+    fn shows_a_tool_while_it_is_written() {
+        let lines = [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"w1","name":"Write","input":{}}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"/r/a.rs\",\"content\":\"fn a() {}\\nfn b"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}"#,
+            r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"/r/a.rs","content":"fn a() {}\nfn b() {}\nfn c() {}\n"}}]},"parent_tool_use_id":null}"#,
+        ];
+        let mut p = ClaudeStream::default();
+        let ev = collect(&mut p, &lines);
+        let starts: Vec<&ToolCall> = ev.iter().filter_map(|e| match e { AgentEvent::ToolStart { tool } if tool.id == "w1" => Some(tool), _ => None }).collect();
+        assert_eq!(starts.len(), 3, "placeholder, partial content, full input");
+        assert!(starts[0].diffs.is_empty());
+        assert_eq!(starts[1].diffs.first().map(|d| d.added), Some(2), "two lines written so far");
+        assert_eq!(starts[2].diffs.first().map(|d| d.added), Some(3));
+    }
     use crate::drivers::testutil::collect;
     use larrier_core::ToolKind;
 
@@ -871,7 +1007,10 @@ mod tests {
     #[test]
     fn fixture_auto_mode_runs_tools_headless() {
         let ev = fixture(include_str!("../../tests/fixtures/claude_auto_tools.jsonl"));
-        let tools: Vec<&ToolCall> = ev.iter().filter_map(|e| match e { AgentEvent::ToolStart { tool } => Some(tool), _ => None }).collect();
+        // Each call starts as soon as the model begins it, then again with
+        // its full input: one tool per id.
+        let mut tools: Vec<&ToolCall> = ev.iter().filter_map(|e| match e { AgentEvent::ToolStart { tool } => Some(tool), _ => None }).collect();
+        tools.dedup_by(|a, b| a.id == b.id);
         assert_eq!(tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["Bash", "Write"]);
         for t in &tools {
             assert_eq!(final_status(&ev, &t.id), Some(ToolStatus::Completed), "{} completes", t.name);

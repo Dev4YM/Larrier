@@ -321,16 +321,21 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
         if ty == "attachment" && !sidechain {
             let a = &v["attachment"];
             if s(a, "type") == Some("queued_command") {
-                let prompt = s(a, "prompt").unwrap_or("");
+                // A plain string, or content blocks when the prompt carries
+                // images ([{type: image, …}, {type: text, …}]).
+                let prompt = content_text(&a["prompt"]);
+                let blocks_images = image_parts(&a["prompt"]);
                 let ts = s(a, "timestamp").or_else(|| s(v, "timestamp")).and_then(parse_ts);
                 if s(a, "commandMode") == Some("task-notification") || prompt.trim_start().starts_with("<task-notification>") {
-                    notes.extend(task_notes(prompt));
+                    notes.extend(task_notes(&prompt));
                 } else {
-                    let (text, images) = image_refs(&clean_user_text(prompt));
+                    let (text, images) = image_refs(&clean_user_text(&prompt));
+                    let text = if blocks_images.is_empty() { text } else { text.lines().filter(|l| l.trim() != "[image]").collect::<Vec<_>>().join("\n").trim().to_string() };
                     let mut parts = Vec::new();
                     if !text.is_empty() {
                         parts.push(Part::Text { text });
                     }
+                    parts.extend(blocks_images);
                     parts.extend(images);
                     if !parts.is_empty() {
                         conv.user_parts(parts, ts);
@@ -822,8 +827,12 @@ mod tests {
             r#"{"type":"attachment","uuid":"x1","parentUuid":"u2","sessionId":"S","timestamp":"2026-10-01T10:00:03Z","attachment":{"type":"queued_command","prompt":"also check the footer","commandMode":"prompt","timestamp":"2026-10-01T10:00:03Z"}}"#.to_string(),
             r#"{"type":"assistant","uuid":"a2","parentUuid":"x1","sessionId":"S","timestamp":"2026-10-01T10:00:04Z","message":{"id":"m2","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/r/footer.html"}}]}}"#.to_string(),
         ];
+        // A queued prompt that carries an image is stored as content blocks.
+        lines.push(format!(r#"{{"type":"attachment","uuid":"x2","parentUuid":"a2","sessionId":"S","timestamp":"2026-10-01T10:00:04Z","attachment":{{"type":"queued_command","prompt":[{{"type":"image","source":{{"type":"base64","media_type":"image/png","data":"{png}"}}}},{{"type":"text","text":"and make it smooth"}}],"commandMode":"prompt"}}}}"#));
         let s = parse(&lines.join("\n"), None, "S").unwrap();
         assert!(s.external_turn, "a tool_use stop reason means the turn is still running");
+        let with_image = s.messages.iter().find(|m| m.role == Role::User && m.text().contains("and make it smooth")).expect("queued prompt with an image");
+        assert!(with_image.parts.iter().any(|p| matches!(p, Part::Image { .. })), "its image comes along");
         let users: Vec<String> = s.messages.iter().filter(|m| m.role == Role::User).map(|m| m.text()).collect();
         assert!(users.iter().any(|t| t.contains("also check the footer")), "queued prompt imported: {users:?}");
         let shot = s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == "t1").unwrap();

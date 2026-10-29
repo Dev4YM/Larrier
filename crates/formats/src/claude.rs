@@ -331,6 +331,9 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
     let mut custom_title = None;
     let mut ai_title = None;
     let mut leaf: Option<String> = None;
+    let mut permission_mode: Option<String> = None;
+    let mut prs: Vec<Value> = Vec::new();
+    let mut relocated: Option<String> = None;
     let mut index: HashMap<String, usize> = HashMap::new();
     for (i, v) in lines.iter().enumerate() {
         if meta.native_id.is_empty() {
@@ -352,13 +355,28 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
             Some("ai-title") => ai_title = string(v, "aiTitle").or(ai_title.take()),
             Some("summary") => ai_title = string(v, "summary").or(ai_title.take()),
             Some("last-prompt") => leaf = string(v, "leafUuid").or(leaf.take()),
+            Some("relocated") => relocated = string(v, "relocatedCwd").or(relocated.take()),
+            Some("pr-link") => {
+                if let Some(url) = s(v, "prUrl") {
+                    prs.retain(|p| p["url"] != url);
+                    prs.push(json!({"number": v["prNumber"], "url": url, "repository": v["prRepository"]}));
+                }
+            }
             _ => {}
+        }
+        // `permission-mode` records and prompts both carry the mode in force.
+        if let Some(m) = s(v, "permissionMode") {
+            permission_mode = Some(m.to_string());
         }
         if let Some(u) = s(v, "uuid") {
             index.insert(u.to_string(), i);
         }
     }
     meta.title = custom_title.or(ai_title);
+    // The session was moved to another folder; resume it there.
+    if relocated.is_some() {
+        meta.cwd = relocated;
+    }
 
     // Pick the active branch.
     let is_msg = |v: &Value| matches!(s(v, "type"), Some("user") | Some("assistant")) && !v["isSidechain"].as_bool().unwrap_or(false);
@@ -401,7 +419,27 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
     }
     let mut session = finish(conv, AGENT, meta)?;
     session.external_turn = turn_open(&lines);
+    session.mode = permission_mode.as_deref().and_then(imported_mode).map(str::to_string);
+    if let Some(m) = &session.mode {
+        session.extra.insert("import_mode".into(), Value::String(m.clone()));
+    }
+    if !prs.is_empty() {
+        session.extra.insert("pull_requests".into(), Value::Array(prs));
+    }
     Ok(session)
+}
+
+/// The Larrier mode for a recorded Claude Code permission mode. Bypass is
+/// never carried over: continuing in Larrier must not skip permission
+/// prompts unless the user picks that mode here.
+fn imported_mode(m: &str) -> Option<&'static str> {
+    Some(match m {
+        "auto" => "auto",
+        "default" | "manual" => "default",
+        "acceptEdits" => "acceptEdits",
+        "plan" => "plan",
+        _ => return None,
+    })
 }
 
 /// Whether Claude Code is still mid-turn: the last prompt (or queued prompt)
@@ -1036,6 +1074,29 @@ mod tests {
     fn encodes_paths() {
         assert_eq!(encode_project(r"D:\src\Projects\Server\Larrier"), "D--src-Projects-Server-Larrier");
         assert_eq!(encode_project(r"C:\Users\dev"), "C--Users-dev");
+    }
+
+    #[test]
+    fn imports_mode_pull_requests_and_relocation() {
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/old","permissionMode":"plan","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"ship it"}}"#,
+            r#"{"type":"permission-mode","permissionMode":"acceptEdits","sessionId":"S"}"#,
+            r#"{"type":"pr-link","sessionId":"S","prNumber":7,"prUrl":"https://github.com/o/r/pull/7","prRepository":"o/r","timestamp":"2026-10-01T10:00:05Z"}"#,
+            r#"{"type":"pr-link","sessionId":"S","prNumber":7,"prUrl":"https://github.com/o/r/pull/7","prRepository":"o/r","timestamp":"2026-10-01T10:00:06Z"}"#,
+            r#"{"type":"relocated","sessionId":"S","relocatedCwd":"/new"}"#,
+        ];
+        let s = parse(&lines.join("
+"), None, "S").unwrap();
+        assert_eq!(s.mode.as_deref(), Some("acceptEdits"));
+        assert_eq!(s.cwd().as_deref(), Some("/new"));
+        let prs = s.extra["pull_requests"].as_array().unwrap();
+        assert_eq!(prs.len(), 1);
+        assert_eq!(prs[0]["number"], 7);
+
+        // Bypass is never carried into Larrier.
+        let bypass = [lines[0], r#"{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"S"}"#];
+        assert_eq!(parse(&bypass.join("
+"), None, "S").unwrap().mode, None);
     }
 
     #[test]

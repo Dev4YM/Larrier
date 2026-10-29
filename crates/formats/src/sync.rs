@@ -109,6 +109,11 @@ fn merge_user_state(new: &mut Session, old: &Session) {
     new.tags = old.tags.clone();
     new.account_id = old.account_id.clone();
     new.parent = old.parent.clone();
+    let old_import_mode = old.extra.get("import_mode").and_then(|m| m.as_str());
+    if old.mode.as_deref() != old_import_mode {
+        new.mode = old.mode.clone();
+        new.permission = old.permission.clone();
+    }
     let old_import_title = old.extra.get("import_title").and_then(|t| t.as_str());
     if old_import_title.map(|t| t != old.title).unwrap_or(false) {
         new.title = old.title.clone();
@@ -144,4 +149,32 @@ fn import_parallel(infos: Vec<&NativeSessionInfo>) -> Vec<Result<Session>> {
         }
     });
     slots.into_iter().map(|m| m.into_inner().unwrap().unwrap_or_else(|| Err(anyhow::anyhow!("not imported")))).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn imported(mode: &str) -> Session {
+        let mut s = Session::new(AgentKind::ClaudeCode, None);
+        s.mode = Some(mode.into());
+        s.extra.insert("import_mode".into(), Value::String(mode.into()));
+        s
+    }
+
+    #[test]
+    fn reimport_keeps_a_mode_picked_in_larrier() {
+        // Unchanged in Larrier: the native mode wins.
+        let mut new = imported("plan");
+        merge_user_state(&mut new, &imported("auto"));
+        assert_eq!(new.mode.as_deref(), Some("plan"));
+
+        // Picked in Larrier: kept.
+        let mut old = imported("auto");
+        old.mode = Some("acceptEdits".into());
+        let mut new = imported("plan");
+        merge_user_state(&mut new, &old);
+        assert_eq!(new.mode.as_deref(), Some("acceptEdits"));
+    }
 }

@@ -64,6 +64,7 @@ icons! {
     ChevronLeft => "chevron-left",
     ChevronsRight => "chevrons-right",
     ChevronsLeft => "chevrons-left",
+    Clock => "clock",
     Settings => "settings",
     GitBranch => "git-branch",
     Globe => "globe",

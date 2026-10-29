@@ -8,7 +8,7 @@ use std::path::Path;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use larrier_agents::git;
-use larrier_core::{Environment, Session, ToolKind, ToolStatus};
+use larrier_core::{Environment, Part, Session, ToolKind, ToolStatus};
 use larrier_formats::ExportFormat;
 
 use super::composer::Composer;
@@ -141,16 +141,84 @@ struct RailInfo {
     env: String,
     created: chrono::DateTime<chrono::Utc>,
     updated: chrono::DateTime<chrono::Utc>,
+    /// When the latest prompt was sent (how long the agent has worked).
+    turn_started: Option<chrono::DateTime<chrono::Utc>>,
     prompts: usize,
-    tokens: u64,
+    input: u64,
+    output: u64,
+    cache: u64,
     cost: Option<f64>,
-    tasks: usize,
+    /// Tokens in the model's context at the latest reply, and its window.
+    context: Option<(u64, Option<u64>)>,
+    plan: Vec<(String, larrier_core::PlanStatus)>,
+    /// Latest tool steps: (title, running, failed).
+    recent: Vec<(String, bool, bool)>,
+    /// Changed files (name, path, +, -), most changed first, and the total.
+    files: Vec<(String, String, u32, u32)>,
+    files_total: (usize, u32, u32),
+    /// Running background work: (title, is a subagent).
+    tasks: Vec<(String, bool)>,
 }
 
 fn rail_info(s: &Session) -> RailInfo {
+    use larrier_core::{PlanStatus, Role};
+    let model_raw = s.model.clone().or_else(|| s.messages.iter().rev().find_map(|m| m.model.clone()));
+    // Context in use at the latest call, as the agent reported it (a reply
+    // spanning several calls sums their tokens, so its usage cannot tell).
+    let context = s.messages.iter().rev().find_map(|m| m.usage.as_ref().and_then(|u| u.context_tokens.map(|c| (c, u.context_window)))).or(s.usage.context_tokens.map(|c| (c, s.usage.context_window))).map(|(used, window)| {
+        (used, window.or_else(|| model_raw.as_deref().and_then(larrier_core::models::lookup).and_then(|m| m.context)))
+    });
+    let cost = s.usage.cost_usd.or_else(|| {
+        let price = larrier_core::models::price(model_raw.as_deref()?)?;
+        let u = &s.usage;
+        Some(price.cost(u.input_tokens, u.output_tokens + u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens)).filter(|c| *c > 0.0)
+    });
+    // The newest to-do list, from a plan part or the call that wrote it.
+    let plan = s
+        .messages
+        .iter()
+        .rev()
+        .flat_map(|m| m.parts.iter().rev())
+        .find_map(|p| match p {
+            Part::Plan { entries } => Some(entries.clone()),
+            Part::Tool(t) if t.kind == ToolKind::Todo => larrier_formats::util::plan_from(&t.input),
+            _ => None,
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.content, e.status))
+        .collect::<Vec<(String, PlanStatus)>>();
+    let mut recent = Vec::new();
+    'outer: for m in s.messages.iter().rev() {
+        for t in m.tool_calls().collect::<Vec<_>>().into_iter().rev() {
+            if matches!(t.kind, ToolKind::Think | ToolKind::Todo) {
+                continue;
+            }
+            let title = t.title.clone().unwrap_or_else(|| t.describe());
+            recent.push((larrier_core::lsf::first_line(&title), t.is_active(), t.is_error || t.status == ToolStatus::Failed));
+            if recent.len() == 5 {
+                break 'outer;
+            }
+        }
+    }
+    let mut changed = s.changed_files();
+    let files_total = (changed.len(), changed.iter().map(|f| f.added).sum(), changed.iter().map(|f| f.removed).sum());
+    changed.sort_by_key(|f| std::cmp::Reverse(f.added + f.removed));
+    let files = changed
+        .into_iter()
+        .take(5)
+        .map(|f| {
+            let name = Path::new(&f.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| f.path.clone());
+            (name, f.path, f.added, f.removed)
+        })
+        .collect();
+    let tasks = larrier_core::lsf::active_tasks(&s.messages)
+        .into_iter()
+        .map(|t| (t.agent_name.clone().or_else(|| t.title.clone()).unwrap_or_else(|| t.describe()), t.is_subagent()))
+        .collect();
     RailInfo {
         agent: s.agent.clone(),
-        model: s.model.as_deref().map(larrier_core::models::display_name),
+        model: model_raw.as_deref().map(larrier_core::models::display_name),
         workspace: s.workspace.as_ref().map(|w| if w.name.is_empty() { w.path.clone() } else { w.name.clone() }),
         branch: s.workspace.as_ref().and_then(|w| w.branch.clone()),
         env: match &s.environment {
@@ -160,18 +228,38 @@ fn rail_info(s: &Session) -> RailInfo {
         },
         created: s.created_at,
         updated: s.updated_at,
-        prompts: s.messages.iter().filter(|m| m.role == larrier_core::Role::User).count(),
-        // What the model read and wrote; cache reads would dwarf it.
-        tokens: s.usage.input_tokens + s.usage.output_tokens + s.usage.reasoning_tokens,
-        cost: s.usage.cost_usd,
-        tasks: larrier_core::lsf::active_tasks(&s.messages).len(),
+        turn_started: s.messages.iter().rev().find(|m| m.role == Role::User).map(|m| m.created_at),
+        prompts: s.messages.iter().filter(|m| m.role == Role::User).count(),
+        input: s.usage.input_tokens,
+        output: s.usage.output_tokens + s.usage.reasoning_tokens,
+        cache: s.usage.cache_read_tokens + s.usage.cache_write_tokens,
+        cost,
+        context,
+        plan,
+        recent,
+        files,
+        files_total,
+        tasks,
     }
 }
 
-/// The column beside the chat while the side panel is closed: a short
-/// summary of the session and its tools. Folds down to icons.
+/// "12m", "3h 5m", "4d 2h": how long something has run.
+fn span_short(d: chrono::Duration) -> String {
+    let m = d.num_minutes().max(0);
+    match m {
+        0 => format!("{}s", d.num_seconds().max(0)),
+        1..=59 => format!("{m}m"),
+        60..=1439 => format!("{}h {}m", m / 60, m % 60),
+        _ => format!("{}d {}h", m / 1440, m % 1440 / 60),
+    }
+}
+
+/// The column beside the chat while the side panel is closed: the session
+/// at a glance (agent, context, to-dos, activity, changes, background work)
+/// and its tools. Folds down to icons.
 #[component]
 fn SessionRail(id: String) -> Element {
+    use larrier_core::PlanStatus;
     let mut app = use_app();
     let id_m = id.clone();
     let info = use_memo(move || app.with_session(&id_m, rail_info));
@@ -179,7 +267,7 @@ fn SessionRail(id: String) -> Element {
     let running = app.is_active(&id);
     let Some(h) = info() else { return rsx! {} };
     let toggle = move |_| app.update_config(|c| c.settings.session_rail_collapsed = !c.settings.session_rail_collapsed);
-    let tasks = (h.tasks > 0).then(|| h.tasks.to_string());
+    let tasks_badge = (!h.tasks.is_empty()).then(|| h.tasks.len().to_string());
     if collapsed {
         return rsx! {
             div { class: "tools-col collapsed",
@@ -190,13 +278,29 @@ fn SessionRail(id: String) -> Element {
                 ToolLink { tab: RightTab::Browser, icon: I::Globe, label: "Browser", icon_only: true }
                 ToolLink { tab: RightTab::Terminal, icon: I::Terminal, label: "Terminal", icon_only: true }
                 ToolLink { tab: RightTab::Files, icon: I::Files, label: "Files", icon_only: true }
-                ToolLink { tab: RightTab::Tasks, icon: I::Workflow, label: "Background Tasks", icon_only: true, badge: tasks }
+                ToolLink { tab: RightTab::Tasks, icon: I::Workflow, label: "Background Tasks", icon_only: true, badge: tasks_badge }
             }
         };
     }
-    let status = if running { "Working".to_string() } else { format!("Idle · {}", crate::state::rel_time(h.updated)) };
+    let now = chrono::Utc::now();
+    let status = match (running, h.turn_started) {
+        (true, Some(t)) => format!("Working · {}", span_short(now - t)),
+        (true, None) => "Working".to_string(),
+        (false, _) => format!("Idle · {}", crate::state::rel_time(h.updated)),
+    };
     let started = h.created.with_timezone(&chrono::Local).format("%b %-d, %H:%M").to_string();
-    let tokens = super::usage::fmt_tokens(h.tokens);
+    let lifetime = span_short(h.updated - h.created);
+    let fmt = super::usage::fmt_tokens;
+    let (ctx_used, ctx_max) = h.context.unwrap_or((0, None));
+    let ctx_pct = ctx_max.filter(|m| *m > 0).map(|m| (ctx_used as f64 / m as f64 * 100.0).clamp(0.0, 100.0));
+    let ctx_sev = match ctx_pct {
+        Some(p) if p >= 85.0 => "crit",
+        Some(p) if p >= 65.0 => "warn",
+        _ => "",
+    };
+    let done = h.plan.iter().filter(|(_, st)| *st == PlanStatus::Completed).count();
+    let plan_more = h.plan.len().saturating_sub(7);
+    let (fcount, fadd, frem) = h.files_total;
     rsx! {
         div { class: "tools-col",
             div { class: "rail-head",
@@ -217,19 +321,112 @@ fn SessionRail(id: String) -> Element {
                     Icon { i: I::GitBranch, size: 12, stroke: 1.6 }
                     span { title: "{h.env}", if let Some(b) = &h.branch { "{b} · {h.env}" } else { "{h.env}" } }
                 }
-                div { class: "rail-stats",
-                    span { title: "Prompts", "{h.prompts} prompts" }
-                    if h.tokens > 0 { span { title: "Tokens", "{tokens} tokens" } }
-                    if let Some(c) = h.cost.filter(|c| *c > 0.0) { span { title: "Cost", "${c:.2}" } }
+                div { class: "rail-line muted",
+                    Icon { i: I::Clock, size: 12, stroke: 1.6 }
+                    span { title: "Started {started}", "{h.prompts} prompts · {lifetime} · since {started}" }
                 }
-                div { class: "rail-line muted", span { "Started {started}" } }
             }
-            div { class: "rail-sec", "Tools" }
-            ToolLink { tab: RightTab::Changes, icon: I::Diff, label: "Changes" }
-            ToolLink { tab: RightTab::Browser, icon: I::Globe, label: "Browser" }
-            ToolLink { tab: RightTab::Terminal, icon: I::Terminal, label: "Terminal" }
-            ToolLink { tab: RightTab::Files, icon: I::Files, label: "Files" }
-            ToolLink { tab: RightTab::Tasks, icon: I::Workflow, label: "Background Tasks", badge: tasks }
+
+            // ---- context and usage
+            if h.context.is_some() || h.input + h.output > 0 {
+                div { class: "rail-sec",
+                    div { class: "rail-sec-head", span { "Context" }
+                        if let Some(p) = ctx_pct { span { class: "meta", "{p:.0}%" } }
+                    }
+                    if let Some(p) = ctx_pct {
+                        div { class: "rail-bar {ctx_sev}", div { class: "fill", style: "width: {p:.1}%;" } }
+                    }
+                    div { class: "rail-stats",
+                        if ctx_used > 0 {
+                            span { title: "Tokens in the model's context at the latest reply",
+                                if let Some(m) = ctx_max { "{fmt(ctx_used)} of {fmt(m)}" } else { "{fmt(ctx_used)} in context" }
+                            }
+                        }
+                    }
+                    div { class: "rail-stats",
+                        span { title: "Input tokens", "{fmt(h.input)} in" }
+                        span { title: "Output tokens", "{fmt(h.output)} out" }
+                        if h.cache > 0 { span { title: "Cache reads and writes", "{fmt(h.cache)} cache" } }
+                        if let Some(c) = h.cost { span { title: "Cost (estimated from list prices when the agent does not report it)", "${c:.2}" } }
+                    }
+                }
+            }
+
+            // ---- to-dos
+            if !h.plan.is_empty() {
+                div { class: "rail-sec",
+                    div { class: "rail-sec-head", span { "To-dos" } span { class: "meta", "{done} of {h.plan.len()}" } }
+                    div { class: "rail-bar", div { class: "fill ok", style: "width: {done as f64 / h.plan.len() as f64 * 100.0:.1}%;" } }
+                    for (i, (text, st)) in h.plan.iter().take(7).enumerate() {
+                        div { key: "{i}", class: match st { PlanStatus::Completed => "rail-todo done", PlanStatus::InProgress => "rail-todo now", _ => "rail-todo" },
+                            span { class: "box", if *st == PlanStatus::Completed { Icon { i: I::Check, size: 9, stroke: 3.0 } } }
+                            span { class: "t", title: "{text}", "{text}" }
+                        }
+                    }
+                    if plan_more > 0 { div { class: "rail-more", "+{plan_more} more" } }
+                }
+            }
+
+            // ---- latest activity
+            if !h.recent.is_empty() {
+                div { class: "rail-sec",
+                    div { class: "rail-sec-head", span { "Activity" } }
+                    for (i, (title, active, failed)) in h.recent.iter().enumerate() {
+                        div { key: "{i}", class: if *failed { "rail-act failed" } else { "rail-act" },
+                            span { class: "ic",
+                                if *active { super::Spinner { size: 11 } }
+                                else if *failed { Icon { i: I::X, size: 11, stroke: 2.0 } }
+                                else { Icon { i: I::Check, size: 11, stroke: 2.0 } }
+                            }
+                            span { class: "t", title: "{title}", "{title}" }
+                        }
+                    }
+                }
+            }
+
+            // ---- changed files
+            if fcount > 0 {
+                div { class: "rail-sec",
+                    div { class: "rail-sec-head", span { "Files changed · {fcount}" }
+                        span { class: "meta", span { class: "add", "+{fadd}" } " " span { class: "del", "-{frem}" } }
+                    }
+                    for (name, path, a, r) in h.files.iter().cloned() {
+                        button { key: "{path}", class: "rail-file", title: "{path}",
+                            onclick: move |_| {
+                                let mut ui = app.ui.write();
+                                ui.open_panel(RightTab::Changes, false);
+                                ui.reveal_file = Some(path.clone());
+                            },
+                            span { class: "t", "{name}" }
+                            span { class: "add", "+{a}" }
+                            span { class: "del", "-{r}" }
+                        }
+                    }
+                }
+            }
+
+            // ---- background work
+            if !h.tasks.is_empty() {
+                div { class: "rail-sec",
+                    div { class: "rail-sec-head", span { "Running in background · {h.tasks.len()}" } }
+                    for (i, (title, sub)) in h.tasks.iter().take(4).enumerate() {
+                        button { key: "{i}", class: "rail-act link", onclick: move |_| app.ui.write().open_panel(RightTab::Tasks, false),
+                            span { class: "ic", super::Spinner { size: 11 } }
+                            Icon { i: if *sub { I::Bot } else { I::Terminal }, size: 12, stroke: 1.6 }
+                            span { class: "t", title: "{title}", "{title}" }
+                        }
+                    }
+                }
+            }
+
+            div { class: "rail-sec",
+                div { class: "rail-sec-head", span { "Tools" } }
+                ToolLink { tab: RightTab::Changes, icon: I::Diff, label: "Changes" }
+                ToolLink { tab: RightTab::Browser, icon: I::Globe, label: "Browser" }
+                ToolLink { tab: RightTab::Terminal, icon: I::Terminal, label: "Terminal" }
+                ToolLink { tab: RightTab::Files, icon: I::Files, label: "Files" }
+                ToolLink { tab: RightTab::Tasks, icon: I::Workflow, label: "Background Tasks", badge: tasks_badge }
+            }
         }
     }
 }

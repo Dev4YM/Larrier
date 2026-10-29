@@ -233,7 +233,7 @@ pub fn BackgroundTasks(session_id: String) -> Element {
                     title: "Show background tasks",
                     onclick: move |_| open.toggle(),
                     if active > 0 {
-                        span { class: "sunburst tk-st", Icon { i: I::Loader, size: 12 } }
+                        span { class: "tk-st", super::Spinner { size: 12 } }
                     } else {
                         span { class: "tk-st ok", Icon { i: I::CircleCheck, size: 12 } }
                     }
@@ -312,7 +312,7 @@ fn StatusIcon(status: ToolStatus, error: bool) -> Element {
     }
     match status {
         ToolStatus::Running | ToolStatus::Pending | ToolStatus::Approval => rsx! {
-            span { class: "sunburst tk-st", title: "Running", Icon { i: I::Loader, size: 13 } }
+            span { class: "tk-st", title: "Running", super::Spinner { size: 13 } }
         },
         ToolStatus::Cancelled => rsx! { span { class: "tk-st muted", title: "Stopped", Icon { i: I::Stop, size: 10 } } },
         _ => rsx! { span { class: "tk-st ok", title: "Done", Icon { i: I::CircleCheck, size: 13 } } },

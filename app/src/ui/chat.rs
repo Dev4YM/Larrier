@@ -262,7 +262,7 @@ fn SplitHeader(id: String) -> Element {
         div { class: "main-head split-head",
             span { class: "ctab on static",
                 span { class: "ic",
-                    if running { span { class: "sunburst", Icon { i: I::Loader, size: 14 } } } else { AgentGlyph { kind: agent } }
+                    if running { super::Spinner { size: 14 } } else { AgentGlyph { kind: agent } }
                 }
                 span { class: "t", dir: "auto", "{title}" }
             }
@@ -401,7 +401,7 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
             },
             span { class: "ic",
                 if running {
-                    span { class: "sunburst", Icon { i: I::Loader, size: 14 } }
+                    super::Spinner { size: 14 }
                 } else if sub.is_some() {
                     Icon { i: I::Bot, size: 14, stroke: 1.5 }
                 } else {

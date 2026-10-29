@@ -1285,7 +1285,7 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
                     ui.right_tab = RightTab::Changes;
                     ui.reveal_file = Some(path.clone());
                 },
-                span { class: "ic", if running { span { class: "sunburst", Icon { i: I::Loader, size: 13 } } } else { Icon { i: I::Lines, size: 13 } } }
+                span { class: "ic", if running { super::Spinner { size: 13 } } else { Icon { i: I::Lines, size: 13 } } }
                 span { class: "name", "{name}" }
                 span { class: "stats",
                     if diff.added > 0 || diff.removed == 0 { span { class: "add", "+{diff.added}" } }
@@ -1380,7 +1380,7 @@ fn CommandCard(tool: ToolCall) -> Element {
         div { class: "tool-card",
             div { class: "tool-card-head", onclick: move |_| open.toggle(),
                 span { class: "ic",
-                    if running { span { class: "sunburst", Icon { i: I::Loader, size: 13 } } }
+                    if running { super::Spinner { size: 13 } }
                     else if failed { span { style: "color: var(--red)", Icon { i: I::Alert, size: 13 } } }
                     else { Icon { i: I::Terminal, size: 13 } }
                 }

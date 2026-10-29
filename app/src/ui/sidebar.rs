@@ -492,7 +492,7 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             },
             span { class: "bullet",
                 if running {
-                    span { class: "sunburst", Icon { i: I::Loader, size: 13, stroke: 1.6 } }
+                    super::Spinner { size: 14 }
                 } else if logo {
                     AgentGlyph { kind: s.agent.clone() }
                 } else {

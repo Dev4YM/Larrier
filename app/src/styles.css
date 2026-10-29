@@ -191,7 +191,6 @@ svg { flex-shrink: 0; display: block; }
 /* status glyphs */
 .spinner { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--fg-4); border-top-color: var(--fg-2); animation: spin .75s linear infinite; }
 .spinner.lg { width: 16px; height: 16px; }
-.sunburst { animation: spin 1.1s steps(8) infinite; color: var(--fg-2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
 .dot.amber { background: var(--amber); }
@@ -738,7 +737,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .composer { transition: border-color .15s ease, box-shadow .15s ease, border-radius .15s ease; }
 .composer:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c) 12%, transparent), 0 1px 2px rgba(0,0,0,.03); }
 .app.no-motion *, .app.no-motion *::before, .app.no-motion *::after { animation: none !important; transition: none !important; }
-.app.no-motion .spinner, .app.no-motion .sunburst, .app.no-motion .ring.busy { animation: spin .8s linear infinite !important; }
+.app.no-motion .spinner, .app.no-motion .ring.busy { animation: spin .8s linear infinite !important; }
 
 /* Styled select */
 .select-btn { height: 28px; min-width: 140px; max-width: 320px; padding: 0 8px 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--input); display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg); }
@@ -803,8 +802,6 @@ select.input { cursor: pointer; padding-right: 4px; }
 
 /* Stable icon slots: spinners rotate around their own center and every
    status glyph occupies the same box, so nothing shifts when state changes. */
-.sunburst { display: inline-flex; align-items: center; justify-content: center; line-height: 0; transform-origin: 50% 50%; flex-shrink: 0; }
-.sunburst svg { display: block; }
 .chat-row .bullet, .ctab .ic, .mp-agent .lg, .mp-row .lg, .menu-item .muted { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .chat-row .tm { min-width: 22px; text-align: right; }
 .chat-row .more { top: 50%; transform: translateY(-50%); }
@@ -1130,3 +1127,16 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .mode-row .mo-desc { font-size: 11.5px; line-height: 15px; color: var(--fg-3); white-space: normal; }
 .mode-row .mo-check { width: 16px; flex-shrink: 0; display: flex; justify-content: center; color: var(--blue); padding-top: 2px; }
 .mode-row .mo-num { width: 12px; flex-shrink: 0; text-align: right; font-size: 11.5px; color: var(--fg-3); padding-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* Running indicator: an accent arc sweeping around a faint ring. */
+.spin { display: inline-block; flex-shrink: 0; vertical-align: middle; color: var(--accent-c, var(--blue)); transform-origin: 50% 50%; animation: spin-turn 1.25s linear infinite; }
+.spin-track { stroke: currentColor; opacity: .16; }
+.spin-arc { stroke: currentColor; stroke-dasharray: 22 78; animation: spin-sweep 1.5s ease-in-out infinite; }
+@keyframes spin-turn { to { transform: rotate(360deg); } }
+@keyframes spin-sweep {
+  0% { stroke-dasharray: 8 92; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 52 48; stroke-dashoffset: -16; }
+  100% { stroke-dasharray: 8 92; stroke-dashoffset: -100; }
+}
+.app.no-motion .spin { animation: spin-turn 2.4s linear infinite !important; }
+.app.no-motion .spin-arc { animation: none !important; stroke-dasharray: 30 70; }

@@ -717,6 +717,18 @@ pub fn glyph_color(hex: &str, dark: bool) -> String {
     }
 }
 
+/// The running indicator: an accent arc that sweeps and breathes around a
+/// faint ring. With Reduce Motion it only turns, slowly.
+#[component]
+pub fn Spinner(#[props(default = 14)] size: u32) -> Element {
+    rsx! {
+        svg { class: "spin", width: "{size}", height: "{size}", view_box: "0 0 16 16", role: "img", "aria-label": "Running",
+            circle { class: "spin-track", cx: "8", cy: "8", r: "6", fill: "none", stroke_width: "2" }
+            circle { class: "spin-arc", cx: "8", cy: "8", r: "6", fill: "none", stroke_width: "2", stroke_linecap: "round", "pathLength": "100" }
+        }
+    }
+}
+
 #[component]
 pub fn Kbd(keys: Vec<&'static str>) -> Element {
     rsx! {

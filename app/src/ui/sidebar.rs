@@ -392,7 +392,7 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
     let title = path.clone().unwrap_or_else(|| if agent.is_some() { name.clone() } else { "Agents and chats without a folder".into() });
     rsx! {
         div { class: if open && !items.is_empty() { "repo-group" } else { "" },
-            button { class: "repo-row", title: "{title}",
+            div { class: "repo-row", role: "button", title: "{title}",
                 onclick: move |_| {
                     let mut ui = app.ui.write();
                     if open {
@@ -403,14 +403,33 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
                         ui.repo_open.insert(k.clone());
                     }
                 },
+                // The folder icon turns into the collapse chevron on hover.
                 span { class: "ic",
-                    if let Some(k) = agent.clone() { AgentGlyph { kind: k } }
-                    else if home { Icon { i: I::Home, size: 16, stroke: 1.5 } }
-                    else if open { Icon { i: I::FolderOpen, size: 16, stroke: 1.5 } }
-                    else { Icon { i: I::Folder, size: 16, stroke: 1.5 } }
+                    span { class: "ic-rest",
+                        if let Some(k) = agent.clone() { AgentGlyph { kind: k } }
+                        else if home { Icon { i: I::Home, size: 16, stroke: 1.5 } }
+                        else if open { Icon { i: I::FolderOpen, size: 16, stroke: 1.5 } }
+                        else { Icon { i: I::Folder, size: 16, stroke: 1.5 } }
+                    }
+                    span { class: "ic-chev",
+                        if open { Icon { i: I::ChevronDown, size: 15, stroke: 1.6 } } else { Icon { i: I::ChevronRight, size: 15, stroke: 1.6 } }
+                    }
                 }
                 span { class: "nm", dir: "auto", "{name}" }
                 if count > 0 { span { class: "cnt", "{count}" } }
+                if agent.is_none() {
+                    button { class: "icon-btn sm add", title: if path.is_some() { "New agent in {name}" } else { "New agent without a folder" },
+                        onclick: {
+                            let p = path.clone();
+                            move |e: MouseEvent| {
+                                e.stop_propagation();
+                                app.draft.write().workspace = p.clone();
+                                app.new_agent();
+                            }
+                        },
+                        Icon { i: I::Plus, size: 15, stroke: 1.6 }
+                    }
+                }
             }
             if open {
                 for s in shown {

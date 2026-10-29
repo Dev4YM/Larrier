@@ -995,6 +995,26 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .chat-col.fixed { flex: 0 0 var(--chat-w, 760px); max-width: 70%; }
 .pill-btn.active-blue { border-color: var(--blue); color: var(--blue); }
 
+/* Sidebar repo rows, Cursor style: chevron and "+ new agent" on hover. */
+.repo-row { position: relative; cursor: pointer; user-select: none; }
+.repo-row .ic { width: 16px; height: 16px; align-items: center; justify-content: center; flex-shrink: 0; }
+.repo-row .ic-rest, .repo-row .ic-chev { display: flex; align-items: center; justify-content: center; }
+.repo-row .ic-chev { display: none; color: var(--fg-2); }
+.repo-row:hover .ic-rest { display: none; }
+.repo-row:hover .ic-chev { display: flex; }
+.repo-row .add { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0; color: var(--fg-2); }
+.repo-row:hover .add { opacity: 1; }
+.repo-row:hover .cnt { opacity: 0; }
+.repo-row .add:hover { color: var(--fg); background: var(--chip); }
+
+/* Back in Settings: a full-width row like every other sidebar row. */
+.nav-row.back-row { width: 100%; color: var(--fg-2); }
+.nav-row.back-row:hover { color: var(--fg); background: var(--hover); }
+.side-top:has(.back-row) { padding: 0 8px; }
+
+/* Menus opened at the pointer start hidden until placed inside the window. */
+.menu.ctx-menu, #ctx-menu { position: fixed; z-index: 400; }
+
 /* Live sessions: another app (a terminal CLI, an IDE) is writing this session. */
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; display: inline-block; box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); animation: live-pulse 1.8s ease-out infinite; }
 @keyframes live-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 45%, transparent); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }

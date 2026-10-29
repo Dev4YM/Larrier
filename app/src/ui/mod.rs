@@ -771,6 +771,7 @@ pub fn place_js(id: &str, prefer_up: bool, align_right: bool) -> String {
         r#"requestAnimationFrame(() => {{
   const m = document.getElementById('{id}'); if (!m) return;
   const anchor = m.parentElement; if (!anchor) return;
+  const focusFirst = true;
   const a = anchor.getBoundingClientRect();
   const vw = window.innerWidth, vh = window.innerHeight, pad = 8, gap = 4;
   const cap = parseFloat(getComputedStyle(m).getPropertyValue('--menu-max')) || 440;
@@ -790,32 +791,62 @@ pub fn place_js(id: &str, prefer_up: bool, align_right: bool) -> String {
   m.style.transformOrigin = (up ? 'bottom ' : 'top ') + ({align_right} ? 'right' : 'left');
   m.classList.toggle('flip-up', up);
   m.style.visibility = 'visible'; m.classList.add('in');
-  const items = () => [...m.querySelectorAll('button.menu-item:not(.disabled), button.mp-agent')].filter(b => b.offsetParent !== null);
+  {keys}
+}});"#,
+        keys = MENU_KEYS_JS
+    )
+}
+
+/// JS that places a menu opened at a point (right-click) fully inside the
+/// window: it flips left / up when it would overflow and caps its height.
+/// `focus` moves keyboard focus into the menu (not for edit menus, which
+/// must leave focus in the text field they act on).
+pub fn place_at_js(id: &str, x: f64, y: f64, focus: bool) -> String {
+    format!(
+        r#"requestAnimationFrame(() => {{
+  const m = document.getElementById('{id}'); if (!m) return;
+  const vw = window.innerWidth, vh = window.innerHeight, pad = 8, x = {x}, y = {y};
+  const focusFirst = {focus};
+  m.style.position = 'fixed'; m.style.maxHeight = (vh - pad * 2) + 'px'; m.style.maxWidth = (vw - pad * 2) + 'px';
+  const w = m.offsetWidth, h = Math.min(m.scrollHeight, vh - pad * 2);
+  let left = x + 2, top = y + 2;
+  if (left + w > vw - pad) left = x - w - 2;
+  if (top + h > vh - pad) top = y - h - 2;
+  left = Math.max(pad, Math.min(left, vw - w - pad));
+  top = Math.max(pad, Math.min(top, vh - h - pad));
+  m.style.left = left + 'px'; m.style.top = top + 'px';
+  m.style.transformOrigin = (top < y ? 'bottom ' : 'top ') + (left < x ? 'right' : 'left');
+  m.style.visibility = 'visible'; m.classList.add('in');
+  {keys}
+}});"#,
+        keys = MENU_KEYS_JS
+    )
+}
+
+/// Keyboard handling shared by every menu (expects `m` and `focusFirst`).
+const MENU_KEYS_JS: &str = r#"const items = () => [...m.querySelectorAll('button.menu-item:not(.disabled), button.mp-agent')].filter(b => b.offsetParent !== null);
   const checked = m.querySelector('.menu-item.checked, .menu-item .check');
-  if (checked) (checked.closest('.menu-item') || checked).scrollIntoView({{ block: 'nearest' }});
+  if (checked) (checked.closest('.menu-item') || checked).scrollIntoView({ block: 'nearest' });
   const s = m.querySelector('.menu-search input, input[autofocus]');
-  if (s) s.focus({{ preventScroll: true }});
-  else {{ const f = (checked && checked.closest('.menu-item')) || items()[0]; if (f) f.focus({{ preventScroll: true }}); }}
+  if (s) s.focus({ preventScroll: true });
+  else if (focusFirst) { const f = (checked && checked.closest('.menu-item')) || items()[0]; if (f) f.focus({ preventScroll: true }); }
   if (m.__keys) return; m.__keys = true;
   let typed = '', typedT = null;
-  m.addEventListener('keydown', (e) => {{
+  m.addEventListener('keydown', (e) => {
     const list = items(); const i = list.indexOf(document.activeElement);
-    const go = (n) => {{ if (!list.length) return; const t = list[(n + list.length) % list.length]; t.focus(); t.scrollIntoView({{ block: 'nearest' }}); }};
-    if (e.key === 'ArrowDown') {{ e.preventDefault(); go(i < 0 ? 0 : i + 1); }}
-    else if (e.key === 'ArrowUp') {{ e.preventDefault(); go(i < 0 ? list.length - 1 : i - 1); }}
-    else if (e.key === 'Home' && e.target.tagName !== 'INPUT') {{ e.preventDefault(); go(0); }}
-    else if (e.key === 'End' && e.target.tagName !== 'INPUT') {{ e.preventDefault(); go(list.length - 1); }}
-    else if (e.key === 'Escape') {{ e.preventDefault(); e.stopPropagation(); const b = m.previousElementSibling; if (b && b.classList.contains('menu-backdrop')) b.click(); }}
-    else if (e.key === 'Tab') {{ e.preventDefault(); go(e.shiftKey ? i - 1 : i + 1); }}
-    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && e.target.tagName !== 'INPUT') {{
+    const go = (n) => { if (!list.length) return; const t = list[(n + list.length) % list.length]; t.focus(); t.scrollIntoView({ block: 'nearest' }); };
+    if (e.key === 'ArrowDown') { e.preventDefault(); go(i < 0 ? 0 : i + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); go(i < 0 ? list.length - 1 : i - 1); }
+    else if (e.key === 'Home' && e.target.tagName !== 'INPUT') { e.preventDefault(); go(0); }
+    else if (e.key === 'End' && e.target.tagName !== 'INPUT') { e.preventDefault(); go(list.length - 1); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); const b = m.previousElementSibling; if (b && b.classList.contains('menu-backdrop')) b.click(); }
+    else if (e.key === 'Tab') { e.preventDefault(); go(e.shiftKey ? i - 1 : i + 1); }
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && e.target.tagName !== 'INPUT') {
       typed += e.key.toLowerCase(); clearTimeout(typedT); typedT = setTimeout(() => typed = '', 600);
       const hit = list.findIndex((b, j) => j !== i && b.innerText.trim().toLowerCase().startsWith(typed));
       if (hit >= 0) go(hit);
-    }}
-  }});
-}});"#
-    )
-}
+    }
+  });"#;
 
 /// A styled select (replaces native `<select>` so it matches the app and
 /// stays inside the window). Long lists get a filter box.

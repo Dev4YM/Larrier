@@ -204,6 +204,12 @@ pub fn Palette() -> Element {
 #[component]
 pub fn TabMenu() -> Element {
     let mut app = use_app();
+    let tab_pos = app.ui.read().tab_ctx.as_ref().map(|c| (c.x, c.y));
+    use_effect(use_reactive!(|tab_pos| {
+        if let Some((x, y)) = tab_pos {
+            document::eval(&super::place_at_js("tab-menu", x, y, true));
+        }
+    }));
     let Some(c) = app.ui.read().tab_ctx.clone() else { return rsx! {} };
     let preview = app.tabs.read().iter().find(|t| t.view == c.view).map(|t| t.preview).unwrap_or(false);
     let n = app.tabs.read().len();
@@ -230,7 +236,7 @@ pub fn TabMenu() -> Element {
             onclick: move |_| app.ui.write().tab_ctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().tab_ctx = None; },
         }
-        div { class: "menu ctx-menu", style: "left: {c.x}px; top: {c.y}px;",
+        div { id: "tab-menu", class: "menu ctx-menu", style: "left: {c.x}px; top: {c.y}px; visibility: hidden;",
             {item("Close", I::X, "Ctrl+W", true, Box::new(move || app.close_tab(&v1)))}
             {item("Close Others", I::X, "", n > 1, Box::new(move || app.close_tabs(&v2, "others")))}
             {item("Close to the Right", I::X, "", !is_last, Box::new(move || app.close_tabs(&v3, "right")))}
@@ -256,6 +262,14 @@ pub fn ContextMenu() -> Element {
     let mut app = use_app();
     let ctx = app.ui.read().ctx.clone();
     let mut sub = use_signal(|| None::<&'static str>);
+    let pos = ctx.as_ref().map(|c| (c.x, c.y));
+    // Re-place whenever it opens, moves or a submenu grows it.
+    use_effect(use_reactive!(|pos| {
+        let _ = sub();
+        if let Some((x, y)) = pos {
+            document::eval(&super::place_at_js("ctx-menu", x, y, true));
+        }
+    }));
     let Some(ctx) = ctx else { return rsx! {} };
     let Some(s) = app.sessions.read().iter().find(|s| s.id == ctx.session_id).cloned() else { return rsx! {} };
     let id = s.id.clone();
@@ -278,7 +292,7 @@ pub fn ContextMenu() -> Element {
     rsx! {
         div { class: "menu-backdrop", onclick: move |_| { app.ui.write().ctx = None; sub.set(None); },
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().ctx = None; } }
-        div { class: "menu", style: "position: fixed; left: {x}px; top: {y}px; max-height: 80vh;",
+        div { id: "ctx-menu", class: "menu", style: "position: fixed; left: {x}px; top: {y}px; visibility: hidden;",
             {item("Open", I::Message, Box::new(move || app.open_session(&i1)))}
             {item("Open in New Tab", I::CopyPlus, { let i = id.clone(); Box::new(move || app.open_session_tab(&i)) })}
             if app.current_id().is_some_and(|c| c != id) {
@@ -527,6 +541,12 @@ fn AddAccountModal(kind: AgentKind) -> Element {
 #[component]
 pub fn GlobalMenu() -> Element {
     let mut app = use_app();
+    let g_pos = app.ui.read().gctx.as_ref().map(|c| (c.x, c.y));
+    use_effect(use_reactive!(|g_pos| {
+        if let Some((x, y)) = g_pos {
+            document::eval(&super::place_at_js("g-menu", x, y, false));
+        }
+    }));
     let ctx = app.ui.read().gctx.clone();
     let Some(c) = ctx else { return rsx! {} };
     let in_agent = app.current_id().is_some();
@@ -562,12 +582,8 @@ pub fn GlobalMenu() -> Element {
         rows += 7;
         seps += 2;
     }
-    let est_h = (rows * 26 + seps * 9 + 10) as f64;
-    let win = dioxus::desktop::window();
-    let scale = win.scale_factor();
-    let size = win.inner_size().to_logical::<f64>(scale);
-    let x = c.x.min(size.width - 250.0).max(4.0);
-    let y = if c.y + est_h > size.height { (c.y - est_h).max(4.0) } else { c.y };
+    let _ = (rows, seps);
+    let (x, y) = (c.x, c.y);
 
     let close = move || app.ui.write().gctx = None;
     let item = move |label: &'static str, icon: I, kb: &'static str, enabled: bool, f: Box<dyn Fn()>| {
@@ -603,7 +619,7 @@ pub fn GlobalMenu() -> Element {
             onclick: move |_| app.ui.write().gctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().gctx = None; },
         }
-        div { class: "menu ctx-menu", style: "left: {x}px; top: {y}px;",
+        div { id: "g-menu", class: "menu ctx-menu", style: "left: {x}px; top: {y}px; visibility: hidden;",
             if c.editable {
                 {item("Undo", I::Undo, "Ctrl+Z", true, Box::new(|| super::menubar::edit_command("undo")))}
                 {item("Redo", I::Refresh, "Ctrl+Y", true, Box::new(|| super::menubar::edit_command("redo")))}

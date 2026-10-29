@@ -42,7 +42,7 @@ pub fn SettingsNav() -> Element {
     rsx! {
         aside { class: "sidebar",
             div { class: "side-top",
-                button { class: "nav-row", style: "width: auto; padding: 0 8px; color: var(--fg-2);",
+                button { class: "nav-row back-row",
                     onclick: move |_| {
                         if app.can_go(-1) { app.go(-1) } else { app.new_agent() }
                     },

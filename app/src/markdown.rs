@@ -33,7 +33,7 @@ pub fn to_html(src: &str) -> String {
             Event::Start(Tag::Link { link_type, dest_url: CowStr::from(safe), title, id })
         }
         Event::Start(Tag::Image { link_type, dest_url, title, id }) => {
-            let safe = sanitize_url(&dest_url);
+            let safe = local_image(&dest_url).unwrap_or_else(|| sanitize_url(&dest_url));
             Event::Start(Tag::Image { link_type, dest_url: CowStr::from(safe), title, id })
         }
         other => other,
@@ -83,6 +83,22 @@ fn code_block(info: &str, text: &str) -> String {
     format!(
         "<div class=\"code-block\"><div class=\"code-head\"><span class=\"code-lang\">{label}</span><button class=\"code-copy\" type=\"button\" title=\"Copy\" onclick=\"{COPY_JS}\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><use href=\"#lucide-copy\"/></svg></button></div><pre><code class=\"hl-code\">{body}</code></pre></div>\n"
     )
+}
+
+/// An image on this computer (`file:///C:/…/chart.png`, `C:\…\shot.png`,
+/// `/home/…/plot.png`), inlined: the window may not load local files.
+fn local_image(url: &str) -> Option<String> {
+    let u = url.trim();
+    let path = if u.starts_with("file://") {
+        larrier_formats::util::file_url_path(u)
+    } else if u.len() > 2 && u.as_bytes()[1] == b':' && u.as_bytes()[0].is_ascii_alphabetic() || u.starts_with('/') && !u.starts_with("//") {
+        u.to_string()
+    } else {
+        return None;
+    };
+    let mime = larrier_formats::util::image_mime(&path)?;
+    let part = larrier_core::Part::Image { mime: Some(mime), source: larrier_core::lsf::MediaSource::Path { path } };
+    crate::state::image_src(&part)
 }
 
 fn sanitize_url(url: &str) -> String {

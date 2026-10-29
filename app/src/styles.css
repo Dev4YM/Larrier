@@ -1090,3 +1090,17 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .question-card .q-chip { font-size: 12px; padding: 2px 9px; border-radius: 10px; background: var(--chip); color: var(--fg-2); }
 .question-card .q-chip.on { background: color-mix(in srgb, var(--accent-c) 16%, var(--chip)); color: var(--fg); font-weight: 500; }
 .question-card .q-answer { font-size: 12.5px; color: var(--fg-2); margin-top: 4px; }
+
+/* Streaming motion: new steps of the running turn glide in (existing ones
+   never move), streaming text has a soft caret, and things that open ease
+   in. All of it is off with Reduce Motion (.app.no-motion). */
+@keyframes stream-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.turn.live .a-block > *, .turn.live > .user-msg, .turn.live .tool-images img { animation: stream-in .28s cubic-bezier(.2, .8, .2, 1) both; }
+.thinking-row { animation: fade-in .24s ease-out both; }
+@keyframes caret { 0%, 45% { opacity: .55; } 55%, 100% { opacity: 0; } }
+.a-text.streaming > :last-child::after { content: ""; display: inline-block; width: .5em; height: 1em; margin-left: 2px; vertical-align: -2px; border-radius: 2px; background: currentColor; opacity: .55; animation: caret 1s steps(1) infinite; }
+.sub-steps, .tool-card.tool-io, .reasoning-text, .tool-card .cmd, .tool-card > pre, .preview.open { transition: opacity .2s ease, transform .2s cubic-bezier(.2, .8, .2, 1); }
+@starting-style {
+  .sub-steps, .tool-card.tool-io, .reasoning-text, .tool-card .cmd, .tool-card > pre { opacity: 0; transform: translateY(-4px); }
+}
+.app.no-motion .a-text.streaming > :last-child::after { animation: none !important; opacity: .45; }

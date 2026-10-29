@@ -144,8 +144,29 @@ pub fn Transcript(id: String) -> Element {
             r#"requestAnimationFrame(() => {{
                 const el = document.getElementById('{tid2}');
                 if (!el) return;
+                if (!el.__wired) {{
+                    el.__wired = true;
+                    const mark = () => {{ el.__userAt = performance.now(); }};
+                    el.addEventListener('wheel', mark, {{ passive: true }});
+                    el.addEventListener('touchmove', mark, {{ passive: true }});
+                    el.addEventListener('keydown', mark);
+                }}
+                const fresh = el.dataset.fresh !== '0';
                 const near = el.scrollHeight - el.scrollTop - el.clientHeight < 260;
-                if (near || el.dataset.fresh !== '0') {{ el.scrollTop = el.scrollHeight; el.dataset.fresh = '0'; }}
+                if (!fresh && !near) return;
+                el.dataset.fresh = '0';
+                // Opening a chat, or reduced motion: jump. Otherwise glide.
+                if (fresh || el.closest('.no-motion')) {{ el.scrollTop = el.scrollHeight; return; }}
+                if (el.__gliding) return;
+                el.__gliding = true;
+                const step = () => {{
+                    if (performance.now() - (el.__userAt || 0) < 700) {{ el.__gliding = false; return; }}
+                    const d = el.scrollHeight - el.clientHeight - el.scrollTop;
+                    if (d <= 1) {{ el.__gliding = false; return; }}
+                    el.scrollTop += Math.max(1, Math.ceil(d * 0.2));
+                    requestAnimationFrame(step);
+                }};
+                requestAnimationFrame(step);
             }});"#
         ));
     }));
@@ -346,7 +367,7 @@ fn TurnView(
     // Each turn is its own box so its sticky prompt card scrolls away when
     // the next prompt arrives (instead of stacking under it).
     rsx! {
-        div { class: "turn",
+        div { class: if live { "turn live" } else { "turn" },
         if let Some(u) = turn.user.clone() {
             UserMessage { key: "{u.id}", session_id: session_id.clone(), msg: u }
         }
@@ -730,7 +751,7 @@ pub fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool
     match part {
         Part::Text { text } => {
             let html = markdown::to_html(&text);
-            rsx! { div { class: "a-text md", dir: "auto", dangerous_inner_html: "{html}" } }
+            rsx! { div { class: if live { "a-text md streaming" } else { "a-text md" }, dir: "auto", dangerous_inner_html: "{html}" } }
         }
         Part::Reasoning { text, duration_ms } => {
             if !show_reasoning {

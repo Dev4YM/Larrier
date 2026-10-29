@@ -1157,3 +1157,25 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 
 /* Background chips share the row with Changes / Commit & Push. */
 .above-composer { flex-wrap: wrap; row-gap: 6px; }
+
+/* Session rail: a short summary of the session and its tools. */
+.tools-col { width: 240px; padding: 0 12px 0 6px; gap: 2px; overflow: hidden auto; transition: width .18s ease, padding .18s ease; }
+.tools-col.collapsed { width: 52px; padding: 0 8px; align-items: center; }
+.rail-head { height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 0 0 8px; flex-shrink: 0; }
+.tools-col.collapsed .rail-head { padding: 0; }
+.rail-head .h { flex: 1; min-width: 0; font-size: 12px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-card { margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); display: flex; flex-direction: column; gap: 7px; font-size: 12px; color: var(--fg-2); min-width: 0; }
+.rail-card .who { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.rail-card .who .a { color: var(--fg); font-weight: 500; white-space: nowrap; }
+.rail-card .who .m { color: var(--fg-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.rail-line > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-line > svg { flex-shrink: 0; color: var(--fg-3); }
+.rail-line .dot { width: 6px; height: 6px; margin: 0 3px; border-radius: 50%; background: var(--fg-4); flex-shrink: 0; }
+.rail-line.muted { color: var(--fg-3); }
+.rail-stats { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.rail-sec { font-size: 11px; color: var(--fg-3); padding: 2px 8px 4px; }
+.tool-link .lb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-link .badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--chip); color: var(--fg-2); font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+.tools-col.collapsed .tool-link { width: 34px; height: 32px; padding: 0; justify-content: center; position: relative; }
+.tools-col.collapsed .tool-link .badge { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; font-size: 9.5px; }

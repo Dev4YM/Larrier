@@ -75,8 +75,6 @@ pub fn AgentView(id: String) -> Element {
     let loaded = app.open.read().contains_key(&id);
     let split = app.split.read().clone().filter(|s| *s != id && app.open.read().contains_key(s));
     let mut dragging = use_signal(|| false);
-    let id_m = id.clone();
-    let ws_name = use_memo(move || app.with_session(&id_m, |s| s.workspace.as_ref().map(|w| w.name.clone())).flatten());
     if !loaded {
         return rsx! { div { class: "empty-state", "Loading…" } };
     }
@@ -100,15 +98,8 @@ pub fn AgentView(id: String) -> Element {
                 }
             } else if right_open {
                 RightPane { id: id.clone() }
-            } else if let Some(name) = ws_name() {
-                div { class: "tools-col",
-                    div { style: "height: 38px;" }
-                    div { class: "h", "On {name}" }
-                    ToolLink { tab: RightTab::Changes, icon: I::Diff, label: "Changes" }
-                    ToolLink { tab: RightTab::Browser, icon: I::Globe, label: "Browser" }
-                    ToolLink { tab: RightTab::Terminal, icon: I::Terminal, label: "Terminal" }
-                    ToolLink { tab: RightTab::Files, icon: I::Files, label: "Files" }
-                }
+            } else {
+                SessionRail { id: id.clone() }
             }
             DropZones { target: Some(id.clone()) }
             if dragging() {
@@ -139,13 +130,117 @@ fn ChatColumn(id: String, input_id: &'static str) -> Element {
     }
 }
 
+/// What the session rail shows about a session.
+#[derive(Clone, PartialEq)]
+struct RailInfo {
+    agent: larrier_core::AgentKind,
+    model: Option<String>,
+    workspace: Option<String>,
+    branch: Option<String>,
+    env: String,
+    created: chrono::DateTime<chrono::Utc>,
+    updated: chrono::DateTime<chrono::Utc>,
+    prompts: usize,
+    tokens: u64,
+    cost: Option<f64>,
+    tasks: usize,
+}
+
+fn rail_info(s: &Session) -> RailInfo {
+    RailInfo {
+        agent: s.agent.clone(),
+        model: s.model.as_deref().map(larrier_core::models::display_name),
+        workspace: s.workspace.as_ref().map(|w| if w.name.is_empty() { w.path.clone() } else { w.name.clone() }),
+        branch: s.workspace.as_ref().and_then(|w| w.branch.clone()),
+        env: match &s.environment {
+            Environment::Worktree { .. } => "Worktree".into(),
+            Environment::Ssh { host, .. } => format!("SSH · {host}"),
+            Environment::Local => "This PC".into(),
+        },
+        created: s.created_at,
+        updated: s.updated_at,
+        prompts: s.messages.iter().filter(|m| m.role == larrier_core::Role::User).count(),
+        // What the model read and wrote; cache reads would dwarf it.
+        tokens: s.usage.input_tokens + s.usage.output_tokens + s.usage.reasoning_tokens,
+        cost: s.usage.cost_usd,
+        tasks: larrier_core::lsf::active_tasks(&s.messages).len(),
+    }
+}
+
+/// The column beside the chat while the side panel is closed: a short
+/// summary of the session and its tools. Folds down to icons.
 #[component]
-fn ToolLink(tab: RightTab, icon: I, label: &'static str) -> Element {
+fn SessionRail(id: String) -> Element {
+    let mut app = use_app();
+    let id_m = id.clone();
+    let info = use_memo(move || app.with_session(&id_m, rail_info));
+    let collapsed = app.config.read().settings.session_rail_collapsed;
+    let running = app.is_active(&id);
+    let Some(h) = info() else { return rsx! {} };
+    let toggle = move |_| app.update_config(|c| c.settings.session_rail_collapsed = !c.settings.session_rail_collapsed);
+    let tasks = (h.tasks > 0).then(|| h.tasks.to_string());
+    if collapsed {
+        return rsx! {
+            div { class: "tools-col collapsed",
+                div { class: "rail-head",
+                    button { class: "icon-btn", title: "Show session details", onclick: toggle, Icon { i: I::ChevronsLeft, size: 15, stroke: 1.6 } }
+                }
+                ToolLink { tab: RightTab::Changes, icon: I::Diff, label: "Changes", icon_only: true }
+                ToolLink { tab: RightTab::Browser, icon: I::Globe, label: "Browser", icon_only: true }
+                ToolLink { tab: RightTab::Terminal, icon: I::Terminal, label: "Terminal", icon_only: true }
+                ToolLink { tab: RightTab::Files, icon: I::Files, label: "Files", icon_only: true }
+                ToolLink { tab: RightTab::Tasks, icon: I::Workflow, label: "Background Tasks", icon_only: true, badge: tasks }
+            }
+        };
+    }
+    let status = if running { "Working".to_string() } else { format!("Idle · {}", crate::state::rel_time(h.updated)) };
+    let started = h.created.with_timezone(&chrono::Local).format("%b %-d, %H:%M").to_string();
+    let tokens = super::usage::fmt_tokens(h.tokens);
+    rsx! {
+        div { class: "tools-col",
+            div { class: "rail-head",
+                span { class: "h", if let Some(w) = &h.workspace { "On {w}" } else { "Session" } }
+                button { class: "icon-btn", title: "Collapse", onclick: toggle, Icon { i: I::ChevronsRight, size: 15, stroke: 1.6 } }
+            }
+            div { class: "rail-card",
+                div { class: "who",
+                    AgentGlyph { kind: h.agent.clone() }
+                    span { class: "a", "{h.agent.display_name()}" }
+                    if let Some(m) = &h.model { span { class: "m", title: "{m}", "{m}" } }
+                }
+                div { class: "rail-line",
+                    if running { super::Spinner { size: 12 } } else { span { class: "dot" } }
+                    span { "{status}" }
+                }
+                div { class: "rail-line",
+                    Icon { i: I::GitBranch, size: 12, stroke: 1.6 }
+                    span { title: "{h.env}", if let Some(b) = &h.branch { "{b} · {h.env}" } else { "{h.env}" } }
+                }
+                div { class: "rail-stats",
+                    span { title: "Prompts", "{h.prompts} prompts" }
+                    if h.tokens > 0 { span { title: "Tokens", "{tokens} tokens" } }
+                    if let Some(c) = h.cost.filter(|c| *c > 0.0) { span { title: "Cost", "${c:.2}" } }
+                }
+                div { class: "rail-line muted", span { "Started {started}" } }
+            }
+            div { class: "rail-sec", "Tools" }
+            ToolLink { tab: RightTab::Changes, icon: I::Diff, label: "Changes" }
+            ToolLink { tab: RightTab::Browser, icon: I::Globe, label: "Browser" }
+            ToolLink { tab: RightTab::Terminal, icon: I::Terminal, label: "Terminal" }
+            ToolLink { tab: RightTab::Files, icon: I::Files, label: "Files" }
+            ToolLink { tab: RightTab::Tasks, icon: I::Workflow, label: "Background Tasks", badge: tasks }
+        }
+    }
+}
+
+#[component]
+fn ToolLink(tab: RightTab, icon: I, label: &'static str, #[props(default)] icon_only: bool, #[props(default)] badge: Option<String>) -> Element {
     let app = use_app();
     rsx! {
-        button { class: "tool-link", onclick: move |_| open_tool(app, tab),
+        button { class: "tool-link", title: if icon_only { label } else { "" }, onclick: move |_| open_tool(app, tab),
             span { class: "ic", Icon { i: icon, size: 16, stroke: 1.5 } }
-            "{label}"
+            if !icon_only { span { class: "lb", "{label}" } }
+            if let Some(b) = badge { span { class: "badge", "{b}" } }
         }
     }
 }

@@ -120,6 +120,10 @@ pub struct Settings {
     pub chat_width: u32,
     #[serde(default = "yes")]
     pub right_panel_open: bool,
+    /// The session rail (shown while the side panel is closed) is folded
+    /// down to its icons.
+    #[serde(default)]
+    pub session_rail_collapsed: bool,
     #[serde(default)]
     pub run_mode: RunMode,
     #[serde(default = "yes")]
@@ -235,6 +239,7 @@ impl Default for Settings {
             sidebar_width: default_sidebar_width(),
             chat_width: default_chat_width(),
             right_panel_open: true,
+            session_rail_collapsed: false,
             run_mode: RunMode::default(),
             auto_import: true,
             live_sync: true,

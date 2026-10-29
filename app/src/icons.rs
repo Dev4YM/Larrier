@@ -62,6 +62,8 @@ icons! {
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",
     ChevronLeft => "chevron-left",
+    ChevronsRight => "chevrons-right",
+    ChevronsLeft => "chevrons-left",
     Settings => "settings",
     GitBranch => "git-branch",
     Globe => "globe",

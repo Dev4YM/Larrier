@@ -56,6 +56,10 @@ pub struct Session {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+    /// One of the agent's own named agents the chat runs as (Claude Code's
+    /// `--agent`), rather than the agent's default self.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_as: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<WorkspaceRef>,
     #[serde(default)]
@@ -871,6 +875,7 @@ impl Session {
             permission: None,
             effort: None,
             account_id: None,
+            run_as: None,
             workspace,
             environment: Environment::Local,
             origin: Origin::larrier(agent),

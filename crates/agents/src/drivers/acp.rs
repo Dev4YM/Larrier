@@ -994,6 +994,7 @@ mod tests {
             launch: Launch::default(),
             chat: None,
             notice: None,
+            run_as: None,
         }
     }
 

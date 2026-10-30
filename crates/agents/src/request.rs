@@ -47,6 +47,9 @@ pub struct TurnRequest {
     /// Something the user should know about this turn, shown before the
     /// reply (a limitation of the agent Larrier had to work around).
     pub notice: Option<String>,
+    /// One of the agent's own named agents to run as (Claude Code's
+    /// `--agent`).
+    pub run_as: Option<String>,
 }
 
 impl TurnRequest {
@@ -564,6 +567,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         launch,
         chat,
         notice,
+        run_as: session.run_as.clone().filter(|_| *agent == AgentKind::ClaudeCode),
     })
 }
 

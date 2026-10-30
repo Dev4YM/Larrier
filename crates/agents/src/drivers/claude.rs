@@ -41,6 +41,11 @@ async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedRecei
     if let Some(m) = &req.model {
         cmd.args(["--model", m]);
     }
+    // The chat runs as one of the user's agents (its prompt, tools and
+    // MCP servers) rather than as Claude Code itself.
+    if let Some(a) = &req.run_as {
+        cmd.args(["--agent", a]);
+    }
     cmd.args(&req.modes.args);
     cmd.env_remove("CLAUDECODE");
     cmd.env("CLAUDE_CODE_FORWARD_SUBAGENT_TEXT", "1");
@@ -79,6 +84,9 @@ async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedRece
         }
         if let Some(m) = &req.model {
             cmd.args(["--model", m]);
+        }
+        if let Some(a) = &req.run_as {
+            cmd.args(["--agent", a]);
         }
         // --permission-mode from the chosen mode (Auto unless picked otherwise).
         cmd.args(&req.modes.args);

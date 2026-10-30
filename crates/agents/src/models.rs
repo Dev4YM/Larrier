@@ -429,21 +429,34 @@ async fn claude_listing(program: &Path) -> Result<(Vec<AgentModel>, Menu), Strin
     };
     let reply = tokio::time::timeout(Duration::from_secs(30), read).await.ok().flatten();
     // Then its MCP servers, as it connects to them (account connectors
-    // and plugins included).
-    let mut mcp = None;
+    // and plugins included). They load in the background after initialize
+    // (none are listed for the first moments), so ask again until the list
+    // has settled.
+    let mut mcp: Vec<McpServer> = Vec::new();
     if reply.is_some() {
-        let line = "{\"type\":\"control_request\",\"request_id\":\"larrier_mcp\",\"request\":{\"subtype\":\"mcp_status\"}}\n";
-        if stdin.write_all(line.as_bytes()).await.is_ok() {
+        let started = std::time::Instant::now();
+        for n in 0.. {
+            let rid = format!("larrier_mcp_{n}");
+            let line = format!("{{\"type\":\"control_request\",\"request_id\":\"{rid}\",\"request\":{{\"subtype\":\"mcp_status\"}}}}\n");
+            if stdin.write_all(line.as_bytes()).await.is_err() {
+                break;
+            }
             let read = async {
                 while let Ok(Some(l)) = lines.next_line().await {
                     let Ok(v) = serde_json::from_str::<Value>(&l) else { continue };
-                    if v["type"] == "control_response" && v["response"]["request_id"] == "larrier_mcp" {
+                    if v["type"] == "control_response" && v["response"]["request_id"] == rid.as_str() {
                         return Some(v);
                     }
                 }
                 None
             };
-            mcp = tokio::time::timeout(Duration::from_secs(30), read).await.ok().flatten();
+            let Some(r) = tokio::time::timeout(Duration::from_secs(20), read).await.ok().flatten() else { break };
+            mcp = parse_mcp_status(&r["response"]["response"]);
+            let settled = !mcp.is_empty() && mcp.iter().all(|s| s.status != "pending");
+            if settled || started.elapsed() > Duration::from_secs(8) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(800)).await;
         }
     }
     drop(stdin);
@@ -455,7 +468,7 @@ async fn claude_listing(program: &Path) -> Result<(Vec<AgentModel>, Menu), Strin
         return Err(v["response"]["error"].as_str().map(|e| format!("Couldn't list models: {e}")).unwrap_or_else(|| "Couldn't list models: none reported".into()));
     }
     let mut menu = parse_claude_menu(init);
-    menu.mcp = mcp.map(|m| parse_mcp_status(&m["response"]["response"])).unwrap_or_default();
+    menu.mcp = mcp;
     Ok((models, menu))
 }
 

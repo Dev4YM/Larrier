@@ -321,9 +321,8 @@ svg { flex-shrink: 0; display: block; }
 .pill-btn.circle { width: 26px; padding: 0; justify-content: center; border-radius: 50%; }
 .composer {
   border: 1px solid var(--border); border-radius: 10px; background: var(--card);
-  display: flex; flex-direction: column; transition: border-color .12s;
+  display: flex; flex-direction: column;
 }
-.composer:focus-within { border-color: var(--border-2); }
 .files-bar { display: flex; align-items: center; gap: 6px; padding: 0 6px 0 8px; height: 32px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--fg-2); cursor: pointer; }
 .files-bar:hover { color: var(--fg); }
 .files-bar .act { height: 22px; padding: 0 8px; border-radius: 5px; font-size: 12px; color: var(--fg-2); }
@@ -658,7 +657,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 /* composer */
 .composer-wrap { padding: 0 28px 10px; }
 .chat-pane.full .composer-wrap, .chat-col .composer-wrap { max-width: 860px; width: 100%; margin: 0 auto; }
-.composer { border-radius: 22px; background: var(--card-2); border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,.03); overflow: visible; }
+.composer { border-radius: 22px; background: var(--card-2); border: 1px solid var(--border); overflow: visible; }
 .composer.tall { border-radius: 16px; }
 .composer-row { display: flex; align-items: flex-end; gap: 6px; padding: 7px 8px; }
 .composer-row textarea, .composer textarea { flex: 1; padding: 6px 4px; min-height: 30px; font-size: 14px; line-height: 20px; }
@@ -737,8 +736,6 @@ select.input { cursor: pointer; padding-right: 4px; }
   transition: background-color .12s ease, color .12s ease, border-color .12s ease, opacity .12s ease, transform .12s ease, left .15s ease, box-shadow .12s ease;
 }
 .send-btn:active, .primary-btn:active, .pill-btn:active, .icon-btn:active, .plus-btn:active { transform: scale(.94); }
-.composer { transition: border-color .15s ease, box-shadow .15s ease, border-radius .15s ease; }
-.composer:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c) 12%, transparent), 0 1px 2px rgba(0,0,0,.03); }
 .app.no-motion *, .app.no-motion *::before, .app.no-motion *::after { animation: none !important; transition: none !important; }
 .app.no-motion .spinner, .app.no-motion .ring.busy { animation: spin .8s linear infinite !important; }
 
@@ -950,7 +947,7 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 .composer.tall .cgrid .c-text { padding: 4px 8px 2px; min-height: 44px; }
 .composer.home-c .cgrid .c-text { min-height: 76px; }
 .composer.home-c .composer-row .spacer { display: none; }
-.composer { transition: border-radius .18s ease, box-shadow .15s ease, border-color .15s ease; }
+.composer { transition: border-radius .18s ease; }
 
 /* Under the composer: this chat's usage + plan quota */
 .chat-usage { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 11.5px; color: var(--fg-3); cursor: default; white-space: nowrap; }

@@ -5,6 +5,13 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.5 — 2026-10-30
+
+### Fixed
+
+- Prompts keep their images and files when a chat re-syncs
+- Steps start at the reply's left edge, like its text and cards
+- Copy on code blocks copies
 ## 0.1.4 — 2026-10-30
 
 ### New

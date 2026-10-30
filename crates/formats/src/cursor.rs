@@ -287,6 +287,18 @@ fn import_ide(db: &Path, id: &str, info: &NativeSessionInfo) -> Result<Session> 
                 m.parts.push(Part::Plan { entries });
             }
         }
+        // A turn is over once Cursor stamps its length on a reply after the
+        // latest prompt (`turnDurationMs`), or it was stopped there; until
+        // then the chat is still working in Cursor.
+        let last_prompt = bubbles.iter().rposition(|b| b["type"].as_i64() == Some(1));
+        let open = last_prompt
+            .map(|i| {
+                let after = &bubbles[i + 1..];
+                let ended = after.iter().any(|b| b.get("turnDurationMs").map(|d| !d.is_null()).unwrap_or(false));
+                let stopped = !after.is_empty() && data["status"].as_str() == Some("aborted");
+                !ended && !stopped
+            })
+            .unwrap_or(false);
         let meta = Meta {
             native_id: id.to_string(),
             path: Some(db.to_path_buf()),
@@ -299,7 +311,9 @@ fn import_ide(db: &Path, id: &str, info: &NativeSessionInfo) -> Result<Session> 
                 && con.query_row("SELECT isArchived FROM composerHeaders WHERE composerId = ?1", [id], |r| r.get::<_, Option<i64>>(0)).ok().flatten().unwrap_or(0) != 0,
             ..Default::default()
         };
-        finish(conv, AGENT, meta)
+        let mut s = finish(conv, AGENT, meta)?;
+        s.external_turn = open;
+        Ok(s)
     })
 }
 

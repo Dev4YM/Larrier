@@ -63,31 +63,33 @@ const CSS: &str = r#"
 }
 
 .above-composer { position: relative; }
-.tk-chip { height: 28px; padding: 0 12px 0 10px; gap: 7px; font-size: 12.5px; color: var(--fg-2); transition: background .15s, color .15s; }
+.tk-chip { gap: 6px; color: var(--fg-2); transition: background .15s, color .15s; }
 .tk-chip:hover { background: var(--hover); color: var(--fg); }
 .tk-chip.on { background: var(--hover); color: var(--fg); }
 .tk-chip .n { font-variant-numeric: tabular-nums; }
-.tk-card { position: absolute; left: 0; right: 0; bottom: calc(100% + 4px); z-index: 40; background: var(--card-2); border-radius: 14px;
-  box-shadow: var(--shadow-pop); padding: 6px; transform-origin: 50% 100%; animation: tk-card-in .2s cubic-bezier(.2, .8, .2, 1); }
-@keyframes tk-card-in { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+.tk-card { position: absolute; left: 0; right: 0; bottom: calc(100% + 2px); z-index: 40; background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .14); padding: 2px 4px 4px; transform-origin: 50% 100%;
+  animation: tk-card-in .18s cubic-bezier(.2, .8, .2, 1); }
+@keyframes tk-card-in { from { opacity: 0; transform: translateY(4px); } }
 .app.no-motion .tk-card { animation: none; }
-.tk-card-head { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 4px 0 12px; font-size: 13px; color: var(--fg-3); }
+.tk-card-head { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 8px; font-size: 12px; color: var(--fg-3); }
 .tk-card-head .tk-ic { color: var(--fg-3); }
-.tk-card-head .ttl { color: var(--fg); font-weight: 600; }
+.tk-card-head .ttl { color: var(--fg); font-weight: 500; }
 .tk-card-head .grow { flex: 1; }
-.tk-stop-all { height: 26px; padding: 0 8px; border-radius: 6px; color: var(--fg-2); font-size: 12.5px; }
+.tk-card-head .icon-btn { width: 22px; height: 22px; }
+.tk-stop-all { height: 20px; padding: 0 5px; border-radius: 5px; color: var(--fg-2); font-size: 12px; }
 .tk-stop-all:hover { background: var(--hover); color: var(--red); }
-.tk-card-list { max-height: min(304px, 42vh); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-top: 6px; border-top: 1px solid var(--border); }
-.tk-item { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 9px;
-  font-size: 13px; line-height: 20px; color: var(--fg); cursor: pointer; min-width: 0; transition: background .12s; }
+.tk-card-list { max-height: min(220px, 36vh); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.tk-item { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px;
+  font-size: 12px; line-height: 16px; color: var(--fg); cursor: pointer; min-width: 0; transition: background .12s; }
 .tk-item:hover { background: var(--hover); }
-.tk-item > .lead { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--fg-3); }
+.tk-item > .lead { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex: none; color: var(--fg-3); }
 .tk-item .ttl { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; max-width: 48%; }
 .tk-item .act { flex: 1; min-width: 0; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tk-item .when { color: var(--fg-3); font-size: 12px; font-variant-numeric: tabular-nums; flex: none; min-width: 34px; text-align: right; }
+.tk-item .when { color: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; min-width: 28px; text-align: right; }
 .tk-item .go { display: inline-flex; flex: none; color: var(--fg-3); opacity: 0; transition: opacity .12s; }
 .tk-item:hover .go { opacity: 1; }
-.tk-card.terms .tk-item .ttl { flex: 1; max-width: none; font-family: var(--mono); font-size: 12.5px; font-weight: 400; }
+.tk-card.terms .tk-item .ttl { flex: 1; max-width: none; font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
 
 .tk-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 16px; display: flex; flex-direction: column; }
 .tk-panel-hint { max-width: 260px; color: var(--fg-3); }
@@ -330,7 +332,7 @@ pub fn BackgroundChips(session_id: String) -> Element {
         if let Some((is_agents, list)) = shown {
             div { class: if is_agents { "tk-card agents" } else { "tk-card terms" },
                 div { class: "tk-card-head",
-                    span { class: "tk-ic", Icon { i: if is_agents { I::Orbit } else { I::Prompt }, size: 14 } }
+                    span { class: "tk-ic", Icon { i: if is_agents { I::Orbit } else { I::Prompt }, size: 13 } }
                     span { class: "ttl", {if is_agents { plural(list.len(), "Agent") } else { plural(list.len(), "Terminal") }} }
                     if can_stop {
                         span { "·" }
@@ -344,7 +346,7 @@ pub fn BackgroundChips(session_id: String) -> Element {
                     }
                     span { class: "grow" }
                     button { class: "icon-btn", title: "Collapse", onclick: move |_| open.set(None),
-                        Icon { i: I::Minus, size: 14 }
+                        Icon { i: I::Minus, size: 13 }
                     }
                 }
                 div { class: "tk-card-list",
@@ -370,14 +372,14 @@ fn CardItem(session_id: String, row: TaskRow) -> Element {
             title: if agent { "Open the subagent" } else { "Show the terminal" },
             onclick: move |_| open_row(app, &session_id, &id, kind),
             span { class: "lead",
-                if agent { Dots { size: 12 } } else { Icon { i: I::Prompt, size: 14 } }
+                if agent { Dots { size: 11 } } else { Icon { i: I::Prompt, size: 13 } }
             }
             span { class: "ttl", title: "{row.title}", "{row.title}" }
             if agent {
                 span { class: "act", {row.activity.clone().unwrap_or_default()} }
             }
             Elapsed { class: "when", active: true, started: row.started, ms: row.ms }
-            span { class: "go", Icon { i: I::ChevronRight, size: 13 } }
+            span { class: "go", Icon { i: I::ChevronRight, size: 12 } }
         }
     }
 }

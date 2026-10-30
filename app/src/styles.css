@@ -1492,6 +1492,12 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .thinking-row { padding: 4px 0; }
 .turn .notice { margin-left: 0; margin-right: 0; }
 .turn .a-text { padding-left: 0; padding-right: 0; }
+/* And the reply sits where the prompt's text does, inside its card's
+   padding and border (as in Claude's app). */
+.turn { --reply-inset: 15px; }
+.turn > :not(.user-msg) { margin-left: var(--reply-inset); margin-right: var(--reply-inset); }
+.turn > .step { margin-left: calc(var(--reply-inset) - 6px); margin-right: calc(var(--reply-inset) - 6px); }
+.turn > .msg-actions { margin-left: calc(var(--reply-inset) - 6px); }
 
 /* Behind Settings the sidebar stays as it was, out of sight. */
 .sidebar.parked { position: absolute; left: 0; top: 0; bottom: 0; visibility: hidden; pointer-events: none; transition: none; }

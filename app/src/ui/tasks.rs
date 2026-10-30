@@ -67,7 +67,7 @@ const CSS: &str = r#"
 .tk-chip:hover { background: var(--hover); color: var(--fg); }
 .tk-chip.on { background: var(--hover); color: var(--fg); }
 .tk-chip .n { font-variant-numeric: tabular-nums; }
-.tk-card { position: absolute; left: 0; right: 0; bottom: calc(100% + 2px); z-index: 40; background: var(--card); border: 1px solid var(--border);
+.tk-card { order: -1; flex: 0 0 100%; min-width: 0; margin-bottom: 2px; background: var(--card); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .14); padding: 2px 4px 4px; transform-origin: 50% 100%;
   animation: tk-card-in .18s cubic-bezier(.2, .8, .2, 1); }
 @keyframes tk-card-in { from { opacity: 0; transform: translateY(4px); } }

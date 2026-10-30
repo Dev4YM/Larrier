@@ -33,6 +33,9 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         cmd.args(&req.modes.args);
         // Claude Code refuses to start nested inside another Claude Code session.
         cmd.env_remove("CLAUDECODE");
+        // Subagents' own text and thinking, not just their tool calls
+        // (`--forward-subagent-text`; older CLIs ignore the variable).
+        cmd.env("CLAUDE_CODE_FORWARD_SUBAGENT_TEXT", "1");
     }
     cmd.args(&req.launch.extra_args);
     let prompt = with_file_mentions(&req, req.full_prompt());
@@ -91,6 +94,10 @@ pub struct ClaudeStream {
     output_calls: HashMap<String, String>,
     /// Tool ids already seen inside subagents.
     side_tools: HashSet<String>,
+    /// The model each subagent (by parent tool id) was last seen on.
+    side_models: HashMap<String, String>,
+    /// Subagent message ids whose usage was recorded.
+    side_usage: HashSet<String>,
     /// Tool calls already marked denied by a `permission_denied` event.
     denied: HashSet<String>,
     /// An API retry streak was announced (until the next response starts).
@@ -489,6 +496,17 @@ impl ClaudeStream {
         match s(v, "type").unwrap_or("") {
             "assistant" => {
                 let msg = &v["message"];
+                // What the subagent runs on, and how full its context is.
+                if let Some(m) = s(msg, "model").filter(|m| self.side_models.get(parent).map(|x| x != m).unwrap_or(true)) {
+                    self.side_models.insert(parent.to_string(), m.to_string());
+                    sink.send(wrap(AgentEvent::Model { model: m.to_string() }));
+                }
+                if let (Some(mid), Some(us)) = (s(msg, "id"), msg.get("usage").filter(|u| u.is_object())) {
+                    let context = u(us, "input_tokens") + u(us, "cache_read_input_tokens") + u(us, "cache_creation_input_tokens");
+                    if context > 0 && self.side_usage.insert(mid.to_string()) {
+                        sink.send(wrap(AgentEvent::Usage { usage: Usage { context_tokens: Some(context), ..Default::default() } }));
+                    }
+                }
                 let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else { return };
                 for b in blocks {
                     match s(b, "type").unwrap_or("") {
@@ -937,19 +955,31 @@ mod tests {
         let lines = [
             r#"{"type":"assistant","parent_tool_use_id":null,"message":{"id":"m1","content":[{"type":"tool_use","id":"agent_1","name":"Agent","input":{"description":"Audit","prompt":"look","subagent_type":"Explore"}}]}}"#,
             r#"{"type":"user","parent_tool_use_id":"agent_1","message":{"role":"user","content":"look"}}"#,
-            r#"{"type":"assistant","parent_tool_use_id":"agent_1","message":{"id":"s1","content":[{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"t_read","name":"Read","input":{"file_path":"src/a.rs"}}]}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":"agent_1","message":{"id":"s1","model":"claude-haiku-4-5","usage":{"input_tokens":200,"cache_read_input_tokens":1000},"content":[{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"t_read","name":"Read","input":{"file_path":"src/a.rs"}}]}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":"agent_1","message":{"id":"s1","model":"claude-haiku-4-5","usage":{"input_tokens":200,"cache_read_input_tokens":1000},"content":[{"type":"text","text":"Reading"}]}}"#,
             r#"{"type":"user","parent_tool_use_id":"agent_1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t_read","content":"fn a()"}]}}"#,
             r#"{"type":"assistant","parent_tool_use_id":"agent_1","message":{"id":"s2","content":[{"type":"text","text":"Found it"}]}}"#,
             r#"{"type":"user","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"agent_1","content":[{"type":"text","text":"Found it"}]}]},"tool_use_result":{"agentId":"a1","agentType":"Explore","status":"completed","totalDurationMs":5300,"totalTokens":900}}"#,
         ];
         let mut p = ClaudeStream::default();
         let ev = collect(&mut p, &lines);
-        let side: Vec<&AgentEvent> = ev.iter().filter_map(|e| match e { AgentEvent::Subagent { parent_tool_id, inner } if parent_tool_id == "agent_1" => Some(&**inner), _ => None }).collect();
+        let side: Vec<&AgentEvent> = ev
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::Subagent { parent_tool_id, inner } if parent_tool_id == "agent_1" && !matches!(**inner, AgentEvent::Model { .. } | AgentEvent::Usage { .. }) => Some(&**inner),
+                _ => None,
+            })
+            .collect();
         assert!(matches!(side[0], AgentEvent::Reasoning { text, .. } if text == "plan"));
         assert!(matches!(side[1], AgentEvent::ToolStart { tool } if tool.id == "t_read"));
-        assert!(matches!(side[2], AgentEvent::ToolUpdate { id, output: Some(o), .. } if id == "t_read" && o == "fn a()"));
-        assert!(matches!(side[3], AgentEvent::Text { text } if text == "Found it"));
+        assert!(matches!(side[2], AgentEvent::Text { text } if text == "Reading"));
+        assert!(matches!(side[3], AgentEvent::ToolUpdate { id, output: Some(o), .. } if id == "t_read" && o == "fn a()"));
+        assert!(matches!(side[4], AgentEvent::Text { text } if text == "Found it"));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolMeta { id, duration_ms: Some(5300), agent_name: Some(n), .. } if id == "agent_1" && n == "Explore")));
+        // The subagent's model and context, once each.
+        let count = |want: fn(&AgentEvent) -> bool| ev.iter().filter(|e| matches!(e, AgentEvent::Subagent { inner, .. } if want(inner))).count();
+        assert_eq!(count(|e| matches!(e, AgentEvent::Model { model } if model == "claude-haiku-4-5")), 1);
+        assert_eq!(count(|e| matches!(e, AgentEvent::Usage { usage } if usage.context_tokens == Some(1200))), 1);
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), .. } if id == "agent_1")));
     }
 

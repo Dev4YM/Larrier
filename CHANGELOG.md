@@ -5,6 +5,18 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.13 — 2026-10-30
+
+### New
+
+- Copy, save and open images from the right-click menu
+
+### Fixed
+
+- A message sent to Claude Code is never dropped
+- Who a chat runs as shows in the session rail
+- The gliding cursor stays under dialogs and menus
+- Right-click menus open over dialogs and the image viewer
 ## 0.1.12 — 2026-10-30
 
 ### New

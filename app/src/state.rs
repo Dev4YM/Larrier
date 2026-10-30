@@ -1221,6 +1221,34 @@ impl App {
         self.update_session(id, |s| s.unread = unread);
     }
 
+    /// Clear every unread dot (sessions not open are saved off the UI thread).
+    pub fn mark_all_read(mut self) {
+        let ids: Vec<String> = self.sessions.peek().iter().filter(|s| s.unread).map(|s| s.id.clone()).collect();
+        if ids.is_empty() {
+            return self.toast("Nothing unread");
+        }
+        for s in self.sessions.write().iter_mut() {
+            s.unread = false;
+        }
+        let (open, closed): (Vec<String>, Vec<String>) = ids.iter().cloned().partition(|id| self.is_loaded(id));
+        for id in &open {
+            self.update_session(id, |s| s.unread = false);
+        }
+        spawn_forever(async move {
+            let _ = tokio::task::spawn_blocking(move || {
+                for id in closed {
+                    if let Ok(mut s) = store().load(&id) {
+                        s.unread = false;
+                        let _ = store().save(&s);
+                    }
+                }
+            })
+            .await;
+        });
+        let n = ids.len();
+        self.toast(format!("Marked {n} session{} as read", if n == 1 { "" } else { "s" }));
+    }
+
     pub fn toggle_archive(mut self, id: &str) {
         let mut archived = false;
         self.update_session(id, |s| {

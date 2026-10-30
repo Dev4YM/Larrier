@@ -231,6 +231,8 @@ pub fn Sidebar() -> Element {
                                 MenuItem { label: "Name".to_string(), checked: sort == SidebarSort::Name, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Name) }
                                 div { class: "menu-sep" }
                                 MenuItem { label: "Show archived".to_string(), checked: show_archived, onclick: move |_| app.update_config(|c| c.settings.show_archived = !c.settings.show_archived) }
+                                div { class: "menu-sep" }
+                                MenuItem { label: "Mark all as read".to_string(), icon: Some(I::Check), onclick: move |_| app.mark_all_read() }
                             }
                         }
                         button { class: "icon-btn", title: "Add a repository", onclick: move |_| app.pick_workspace(false),

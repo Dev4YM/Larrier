@@ -81,17 +81,28 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
     if !loaded {
         return rsx! { div { class: "empty-state", "Loading…" } };
     }
+    // With the session rail, the header runs the whole width and the rail
+    // sits under it, like Cursor's; beside a panel or a second chat, each
+    // column keeps its own header.
+    let rail = split.is_none() && !right_open;
+    let col_class = format!(
+        "chat-col primary{}{}{}",
+        if right_open && split.is_none() { " fixed" } else { "" },
+        if rail { " bare" } else { "" },
+        if sub.is_some() { " showing-sub" } else { "" },
+    );
     rsx! {
+        div { class: "agent-frame",
+        if rail {
+            ChatHeader { id: id.clone() }
+        }
         div { class: if split.is_some() { "agent-body split" } else { "agent-body" },
             div {
-                class: match (right_open && split.is_none(), sub.is_some()) {
-                    (true, true) => "chat-col primary fixed showing-sub",
-                    (true, false) => "chat-col primary fixed",
-                    (false, true) => "chat-col primary showing-sub",
-                    (false, false) => "chat-col primary",
-                },
+                class: "{col_class}",
                 "data-session": "{id}",
-                ChatHeader { id: id.clone() }
+                if !rail {
+                    ChatHeader { id: id.clone() }
+                }
                 // The chat stays laid out under a subagent's transcript, so
                 // going back finds it as it was.
                 ChatColumn { id: id.clone(), input_id: "composer-input" }
@@ -142,6 +153,7 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
                     },
                 }
             }
+        }
         }
     }
 }

@@ -340,7 +340,8 @@ pub fn Composer(
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();
     let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || !chips_now.is_empty() || quote.is_some();
-    let model_logo_svg = model.as_deref().and_then(model_logo).or_else(|| agent_logo(&agent));
+    // The harness's logo: "Cursor Agent · Opus 5.5" is Cursor, whoever made the model.
+    let model_logo_svg = agent_logo(&agent);
     let model_text = model_display(&agent, &model);
     let env_text = if worktree { "Worktree" } else { "This PC" };
 

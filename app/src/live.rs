@@ -40,7 +40,10 @@ fn watcher() -> &'static Mutex<Option<LiveWatcher>> {
     W.get_or_init(|| Mutex::new(None))
 }
 
-static TX: OnceLock<tokio::sync::mpsc::UnboundedSender<Vec<Session>>> = OnceLock::new();
+/// Fresh sessions, and the ids among them whose conversation grew.
+type Fresh = (Vec<Session>, Vec<String>);
+
+static TX: OnceLock<tokio::sync::mpsc::UnboundedSender<Fresh>> = OnceLock::new();
 
 /// Larrier started a turn on this session: live sync leaves it alone.
 pub fn mark_busy(id: &str) {
@@ -67,13 +70,13 @@ fn is_busy_at(map: &HashMap<String, Option<Instant>>, id: &str, now: Instant) ->
 
 /// Start live sync (once, from the root component).
 pub fn start(app: App) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<Session>>();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Fresh>();
     if TX.set(tx).is_err() {
         return;
     }
     spawn_forever(async move {
-        while let Some(sessions) = rx.recv().await {
-            apply(app, sessions);
+        while let Some((sessions, grew)) = rx.recv().await {
+            apply(app, sessions, &grew);
         }
     });
     // Expire the live markers with a cheap tick that only touches them.
@@ -109,7 +112,7 @@ pub fn restart(app: App) {
             // Load off the UI thread; the UI only swaps the result in.
             let sessions: Vec<Session> = r.changed.iter().filter_map(|id| store().load(id).ok()).collect();
             if !sessions.is_empty() {
-                let _ = tx.send(sessions);
+                let _ = tx.send((sessions, r.grew));
             }
         };
         match larrier_formats::live::spawn(st, agents, Arc::new(is_busy), Box::new(on_report)) {
@@ -135,23 +138,31 @@ pub fn status(enabled: bool) -> String {
     }
 }
 
-/// Swap fresh sessions into the UI.
-fn apply(mut app: App, sessions: Vec<Session>) {
+/// Swap fresh sessions into the UI. Only those whose agent added to the
+/// conversation (`grew`) get the unread dot, and count as being worked on
+/// when that was just now; the rest (an agent rewriting its store, a newer
+/// importer) update quietly.
+fn apply(mut app: App, sessions: Vec<Session>, grew: &[String]) {
     let now = Instant::now();
+    tracing::debug!("live sync: showing {} session(s)", sessions.len());
     for mut s in sessions {
         let id = s.id.clone();
         if app.is_running(&id) {
             continue;
         }
-        last_write().lock().unwrap().insert(id.clone(), now);
+        let grew = grew.contains(&id);
+        let fresh = grew && s.messages.last().map(|m| chrono::Utc::now() - m.created_at < chrono::Duration::from_std(LIVE_FOR * 4).unwrap_or_default()).unwrap_or(false);
         let visible = app.current_id().as_deref() == Some(id.as_str()) || app.split.peek().as_deref() == Some(id.as_str());
-        if !visible && !s.unread {
+        if grew && !visible && !s.unread {
             s.unread = true;
             crate::state::save_async(s.clone());
         }
         app.apply_external(s);
-        if !app.live.peek().contains_key(&id) {
-            app.live.write().insert(id, now);
+        if fresh {
+            last_write().lock().unwrap().insert(id.clone(), now);
+            if !app.live.peek().contains_key(&id) {
+                app.live.write().insert(id, now);
+            }
         }
     }
 }

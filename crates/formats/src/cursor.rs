@@ -141,15 +141,18 @@ pub fn discover() -> Vec<NativeSessionInfo> {
 
 fn discover_ide(db: &Path) -> Result<Vec<NativeSessionInfo>> {
     with_db(db, |con| {
-        let (size, _) = util::file_info(db);
         let mut out = Vec::new();
         if util::has_table(con, "composerHeaders") {
-            let mut st = con.prepare("SELECT composerId, lastUpdatedAt, createdAt, isArchived, value FROM composerHeaders WHERE isSubagent = 0 OR isSubagent IS NULL")?;
+            // One database holds every chat, so its size and time say
+            // nothing about one chat: each chat's own stamps do (its header
+            // changes with every step, its checkpoint with the conversation).
+            let checkpoint = if util::table_columns(con, "composerHeaders").iter().any(|c| c == "checkpointAt") { "checkpointAt" } else { "NULL" };
+            let mut st = con.prepare(&format!("SELECT composerId, lastUpdatedAt, createdAt, {checkpoint}, value FROM composerHeaders WHERE isSubagent = 0 OR isSubagent IS NULL"))?;
             let rows = st.query_map([], |r| {
                 Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<i64>>(3)?, r.get::<_, Option<String>>(4)?))
             })?;
             for row in rows.flatten() {
-                let (id, updated, created, _archived, value) = row;
+                let (id, updated, created, checkpoint, value) = row;
                 let v: Value = value.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
                 if v["isDraft"].as_bool().unwrap_or(false) || v["isBestOfNSubcomposer"].as_bool().unwrap_or(false) {
                     continue;
@@ -162,8 +165,8 @@ fn discover_ide(db: &Path) -> Result<Vec<NativeSessionInfo>> {
                     title: string(&v, "name").filter(|n| !n.trim().is_empty()),
                     cwd: workspace_path(&v),
                     updated_at: ts_from_ms(upd),
-                    size,
-                    mtime_ms: upd,
+                    size: value.as_deref().map(|t| t.len() as u64).unwrap_or(0),
+                    mtime_ms: upd.max(checkpoint.unwrap_or(0)),
                 });
             }
         } else if let Ok(raw) = con.query_row("SELECT value FROM ItemTable WHERE key = 'composer.composerData'", [], |r| r.get::<_, String>(0)) {
@@ -179,7 +182,7 @@ fn discover_ide(db: &Path) -> Result<Vec<NativeSessionInfo>> {
                     title: string(c, "name"),
                     cwd: None,
                     updated_at: ts_from_ms(upd),
-                    size,
+                    size: 0,
                     mtime_ms: upd,
                 });
             }
@@ -275,7 +278,9 @@ fn import_ide(db: &Path, id: &str, info: &NativeSessionInfo) -> Result<Session> 
             cwd: info.cwd.clone(),
             created: data["createdAt"].as_i64().and_then(ts_from_ms),
             updated: data["lastUpdatedAt"].as_i64().and_then(ts_from_ms).or(info.updated_at),
-            archived: false,
+            // Archived in Cursor's sidebar (kept on the chat's header).
+            archived: util::has_table(con, "composerHeaders")
+                && con.query_row("SELECT isArchived FROM composerHeaders WHERE composerId = ?1", [id], |r| r.get::<_, Option<i64>>(0)).ok().flatten().unwrap_or(0) != 0,
             ..Default::default()
         };
         finish(conv, AGENT, meta)

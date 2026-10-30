@@ -20,7 +20,9 @@ const CHUNK: usize = 48;
 
 enum Plan {
     New,
-    Update(String),
+    /// Re-import into this session; `true` when the source changed (not just
+    /// the importer).
+    Update(String, bool),
 }
 
 /// One sync pass at a time, across full and live syncs.
@@ -37,7 +39,7 @@ pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
 /// Bump when an importer changes what it produces: sessions imported by an
 /// older version are imported again on the next sync, keeping what the user
 /// changed in Larrier.
-pub const IMPORTER_VERSION: u32 = 5;
+pub const IMPORTER_VERSION: u32 = 6;
 
 pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(&str) -> bool) -> SyncReport {
     let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -51,10 +53,11 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
             // Known-empty source that hasn't changed.
             Some(r) if r.session_id.is_empty() && r.source_mtime == info.mtime_ms && r.source_len == info.size && r.importer >= IMPORTER_VERSION => report.skipped += 1,
             Some(r) if !r.session_id.is_empty() && store.exists(&r.session_id) => {
-                if r.source_mtime == info.mtime_ms && r.source_len == info.size && r.importer >= IMPORTER_VERSION {
+                let source_changed = r.source_mtime != info.mtime_ms || r.source_len != info.size;
+                if !source_changed && r.importer >= IMPORTER_VERSION {
                     report.skipped += 1;
                 } else {
-                    todo.push((info, Plan::Update(r.session_id), key));
+                    todo.push((info, Plan::Update(r.session_id, source_changed), key));
                 }
             }
             _ => todo.push((info, Plan::New, key)),
@@ -69,10 +72,22 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
         for ((info, plan, key), res) in chunk.iter().zip(results) {
             match res {
                 Ok(mut s) => {
+                    let mut unchanged = false;
                     match plan {
-                        Plan::Update(id) => {
+                        Plan::Update(id, source_changed) => {
                             if let Ok(old) = store.load(id) {
                                 merge_user_state(&mut s, &old);
+                                keep_ids(&mut s, &old);
+                                if same_conversation(&s, &old) {
+                                    // Touched, not continued (an agent rewriting
+                                    // its store, a chat opened in its app): it
+                                    // keeps its place and its time.
+                                    s.updated_at = old.updated_at;
+                                    s.origin.imported_at = old.origin.imported_at;
+                                    unchanged = s == old;
+                                } else if *source_changed && grew(&s, &old) {
+                                    report.grew.push(id.clone());
+                                }
                             }
                             s.id = id.clone();
                             report.updated += 1;
@@ -80,8 +95,10 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
                         Plan::New => report.imported += 1,
                     }
                     store.set_import_record(key, ImportRecord { session_id: s.id.clone(), source_mtime: info.mtime_ms, source_len: info.size, importer: IMPORTER_VERSION, ..Default::default() });
-                    report.changed.push(s.id.clone());
-                    batch.push(s);
+                    if !unchanged {
+                        report.changed.push(s.id.clone());
+                        batch.push(s);
+                    }
                 }
                 Err(e) if e.downcast_ref::<ImportSkip>().is_some() => {
                     // Remember empty sessions so they aren't re-parsed every run.
@@ -102,6 +119,28 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
     report
 }
 
+/// Messages already imported keep their ids (open transcripts, edits and
+/// feedback refer to them): the shared run of messages by role.
+fn keep_ids(new: &mut Session, old: &Session) {
+    for (n, o) in new.messages.iter_mut().zip(&old.messages) {
+        if n.role != o.role {
+            break;
+        }
+        n.id = o.id.clone();
+    }
+}
+
+/// The same messages (by role and content), whatever else changed.
+fn same_conversation(a: &Session, b: &Session) -> bool {
+    a.messages.len() == b.messages.len() && a.messages.iter().zip(&b.messages).all(|(x, y)| x.role == y.role && x.parts == y.parts)
+}
+
+/// The agent added to the conversation: more messages, or a longer last one.
+fn grew(new: &Session, old: &Session) -> bool {
+    let size = |s: &Session| s.messages.last().map(|m| m.parts.len() + m.text().len()).unwrap_or(0);
+    new.messages.len() > old.messages.len() || (new.messages.len() == old.messages.len() && size(new) > size(old))
+}
+
 /// Keep what the user changed in Larrier when a native session is re-imported.
 fn merge_user_state(new: &mut Session, old: &Session) {
     new.pinned = old.pinned;
@@ -110,7 +149,12 @@ fn merge_user_state(new: &mut Session, old: &Session) {
     for (k, v) in old.extra.iter().filter(|(k, _)| k.starts_with("feedback:")) {
         new.extra.insert(k.clone(), v.clone());
     }
-    new.archived = old.archived || new.archived;
+    // Archived in the agent follows the agent, unless the user (un)archived
+    // it in Larrier.
+    let old_import_archived = old.extra.get("import_archived").and_then(|a| a.as_bool()).unwrap_or(false);
+    if old.archived != old_import_archived {
+        new.archived = old.archived;
+    }
     new.tags = old.tags.clone();
     new.account_id = old.account_id.clone();
     new.parent = old.parent.clone();
@@ -184,5 +228,37 @@ mod tests {
         let mut new = imported("plan");
         merge_user_state(&mut new, &old);
         assert_eq!(new.mode.as_deref(), Some("acceptEdits"));
+    }
+
+    #[test]
+    fn archived_follows_the_agent_unless_changed_in_larrier() {
+        let archived_in_agent = |on: bool| {
+            let mut s = imported("auto");
+            s.archived = on;
+            if on {
+                s.extra.insert("import_archived".into(), Value::Bool(true));
+            }
+            s
+        };
+        // Archived in the agent since the last import: archived here too.
+        let mut new = archived_in_agent(true);
+        merge_user_state(&mut new, &archived_in_agent(false));
+        assert!(new.archived);
+        // Unarchived in the agent: back in the list.
+        let mut new = archived_in_agent(false);
+        merge_user_state(&mut new, &archived_in_agent(true));
+        assert!(!new.archived);
+        // Archived in Larrier: stays archived.
+        let mut old = archived_in_agent(false);
+        old.archived = true;
+        let mut new = archived_in_agent(false);
+        merge_user_state(&mut new, &old);
+        assert!(new.archived);
+        // Brought back in Larrier: stays in the list.
+        let mut old = archived_in_agent(true);
+        old.archived = false;
+        let mut new = archived_in_agent(true);
+        merge_user_state(&mut new, &old);
+        assert!(!new.archived);
     }
 }

@@ -740,6 +740,26 @@ pub struct Meta {
     pub resume_path: Option<String>,
 }
 
+/// A turn still running in the agent's own app: its calls without a result
+/// are still running (importing closes every call, as history is final).
+pub fn reopen_open_calls(s: &mut Session) {
+    fn reopen(msgs: &mut [Message]) {
+        for m in msgs {
+            for t in m.tool_calls_mut() {
+                if t.output.is_none() && !t.is_error && t.status == ToolStatus::Completed {
+                    t.status = ToolStatus::Running;
+                }
+                reopen(&mut t.subagent);
+            }
+        }
+    }
+    if !s.external_turn {
+        return;
+    }
+    let start = s.messages.iter().rposition(|m| m.role == Role::User).map(|i| i + 1).unwrap_or(0);
+    reopen(&mut s.messages[start..]);
+}
+
 /// Turn a built conversation into an LSF session.
 pub fn finish(conv: Conv, origin: AgentKind, meta: Meta) -> Result<Session> {
     finish_as(conv, origin.clone(), origin, meta)
@@ -786,6 +806,10 @@ pub fn finish_as(mut conv: Conv, origin: AgentKind, agent: AgentKind, meta: Meta
     s.status = SessionStatus::Done;
     s.unread = false;
     s.archived = meta.archived;
+    if meta.archived {
+        // Archived in the agent itself (see `sync::merge_user_state`).
+        s.extra.insert("import_archived".into(), Value::Bool(true));
+    }
     let path_str = meta.path.as_ref().map(|p| p.to_string_lossy().to_string());
     s.origin = Origin {
         agent: origin.clone(),

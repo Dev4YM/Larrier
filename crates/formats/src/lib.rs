@@ -106,6 +106,10 @@ pub struct SyncReport {
     /// Larrier ids of the sessions that were imported or updated.
     #[serde(default)]
     pub changed: Vec<String>,
+    /// Those among `changed` whose agent added to the conversation since the
+    /// last import (not just touched its files, or a newer importer).
+    #[serde(default)]
+    pub grew: Vec<String>,
 }
 
 /// Agents whose native sessions this crate can read.
@@ -144,7 +148,7 @@ pub fn discover_all() -> Vec<NativeSessionInfo> {
 
 /// Convert one native session into LSF.
 pub fn import_native(info: &NativeSessionInfo) -> Result<Session> {
-    match info.agent {
+    let mut s = match info.agent {
         AgentKind::ClaudeCode => claude::import(info),
         AgentKind::Codex => codex::import(info),
         AgentKind::Cursor => cursor::import(info),
@@ -154,7 +158,9 @@ pub fn import_native(info: &NativeSessionInfo) -> Result<Session> {
         AgentKind::Hermes => hermes::import(info),
         AgentKind::Droid => droid::import(info),
         _ => Err(anyhow!("importing {} sessions is not supported yet", info.agent.display_name())),
-    }
+    }?;
+    util::reopen_open_calls(&mut s);
+    Ok(s)
 }
 
 /// Import any supported file (LSF, native session files, chat exports).
@@ -278,6 +284,26 @@ pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
 mod tests {
     use super::*;
     use larrier_core::{Message, WorkspaceRef};
+
+    /// A turn still running in the agent's app shows its unanswered calls as
+    /// running, not done.
+    #[test]
+    fn calls_of_a_running_turn_stay_running() {
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"build it"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","timestamp":"2026-10-01T10:00:01Z","message":{"id":"m1","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/r/a.rs"}}]}}"#,
+            r#"{"type":"user","uuid":"r1","parentUuid":"a1","sessionId":"S","timestamp":"2026-10-01T10:00:02Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"fn a()"}]}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"r1","sessionId":"S","timestamp":"2026-10-01T10:00:03Z","message":{"id":"m2","role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"cargo build"}}]}}"#,
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("11111111-2222-3333-4444-555555555555.jsonl");
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        let s = import_native(&claude::file_info(&path).unwrap()).unwrap();
+        assert!(s.external_turn);
+        let status = |id: &str| s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == id).map(|t| t.status);
+        assert_eq!(status("t1"), Some(larrier_core::ToolStatus::Completed));
+        assert_eq!(status("t2"), Some(larrier_core::ToolStatus::Running));
+    }
 
     fn sample() -> Session {
         let mut s = Session::new(AgentKind::ClaudeCode, Some(WorkspaceRef::from_path(std::env::temp_dir().to_string_lossy().to_string())));

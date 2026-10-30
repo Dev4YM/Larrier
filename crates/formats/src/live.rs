@@ -314,7 +314,9 @@ pub fn spawn(
             if ready.is_empty() {
                 continue;
             }
+            let started = Instant::now();
             let report = sync_paths_in(&store, &specs, &ready, &*skip);
+            tracing::debug!("live sync: {} changed path(s) → {} updated, {} grew in {:?}", ready.len(), report.changed.len(), report.grew.len(), started.elapsed());
             if !report.changed.is_empty() || !report.errors.is_empty() {
                 on_report(report);
             }
@@ -445,5 +447,46 @@ mod tests {
         // Paths outside the watched folders are ignored.
         let r = sync_paths_in(&store, &specs, &[data.path().join("x.jsonl")], &never);
         assert_eq!(r, SyncReport::default());
+    }
+
+    /// An agent rewriting its store without adding to a conversation must
+    /// not make it look new: no unread dot, no "running", same place.
+    #[test]
+    fn touched_sessions_are_not_news() {
+        let native = tempfile::tempdir().unwrap();
+        let proj = native.path().join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let specs = vec![claude_spec(native.path())];
+        let never = |_: &str| false;
+        let sid = "21111111-2222-3333-4444-555555555555";
+
+        let file = write_claude_session(&proj, sid, &["first"]);
+        let r = sync_paths_in(&store, &specs, std::slice::from_ref(&file), &never);
+        let id = r.changed[0].clone();
+        assert!(r.grew.is_empty(), "a first import is not news");
+        let before = store.load(&id).unwrap();
+
+        // Same conversation written again (and stamped later).
+        std::thread::sleep(Duration::from_millis(20));
+        let text = std::fs::read_to_string(&file).unwrap();
+        std::fs::write(&file, format!("{text}{}
+", serde_json::json!({"type": "system", "subtype": "noop", "sessionId": sid}))).unwrap();
+        let r = sync_paths_in(&store, &specs, std::slice::from_ref(&file), &never);
+        assert_eq!(r.updated, 1, "{r:?}");
+        assert!(r.grew.is_empty(), "{r:?}");
+        let after = store.load(&id).unwrap();
+        assert_eq!(after.updated_at, before.updated_at);
+
+        // A new turn is news, and the earlier messages keep their ids.
+        std::thread::sleep(Duration::from_millis(20));
+        write_claude_session(&proj, sid, &["first", "second"]);
+        let r = sync_paths_in(&store, &specs, std::slice::from_ref(&file), &never);
+        assert_eq!(r.grew, vec![id.clone()]);
+        let grown = store.load(&id).unwrap();
+        assert_eq!(grown.messages.len(), 4);
+        assert_eq!(grown.messages[0].id, before.messages[0].id);
+        assert_eq!(grown.messages[1].id, before.messages[1].id);
     }
 }

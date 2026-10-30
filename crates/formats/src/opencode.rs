@@ -57,15 +57,23 @@ fn discover_db(db: &Path) -> Result<Vec<NativeSessionInfo>> {
     let con = open_sqlite(db)?;
     let cols = util::table_columns(&con, "session");
     let parent = if cols.iter().any(|c| c == "parent_id") { "WHERE parent_id IS NULL" } else { "" };
-    let mut st = con.prepare(&format!("SELECT id, title, directory, time_created, time_updated FROM session {parent}"))?;
-    let (size, _) = util::file_info(db);
+    // One database holds every session: each one's change stamp is its
+    // own part count (or message count), not the database's size.
+    let count = if util::table_columns(&con, "part").iter().any(|c| c == "session_id") {
+        "(SELECT count(*) FROM part p WHERE p.session_id = session.id)"
+    } else if util::table_columns(&con, "message").iter().any(|c| c == "session_id") {
+        "(SELECT count(*) FROM message m WHERE m.session_id = session.id)"
+    } else {
+        "0"
+    };
+    let mut st = con.prepare(&format!("SELECT id, title, directory, time_created, time_updated, {count} FROM session {parent}"))?;
     let rows = st.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, Option<i64>>(3)?, r.get::<_, Option<i64>>(4)?))
+        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, Option<i64>>(3)?, r.get::<_, Option<i64>>(4)?, r.get::<_, i64>(5)?))
     })?;
     let mut out = Vec::new();
-    for (id, title, dir, created, updated) in rows.flatten() {
+    for (id, title, dir, created, updated, parts) in rows.flatten() {
         let upd = updated.or(created).unwrap_or(0);
-        out.push(NativeSessionInfo { agent: AGENT, native_id: id, path: db.to_path_buf(), title, cwd: dir, updated_at: ts_from_ms(upd), size, mtime_ms: upd });
+        out.push(NativeSessionInfo { agent: AGENT, native_id: id, path: db.to_path_buf(), title, cwd: dir, updated_at: ts_from_ms(upd), size: parts as u64, mtime_ms: upd });
     }
     Ok(out)
 }

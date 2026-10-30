@@ -591,7 +591,11 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
             continue;
         }
         if let Some(a) = active {
-            if !a.contains(&i) {
+            // Results of calls made side by side hang off their own call,
+            // beside the branch: they still belong to it (and only fill in
+            // calls that are on it).
+            let results_only = v["message"]["content"].as_array().map(|b| !b.is_empty() && b.iter().all(|x| s(x, "type") == Some("tool_result"))).unwrap_or(false);
+            if !a.contains(&i) && !(ty == "user" && results_only) {
                 continue;
             }
         }
@@ -1071,6 +1075,24 @@ pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Claude Code hangs the result of a call made beside another off that
+    /// call, off the branch the conversation continues on.
+    #[test]
+    fn results_of_parallel_calls_are_kept() {
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","message":{"role":"user","content":"check both"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"a1","sessionId":"S","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"/r/a.rs"}}]}}"#,
+            r#"{"type":"user","uuid":"r1","parentUuid":"a1","sessionId":"S","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a.rs"}]}}"#,
+            r#"{"type":"user","uuid":"r2","parentUuid":"a2","sessionId":"S","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"fn a()"}]}}"#,
+            r#"{"type":"assistant","uuid":"a3","parentUuid":"r2","sessionId":"S","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Both fine."}]}}"#,
+        ];
+        let s = parse(&lines.join("\n"), None, "S").unwrap();
+        let out = |id: &str| s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == id).and_then(|t| t.output.clone());
+        assert_eq!(out("t1").as_deref(), Some("a.rs"));
+        assert_eq!(out("t2").as_deref(), Some("fn a()"));
+    }
 
     #[test]
     fn encodes_paths() {

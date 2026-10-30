@@ -127,6 +127,8 @@ fn norm(t: &str) -> String {
 pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
     let lines = json_lines(text);
     let mut meta = Meta { path: path.map(PathBuf::from), ..Default::default() };
+    // Threads archived in Codex move to `archived_sessions`.
+    meta.archived = path.map(|p| p.components().any(|c| c.as_os_str() == "archived_sessions")).unwrap_or(false);
     let (conv, spawns) = convert(&lines, path, &mut meta);
     let mut s = finish(conv, AGENT, meta)?;
     attach_children(&mut s.messages, &spawns, path, 0);

@@ -9,6 +9,8 @@ Each logo is normalized for inline use: prolog/comments/<title> removed,
 root width/height/style replaced by width="100%" height="100%", ids made
 unique per file, whitespace collapsed. Simple Icons get their brand color.
 Brands neither library ships are hand-drawn marks in CUSTOM below (CC0).
+`droid.svg` (Factory Droid) is not built here: it is Factory's own mark, taken
+from factory.ai/favicon.svg and drawn in the text color without its tile.
 """
 
 import json
@@ -21,8 +23,6 @@ LOGOS = {
     # agents / harnesses
     "claude-code": ("lobe", "claudecode-color.svg"),
     "claude-code-mono": ("lobe", "claudecode.svg"),
-    "codex": ("lobe", "codex-color.svg"),
-    "codex-mono": ("lobe", "codex.svg"),
     "cursor": ("lobe", "cursor.svg"),
     "opencode": ("lobe", "opencode.svg"),
     "gemini-cli": ("lobe", "geminicli-color.svg"),
@@ -99,7 +99,6 @@ LOGOS = {
 
 # Hand-drawn marks for brands neither library ships (CC0).
 CUSTOM = {
-    "droid": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#EE6018"/><path d="M8 6.5v-2M16 6.5v-2" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><rect x="5" y="7" width="14" height="11" rx="3.5" fill="#fff"/><circle cx="9.5" cy="12.5" r="1.6" fill="#EE6018"/><circle cx="14.5" cy="12.5" r="1.6" fill="#EE6018"/></svg>',
     "aider": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#14B014"/><path d="M8.5 8 5 12l3.5 4M15.5 8 19 12l-3.5 4M13.2 6.5l-2.4 11" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     "vscode": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#0078D4"/><path d="M15.5 5.5v13L8 12.6l-2.6 2.2L4 13.9V10l1.4-.9L8 11.4zM8 11.4 15.5 5.5M8 12.6l7.5 5.9" fill="none" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/><path d="m15.5 5.5 3 1.5v10l-3 1.5z" fill="#fff"/></svg>',
     "powershell": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#012456"/><path d="m6.5 8 4.5 4-4.5 4M12.5 16.5h5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',

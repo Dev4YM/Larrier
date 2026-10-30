@@ -1366,3 +1366,6 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ap-corner.solid { border-radius: 1px; }
 .ap-corner.balanced { border-radius: 3px; }
 .ap-corner.rounded { border-radius: 6px; }
+
+/* Edit cards are colored by the file's language; unchanged lines recede. */
+.pv-line.ctx { opacity: .72; }

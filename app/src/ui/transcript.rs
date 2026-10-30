@@ -1350,6 +1350,13 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
         lines.drain(..lines.len() - 4);
     }
     let path = diff.path.clone();
+    // Colored by the file's language (the lines are read as one piece so
+    // strings and comments that span lines stay right).
+    let code: String = lines.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n");
+    let colored: Vec<Option<String>> = match crate::highlight::highlight_lines(&code, Some(&name)) {
+        Some(h) if h.len() == lines.len() => h.into_iter().map(Some).collect(),
+        _ => vec![None; lines.len()],
+    };
     rsx! {
         div { class: if running { "tool-card live" } else { "tool-card" },
             div { class: "tool-card-head", title: "{diff.path}", "data-path": "{diff.path}",
@@ -1368,8 +1375,12 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
             }
             if !lines.is_empty() {
                 div { class: if open() { "preview open" } else { "preview" }, onclick: move |_| open.toggle(),
-                    for (i, (k, t)) in lines.into_iter().enumerate() {
-                        div { key: "{i}", class: "pv-line {k}", "{t}" }
+                    for (i, ((k, t), html)) in lines.into_iter().zip(colored).enumerate() {
+                        if let Some(h) = html {
+                            div { key: "{i}", class: "pv-line {k}", dangerous_inner_html: "{h}" }
+                        } else {
+                            div { key: "{i}", class: "pv-line {k}", "{t}" }
+                        }
                     }
                 }
             }

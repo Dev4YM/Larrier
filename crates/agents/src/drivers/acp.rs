@@ -991,6 +991,7 @@ mod tests {
             handoff: None,
             launch: Launch::default(),
             chat: None,
+            notice: None,
         }
     }
 

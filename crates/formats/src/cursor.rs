@@ -38,6 +38,144 @@ pub fn ide_db() -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
+// ---------------------------------------------------------------- workspaces
+
+/// The CLI keeps a chat under `chats/<md5 of the exact --workspace path>/<id>`
+/// and resumes it only from that path: from any other folder it quietly
+/// starts an empty chat with the same id.
+pub fn workspace_hash(workspace: &str) -> String {
+    use md5::{Digest, Md5};
+    hex::encode(Md5::digest(workspace.as_bytes()))
+}
+
+/// Where the CLI keeps chat `id` when run in `workspace`.
+pub fn chat_db(workspace: &str, id: &str) -> PathBuf {
+    config_dir().join("chats").join(workspace_hash(workspace)).join(id).join("store.db")
+}
+
+/// A CLI chat the CLI can resume, and the workspace path to resume it from.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CliChat {
+    pub db: PathBuf,
+    pub workspace: String,
+}
+
+/// Find CLI chat `id`: `known` is where it was last seen, `cwd` picks among
+/// copies in several workspaces; otherwise the copy with the most history.
+pub fn cli_chat(id: &str, known: Option<&Path>, cwd: Option<&str>) -> Option<CliChat> {
+    cli_chat_in(&config_dir().join("chats"), id, known, cwd)
+}
+
+fn cli_chat_in(chats_dir: &Path, id: &str, known: Option<&Path>, cwd: Option<&str>) -> Option<CliChat> {
+    let mut dbs: Vec<PathBuf> = known.filter(|k| k.file_name().is_some_and(|n| n == "store.db") && k.exists()).map(Path::to_path_buf).into_iter().collect();
+    for e in std::fs::read_dir(chats_dir).into_iter().flatten().flatten() {
+        let db = e.path().join(id).join("store.db");
+        if db.exists() && !dbs.contains(&db) {
+            dbs.push(db);
+        }
+    }
+    let chats: Vec<CliChat> = dbs
+        .into_iter()
+        .filter_map(|db| {
+            let workspace = chat_workspace(&db)?;
+            let hash = db.parent()?.parent()?.file_name()?.to_string_lossy().to_string();
+            (workspace_hash(&workspace) == hash).then_some(CliChat { db, workspace })
+        })
+        .collect();
+    let same = |a: &str, b: &str| if cfg!(windows) { a.trim_end_matches(['\\', '/']).eq_ignore_ascii_case(b.trim_end_matches(['\\', '/'])) } else { a.trim_end_matches('/') == b.trim_end_matches('/') };
+    if let Some(k) = known.and_then(|k| chats.iter().find(|c| c.db == k)) {
+        return Some(k.clone());
+    }
+    if let Some(c) = cwd.and_then(|cwd| chats.iter().find(|c| same(&c.workspace, cwd))) {
+        return Some(c.clone());
+    }
+    let history = |db: &Path| open_sqlite(db).ok().and_then(|con| con.query_row("SELECT count(*) FROM blobs", [], |r| r.get::<_, i64>(0)).ok()).unwrap_or(0);
+    chats.into_iter().max_by_key(|c| history(&c.db))
+}
+
+/// The workspace a CLI chat was started in, from the context Cursor puts
+/// before its first prompt (`Workspace Path: …`).
+pub fn chat_workspace(db: &Path) -> Option<String> {
+    static CACHE: std::sync::Mutex<Option<HashMap<PathBuf, String>>> = std::sync::Mutex::new(None);
+    if let Some(w) = CACHE.lock().ok()?.get_or_insert_with(HashMap::new).get(db) {
+        return Some(w.clone());
+    }
+    let con = open_sqlite(db).ok()?;
+    let mut st = con.prepare("SELECT data FROM blobs ORDER BY rowid LIMIT 256").ok()?;
+    let rows = st.query_map([], |r| r.get::<_, Vec<u8>>(0)).ok()?;
+    let found = rows.flatten().find_map(|data| {
+        let v: Value = serde_json::from_slice(&data).ok()?;
+        (s(&v, "role") == Some("user")).then_some(())?;
+        content_text(&v["content"]).lines().find_map(|l| l.trim().strip_prefix("Workspace Path:").map(|p| p.trim().to_string())).filter(|p| !p.is_empty())
+    })?;
+    CACHE.lock().ok()?.get_or_insert_with(HashMap::new).insert(db.to_path_buf(), found.clone());
+    Some(found)
+}
+
+/// The folder behind a `~/.cursor/projects/<slug>` directory: recorded when
+/// the CLI trusted it, else found on disk from the slug (the path with every
+/// run of other characters turned into `-`).
+pub fn project_path(dir: &Path) -> Option<String> {
+    static CACHE: std::sync::Mutex<Option<HashMap<PathBuf, Option<String>>>> = std::sync::Mutex::new(None);
+    if let Some(p) = CACHE.lock().ok()?.get_or_insert_with(HashMap::new).get(dir) {
+        return p.clone();
+    }
+    let trusted = std::fs::read(dir.join(".workspace-trusted")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| string(&v, "workspacePath"));
+    let found = trusted.or_else(|| resolve_slug(&dir.file_name()?.to_string_lossy()));
+    CACHE.lock().ok()?.get_or_insert_with(HashMap::new).insert(dir.to_path_buf(), found.clone());
+    found
+}
+
+/// The project folder of a transcript (`projects/<slug>/agent-transcripts/…`).
+fn transcript_project(path: &Path) -> Option<PathBuf> {
+    path.ancestors().find(|a| a.file_name().is_some_and(|n| n == "agent-transcripts"))?.parent().map(Path::to_path_buf)
+}
+
+pub fn slugify(path: &str) -> String {
+    let mut out = String::new();
+    for c in path.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+fn resolve_slug(slug: &str) -> Option<String> {
+    let root = if cfg!(windows) {
+        let drive = slug.split('-').next().filter(|d| d.len() == 1)?;
+        PathBuf::from(format!("{}:\\", drive.to_ascii_uppercase()))
+    } else {
+        PathBuf::from("/")
+    };
+    descend(&root, slug, 0).map(|p| p.to_string_lossy().to_string())
+}
+
+/// Walk down from `dir` through folders whose slugs continue `slug`.
+fn descend(dir: &Path, slug: &str, depth: usize) -> Option<PathBuf> {
+    let here = slugify(&dir.to_string_lossy());
+    let lower = slug.to_ascii_lowercase();
+    if here.eq_ignore_ascii_case(slug) {
+        return Some(dir.to_path_buf());
+    }
+    if depth > 32 || !lower.starts_with(&format!("{}-", here.to_ascii_lowercase())) {
+        return None;
+    }
+    let mut subdirs: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect();
+    subdirs.sort();
+    subdirs.into_iter().find_map(|d| {
+        let s = slugify(&d.to_string_lossy()).to_ascii_lowercase();
+        let fits = s.len() > here.len() && lower.starts_with(&s) && matches!(lower.as_bytes().get(s.len()), None | Some(b'-'));
+        if fits {
+            descend(&d, slug, depth + 1)
+        } else {
+            None
+        }
+    })
+}
+
 thread_local! {
     static CONNS: RefCell<HashMap<PathBuf, rusqlite::Connection>> = RefCell::new(HashMap::new());
 }
@@ -108,12 +246,15 @@ pub fn discover() -> Vec<NativeSessionInfo> {
                 if let Ok(m) = cli_meta(e.path()) {
                     info.title = chat_name(&m);
                 }
+                info.cwd = chat_workspace(e.path());
                 keep_newest(&mut cli, id, info);
             }
         }
     }
-    // Agent transcripts (Agents Window / CLI runs).
+    // Agent transcripts (Agents Window / CLI runs). Their project folder
+    // also places app chats that don't name their workspace.
     let mut transcripts: HashMap<String, NativeSessionInfo> = HashMap::new();
+    let mut ide_cwd: HashMap<String, String> = HashMap::new();
     if let Ok(projects) = std::fs::read_dir(cfg.join("projects")) {
         for p in projects.flatten() {
             let tdir = p.path().join("agent-transcripts");
@@ -128,10 +269,17 @@ pub fn discover() -> Vec<NativeSessionInfo> {
                 } else {
                     continue;
                 };
-                if ide_ids.contains(&id) || cli.contains_key(&id) || !file.exists() {
+                if ide_ids.contains(&id) {
+                    if let Some(dir) = project_path(&p.path()) {
+                        ide_cwd.insert(id, dir);
+                    }
+                    continue;
+                }
+                if cli.contains_key(&id) || !file.exists() {
                     continue;
                 }
                 let mut info = util::info(AGENT, id.clone(), &file);
+                info.cwd = project_path(&p.path());
                 if info.size < 16 {
                     continue;
                 }
@@ -149,6 +297,9 @@ pub fn discover() -> Vec<NativeSessionInfo> {
                 keep_newest(&mut transcripts, id, info);
             }
         }
+    }
+    for info in out.iter_mut().filter(|i| i.cwd.is_none()) {
+        info.cwd = ide_cwd.remove(&info.native_id);
     }
     out.extend(cli.into_values());
     out.extend(transcripts.into_values());
@@ -523,7 +674,8 @@ fn prompt_parts(raw: &str) -> Vec<Part> {
 /// `{type: "turn_ended", status, error?}`. Tool results are not recorded.
 pub fn parse_transcript(text: &str, id: &str, path: Option<&Path>, mtime: Option<chrono::DateTime<chrono::Utc>>) -> Result<Session> {
     let (conv, open) = transcript_conv(text, mtime);
-    let meta = Meta { native_id: id.to_string(), path: path.map(PathBuf::from), updated: mtime, ..Default::default() };
+    let cwd = path.and_then(transcript_project).and_then(|d| project_path(&d));
+    let meta = Meta { native_id: id.to_string(), path: path.map(PathBuf::from), cwd, updated: mtime, ..Default::default() };
     let mut s = finish(conv, AGENT, meta)?;
     if let Some(p) = path {
         attach_subagents(&mut s.messages, p);
@@ -729,6 +881,7 @@ fn import_cli(db: &Path, id: &str) -> Result<Session> {
         native_id: id.to_string(),
         path: Some(db.to_path_buf()),
         title: chat_name(&meta_v),
+        cwd: chat_workspace(db),
         created,
         ..Default::default()
     };
@@ -845,7 +998,7 @@ mod tests {
         con.execute("INSERT INTO meta VALUES ('0', ?1)", [meta]).unwrap();
         let blobs = [
             r#"{"role":"system","content":"You are an AI coding assistant"}"#,
-            r#"{"role":"user","content":"<user_info>\nOS Version: win32\n</user_info>"}"#,
+            r#"{"role":"user","content":"<user_info>\nOS Version: win32\n\nWorkspace Path: D:\\work\\notes app\n</user_info>"}"#,
             r#"{"role":"user","content":[{"type":"text","text":"<timestamp>Thursday, Oct 29, 2026, 4:58 PM (UTC+3)</timestamp>\n<user_query>\nedit notes\n</user_query>"}]}"#,
             r#"{"role":"assistant","content":[{"type":"reasoning","text":"","signature":"sig"},{"type":"text","text":"On it."},{"type":"tool-call","toolCallId":"c1","toolName":"StrReplace","args":{"path":"notes.txt","old_string":"beta","new_string":"BETA"}},{"type":"tool-call","toolCallId":"c2","toolName":"Shell","args":{"command":"cmd /c exit 3","description":"Exit"}}]}"#,
             r#"{"role":"tool","content":[{"type":"tool-result","toolCallId":"c1","toolName":"StrReplace","result":"The file notes.txt has been updated."}],"providerOptions":{"cursor":{"highLevelToolCallResult":{"output":{"success":{"path":"notes.txt","linesAdded":1,"linesRemoved":1,"diffString":"--- a/notes.txt\n+++ b/notes.txt\n@@ -1,1 +1,1 @@\n-beta\n+BETA\n"}},"isError":false}}}}"#,
@@ -859,6 +1012,7 @@ mod tests {
         drop(con);
         let s = import_cli(&db, "A").unwrap();
         assert_eq!(s.title, "Edit notes", "placeholder name ignored; injected context is not a prompt");
+        assert_eq!(s.cwd().as_deref(), Some(r"D:\work\notes app"), "the workspace from Cursor's context");
         assert_eq!(s.messages.iter().filter(|m| m.role == Role::User).count(), 1);
         assert_eq!(s.messages[0].created_at.to_rfc3339(), "2026-10-29T13:58:00+00:00");
         let t = tools(&s);
@@ -868,4 +1022,83 @@ mod tests {
         assert_eq!(text.concat().matches("done").count(), 1, "retried message kept once");
         assert!(!s.messages.iter().flat_map(|m| &m.parts).any(|p| matches!(p, Part::Reasoning { .. })), "signed-only reasoning has no text");
     }
+
+    fn chat_store(dir: &Path, workspace: &str, id: &str, turns: usize) -> PathBuf {
+        let db = dir.join(workspace_hash(workspace)).join(id).join("store.db");
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let con = rusqlite::Connection::open(&db).unwrap();
+        con.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB);").unwrap();
+        let info = serde_json::json!({"role": "user", "content": format!("<user_info>\nShell: powershell\n\nWorkspace Path: {workspace}\n</user_info>")});
+        con.execute("INSERT INTO blobs VALUES ('0', ?1)", [info.to_string().into_bytes()]).unwrap();
+        for i in 0..turns {
+            let b = serde_json::json!({"role": "user", "content": [{"type": "text", "text": format!("<user_query>\nturn {i}\n</user_query>")}]});
+            con.execute("INSERT INTO blobs VALUES (?1, ?2)", rusqlite::params![format!("u{i}"), b.to_string().into_bytes()]).unwrap();
+        }
+        db
+    }
+
+    /// The CLI keys chats by the md5 of the exact workspace path; resuming
+    /// from elsewhere starts an empty chat with the same id (seen with
+    /// cursor-agent 2026.10.22). The copy with the conversation is found.
+    #[test]
+    fn finds_the_resumable_cli_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path();
+        // A workspace path and its folder in ~/.cursor/chats (the md5 of the path).
+        assert_eq!(workspace_hash(r"C:\Users\dev\projects\shop-app"), "2bc4109bc3724c5931c89f94ae5f41d2");
+        let home = chat_store(chats, r"D:\proj\app", "chat-1", 6);
+        let blank = chat_store(chats, r"C:\Users\me", "chat-1", 1);
+        let c = cli_chat_in(chats, "chat-1", None, None).unwrap();
+        assert_eq!((c.db.as_path(), c.workspace.as_str()), (home.as_path(), r"D:\proj\app"), "most history wins");
+        if cfg!(windows) {
+            assert_eq!(cli_chat_in(chats, "chat-1", None, Some(r"c:\users\me\")).unwrap().db, blank, "the session's own folder wins");
+        }
+        assert_eq!(cli_chat_in(chats, "chat-1", Some(&home), Some(r"C:\Users\me")).unwrap().db, home, "where Larrier last saw it wins");
+        assert!(cli_chat_in(chats, "chat-2", None, None).is_none(), "not a CLI chat (made in the Cursor app)");
+        // A store whose folder doesn't match its workspace can't be resumed.
+        let moved = chat_store(chats, r"D:\a", "chat-3", 2);
+        let wrong = chats.join("0123456789abcdef0123456789abcdef").join("chat-3");
+        std::fs::create_dir_all(&wrong).unwrap();
+        std::fs::rename(&moved, wrong.join("store.db")).unwrap();
+        assert!(cli_chat_in(chats, "chat-3", None, None).is_none());
+    }
+
+    #[test]
+    fn project_slugs_resolve_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("apps").join("flutter_apps").join("shop-app")).unwrap();
+        std::fs::create_dir_all(root.join("apps").join("flutter-apps")).unwrap();
+        std::fs::create_dir_all(root.join("D--src").join(".git")).unwrap();
+        let want = root.join("apps").join("flutter_apps").join("shop-app");
+        let slug = slugify(&want.to_string_lossy());
+        assert!(!slug.contains("--") && !slug.contains('_'), "{slug}");
+        assert_eq!(descend(root, &slug, 0), Some(want), "past a folder with the same slug");
+        assert_eq!(descend(root, &slugify(&root.join("D--src").to_string_lossy()), 0), Some(root.join("D--src")));
+        assert_eq!(descend(root, &format!("{}-nope", slugify(&root.to_string_lossy())), 0), None);
+        assert_eq!(slugify(r"d:\src\Projects\apps\flutter_apps\shop-app"), "d-src-Projects-apps-flutter-apps-shop-app");
+        assert_eq!(slugify(r"C:\Users\dev\AppData\Local\Temp\claude\D--src-Projects"), "C-Users-dev-AppData-Local-Temp-claude-D-src-Projects");
+    }
+
+    /// Every chat on this machine gets its folder (`cargo test -p
+    /// larrier-formats real_cursor_workspaces -- --ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn real_cursor_workspaces() {
+        let list = discover();
+        let kind = |i: &NativeSessionInfo| match i.path.file_name().map(|n| n.to_string_lossy().to_string()).as_deref() {
+            Some("store.db") => "cli",
+            Some(n) if n.ends_with(".vscdb") => "app",
+            _ => "transcript",
+        };
+        let mut counts: std::collections::BTreeMap<(&str, bool), usize> = Default::default();
+        for i in &list {
+            *counts.entry((kind(i), i.cwd.is_some())).or_default() += 1;
+        }
+        println!("{counts:?}");
+        for i in list.iter().filter(|i| i.cwd.is_none()).take(12) {
+            println!("no folder: {} {}", kind(i), i.path.display());
+        }
+    }
 }
+

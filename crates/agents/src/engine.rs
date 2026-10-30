@@ -425,10 +425,13 @@ pub fn unsynced_from(session: &Session, agent: &AgentKind) -> usize {
 
 /// True when the session has prior conversation the agent must be told about.
 pub fn needs_handoff(session: &Session, agent: &AgentKind) -> bool {
-    let synced = unsynced_from(session, agent);
-    // The last message is the new user prompt; anything before it that the
-    // agent has not seen requires a handoff.
-    session.messages.len().saturating_sub(1) > synced && session.messages.iter().take(session.messages.len().saturating_sub(1)).skip(synced).any(|m| m.role != Role::System)
+    has_unsynced(session, unsynced_from(session, agent))
+}
+
+/// True when messages from `from` up to the new prompt (the last message)
+/// hold conversation the agent has not seen.
+pub fn has_unsynced(session: &Session, from: usize) -> bool {
+    session.messages.len().saturating_sub(1) > from && session.messages.iter().take(session.messages.len().saturating_sub(1)).skip(from).any(|m| m.role != Role::System)
 }
 
 #[cfg(test)]

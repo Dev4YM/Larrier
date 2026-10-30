@@ -44,6 +44,9 @@ pub struct TurnRequest {
     pub handoff: Option<String>,
     pub launch: Launch,
     pub chat: Option<ChatTarget>,
+    /// Something the user should know about this turn, shown before the
+    /// reply (a limitation of the agent Larrier had to work around).
+    pub notice: Option<String>,
 }
 
 impl TurnRequest {
@@ -482,17 +485,30 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         }
     }
     let attachments: Vec<Part> = last.parts.iter().filter(|p| matches!(p, Part::Image { .. } | Part::File { .. })).cloned().collect();
-    let cwd = session
+    let mut cwd = session
         .cwd()
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
     let link = session.native_link(agent);
-    let resume_id = link.map(|l| l.id.clone());
+    let mut resume_id = link.map(|l| l.id.clone());
     let resume_path = link.and_then(|l| l.path.clone()).filter(|p| Path::new(p).exists());
     let resume_at = link.and_then(|l| l.resume_at.clone()).filter(|_| resume_id.is_some());
-    let handoff = if protocol != Protocol::HttpChat && engine::needs_handoff(session, agent) {
-        let from = engine::unsynced_from(session, agent);
+    let mut notice = None;
+    let mut from = engine::unsynced_from(session, agent);
+    if *agent == AgentKind::Cursor && protocol == Protocol::CursorStream {
+        if let Some(l) = link {
+            match cursor_resume(&l.id, l.path.as_deref(), session.cwd().as_deref()) {
+                Ok(workspace) => cwd = workspace,
+                Err(why) => {
+                    resume_id = None;
+                    from = 0;
+                    notice = Some(why);
+                }
+            }
+        }
+    }
+    let handoff = if protocol != Protocol::HttpChat && engine::has_unsynced(session, from) {
         let upto = session.messages.len().saturating_sub(1);
         let mut s = session.clone();
         s.messages.truncate(upto);
@@ -547,7 +563,23 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         handoff,
         launch,
         chat,
+        notice,
     })
+}
+
+/// The folder to resume a Cursor chat from. The CLI finds a chat only from
+/// the exact workspace it was started in, and only chats it ran itself;
+/// otherwise it would quietly start an empty chat with the same id, so the
+/// reason is returned and the conversation is handed over instead.
+fn cursor_resume(id: &str, known: Option<&str>, cwd: Option<&str>) -> std::result::Result<PathBuf, String> {
+    match larrier_formats::cursor::cli_chat(id, known.map(Path::new), cwd) {
+        Some(chat) if Path::new(&chat.workspace).is_dir() => Ok(PathBuf::from(chat.workspace)),
+        Some(chat) => Err(format!(
+            "This Cursor chat was started in {}, which no longer exists, and Cursor can only resume a chat from the folder it started in. Larrier passed the conversation so far to a new Cursor chat.",
+            chat.workspace
+        )),
+        None => Err("Cursor's CLI can only continue chats it ran itself, and this one was made in the Cursor app. Larrier passed the conversation so far to a new Cursor chat.".to_string()),
+    }
 }
 
 /// How a model choice reaches an agent's CLI: effort and endpoint

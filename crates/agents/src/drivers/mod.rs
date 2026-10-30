@@ -22,6 +22,9 @@ use crate::events::{EventSink, TurnCommand};
 use crate::request::TurnRequest;
 
 pub async fn run(req: TurnRequest, sink: EventSink, control: UnboundedReceiver<TurnCommand>) {
+    if let Some(n) = &req.notice {
+        sink.notice(n.clone());
+    }
     match req.protocol {
         Protocol::ClaudeStream => claude::run(req, sink, control).await,
         Protocol::AmpStream => claude::run_amp(req, sink, control).await,

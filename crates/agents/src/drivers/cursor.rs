@@ -30,12 +30,14 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     cmd.args(&req.modes.args);
     cmd.args(&req.launch.extra_args);
     cmd.arg(with_file_mentions(&req, req.prompt_for_arg(24_000)));
-    let mut parser = CursorStream::default();
+    let mut parser = CursorStream { workspace: Some(req.cwd.to_string_lossy().to_string()), ..Default::default() };
     run_stream("Cursor Agent", cmd, None, &sink, &mut control, &mut parser).await;
 }
 
 #[derive(Default)]
 pub struct CursorStream {
+    /// The `--workspace` path: the CLI stores the chat under it.
+    workspace: Option<String>,
     done: bool,
     failed: bool,
     /// Text deltas arrived since the last flush.
@@ -85,7 +87,8 @@ impl LineParser for CursorStream {
             "system" => {
                 if s(&v, "subtype") == Some("init") {
                     if let Some(id) = s(&v, "session_id") {
-                        sink.send(AgentEvent::NativeSession { id: id.to_string(), path: None });
+                        let path = self.workspace.as_deref().map(|w| larrier_formats::cursor::chat_db(w, id).to_string_lossy().to_string());
+                        sink.send(AgentEvent::NativeSession { id: id.to_string(), path });
                     }
                     if let Some(m) = s(&v, "model") {
                         // Cursor names its model ("Composer 2"), it doesn't

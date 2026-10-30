@@ -7,6 +7,7 @@ pub mod drivers;
 pub mod engine;
 pub mod events;
 pub mod git;
+pub mod models;
 pub mod harness;
 pub mod request;
 

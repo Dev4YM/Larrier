@@ -530,6 +530,35 @@ pub fn plan_from_text(text: &str) -> Option<Vec<PlanEntry>> {
     (!entries.is_empty()).then_some(entries)
 }
 
+/// Split off the attachment list Larrier appends to a prompt for agents
+/// that take files as @paths ("\n\nAttached files:\n- @path\n…"): the
+/// prompt's own text, and the attachments as parts (images by extension).
+/// Text without such a list at its end comes back unchanged.
+pub fn split_attachment_list(text: &str) -> (String, Vec<Part>) {
+    let Some(i) = text.rfind("Attached files:\n") else { return (text.to_string(), Vec::new()) };
+    let (head, list) = (&text[..i], &text[i + "Attached files:\n".len()..]);
+    let lines: Vec<&str> = list.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if lines.is_empty() || !lines.iter().all(|l| l.starts_with("- @")) || !(head.is_empty() || head.ends_with('\n')) {
+        return (text.to_string(), Vec::new());
+    }
+    let parts = lines
+        .iter()
+        .map(|l| {
+            let path = l.trim_start_matches("- @").trim().to_string();
+            let lower = path.to_ascii_lowercase();
+            let mime = [("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("gif", "image/gif"), ("webp", "image/webp"), ("bmp", "image/bmp")]
+                .iter()
+                .find(|(e, _)| lower.ends_with(&format!(".{e}")))
+                .map(|(_, m)| m.to_string());
+            match mime {
+                Some(m) => Part::Image { mime: Some(m), source: MediaSource::Path { path } },
+                None => Part::File { path, mime: None, text: None },
+            }
+        })
+        .collect();
+    (head.trim_end().to_string(), parts)
+}
+
 // ---------------------------------------------------------------- builder
 
 /// Incrementally builds LSF messages. Consecutive assistant content between
@@ -563,7 +592,30 @@ impl Conv {
     }
 
     pub fn user_parts(&mut self, parts: Vec<Part>, ts: Option<DateTime<Utc>>) {
-        let parts: Vec<Part> = parts.into_iter().filter(|p| !matches!(p, Part::Text { text } if text.trim().is_empty())).collect();
+        // The attachment list Larrier appends for agents that take files as
+        // @paths comes back from their transcripts as text: it's the
+        // prompt's attachments again.
+        let mut out: Vec<Part> = Vec::new();
+        for p in parts {
+            match p {
+                Part::Text { text } => {
+                    let (rest, attached) = split_attachment_list(&text);
+                    out.push(Part::Text { text: rest });
+                    for a in attached {
+                        let dup = out.iter().any(|x| match (x, &a) {
+                            (Part::Image { source: MediaSource::Path { path: p1 }, .. }, Part::Image { source: MediaSource::Path { path: p2 }, .. }) => p1 == p2,
+                            (Part::File { path: p1, .. }, Part::File { path: p2, .. }) => p1 == p2,
+                            _ => false,
+                        });
+                        if !dup {
+                            out.push(a);
+                        }
+                    }
+                }
+                other => out.push(other),
+            }
+        }
+        let parts: Vec<Part> = out.into_iter().filter(|p| !matches!(p, Part::Text { text } if text.trim().is_empty())).collect();
         if parts.is_empty() {
             return;
         }
@@ -967,6 +1019,25 @@ pub fn image_part(mime: Option<String>, data: Option<&str>, url: Option<&str>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A prompt sent with attachments, as an agent's transcript gives it
+    /// back: the list becomes the prompt's attachments again.
+    #[test]
+    fn attachment_lists_come_back_as_attachments() {
+        let sent = "fix the icon hover\nso please fully ensure\n\nAttached files:\n- @C:\\Users\\me\\AppData\\Roaming\\Larrier\\attachments\\01a1.png\n- @D:\\proj\\notes.md\n";
+        let (text, parts) = split_attachment_list(sent);
+        assert_eq!(text, "fix the icon hover\nso please fully ensure");
+        assert!(matches!(&parts[0], Part::Image { mime: Some(m), source: MediaSource::Path { path } } if m == "image/png" && path.ends_with("01a1.png")));
+        assert!(matches!(&parts[1], Part::File { path, .. } if path == "D:\\proj\\notes.md"));
+        // Text that only mentions the words keeps them.
+        let plain = "What does \"Attached files:\" mean in the log?";
+        assert_eq!(split_attachment_list(plain), (plain.to_string(), Vec::new()));
+        let mut conv = Conv::new(AgentKind::Cursor);
+        conv.user(sent, None);
+        let m = &conv.messages[0];
+        assert_eq!(m.text(), "fix the icon hover\nso please fully ensure");
+        assert_eq!(m.parts.iter().filter(|p| matches!(p, Part::Image { .. })).count(), 1);
+    }
 
     #[test]
     fn hunk_and_compact() {

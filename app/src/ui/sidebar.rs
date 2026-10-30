@@ -379,16 +379,7 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
     rsx! {
         div { class: if open && !items.is_empty() { "repo-group open" } else { "repo-group" }, "data-project": "{drag}",
             div { class: if open { "repo-row open" } else { "repo-row" }, role: "button", title: "{title}", "data-drag-project": "{drag}",
-                onclick: move |_| {
-                    let mut ui = app.ui.write();
-                    if open {
-                        ui.repo_open.remove(&k);
-                        ui.repo_closed.insert(k.clone());
-                    } else {
-                        ui.repo_closed.remove(&k);
-                        ui.repo_open.insert(k.clone());
-                    }
-                },
+                onclick: move |_| app.set_group_open(&k, !open),
                 // The folder icon turns into the collapse chevron on hover.
                 span { class: "ic",
                     span { class: "ic-rest",
@@ -439,10 +430,7 @@ fn AgentSub(pkey: String, agent: AgentKind, items: Vec<SessionSummary>, ctx: Sid
     rsx! {
         div { class: "agent-sub",
             div { class: if open { "agent-sub-row open" } else { "agent-sub-row" }, role: "button",
-                onclick: move |_| {
-                    let mut ui = app.ui.write();
-                    if open { ui.repo_closed.insert(key.clone()); } else { ui.repo_closed.remove(&key); }
-                },
+                onclick: move |_| app.set_group_open(&key, !open),
                 span { class: "chev", Icon { i: I::ChevronRight, size: 12, stroke: 1.7 } }
                 span { class: "lg", AgentGlyph { kind: agent.clone() } }
                 span { class: "nm", "{agent.display_name()}" }

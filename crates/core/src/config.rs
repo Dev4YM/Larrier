@@ -156,6 +156,12 @@ pub struct Settings {
     /// `~home` is Home). Projects not listed come first, Home last.
     #[serde(default)]
     pub project_order: Vec<String>,
+    /// Sidebar groups the user opened or closed (projects, and agents
+    /// inside a project as `project|agent`); the rest follow the default.
+    #[serde(default)]
+    pub sidebar_opened: Vec<String>,
+    #[serde(default)]
+    pub sidebar_closed: Vec<String>,
     #[serde(default = "yes")]
     pub notify_on_finish: bool,
     /// Look for a newer release on GitHub (installed copies of Larrier).
@@ -408,6 +414,8 @@ impl Default for Settings {
             sidebar_sort: SidebarSort::default(),
             show_archived: false,
             project_order: Vec::new(),
+            sidebar_opened: Vec::new(),
+            sidebar_closed: Vec::new(),
             notify_on_finish: true,
             auto_update: true,
             updates: UpdateMode::Download,

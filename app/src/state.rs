@@ -424,8 +424,8 @@ impl App {
             quote: None,
             history: vec![View::Home],
             hist_pos: 0,
-            repo_open: BTreeSet::new(),
-            repo_closed: BTreeSet::new(),
+            repo_open: cfg.settings.sidebar_opened.iter().cloned().collect(),
+            repo_closed: cfg.settings.sidebar_closed.iter().cloned().collect(),
             menubar: None,
             win_w: 1400.0,
             lightbox: None,
@@ -497,6 +497,28 @@ impl App {
     pub fn update_config(mut self, f: impl FnOnce(&mut Config)) {
         f(&mut self.config.write());
         self.save_config();
+    }
+
+    /// Open or close a sidebar group, remembered across launches.
+    pub fn set_group_open(mut self, key: &str, open: bool) {
+        {
+            let mut ui = self.ui.write();
+            if open {
+                ui.repo_closed.remove(key);
+                ui.repo_open.insert(key.to_string());
+            } else {
+                ui.repo_open.remove(key);
+                ui.repo_closed.insert(key.to_string());
+            }
+        }
+        let (opened, closed) = {
+            let ui = self.ui.peek();
+            (ui.repo_open.iter().cloned().collect(), ui.repo_closed.iter().cloned().collect())
+        };
+        self.update_config(|c| {
+            c.settings.sidebar_opened = opened;
+            c.settings.sidebar_closed = closed;
+        });
     }
 
     pub fn apply_theme(mut self) {
@@ -1377,10 +1399,7 @@ impl App {
         self.put_session(s);
         self.ensure_tab(&View::Agent(id.clone()), true);
         // Its project opens, so the new chat is seen arriving in it.
-        let key = project_key(d.workspace.as_deref());
-        let mut ui = self.ui.write();
-        ui.repo_closed.remove(&key);
-        ui.repo_open.insert(key);
+        self.set_group_open(&project_key(d.workspace.as_deref()), true);
         Ok(id)
     }
 

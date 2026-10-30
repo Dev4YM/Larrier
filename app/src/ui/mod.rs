@@ -120,6 +120,28 @@ pub fn Root() -> Element {
             const mq = window.matchMedia('(prefers-color-scheme: dark)');
             dioxus.send({ t: 'theme', dark: mq.matches });
             mq.addEventListener('change', (e) => dioxus.send({ t: 'theme', dark: e.matches }));
+            // Copy buttons of code blocks (in rendered Markdown): the text
+            // goes to the system clipboard through the app.
+            if (!window.__larrierCopy) {
+              window.__larrierCopy = true;
+              document.addEventListener('click', (e) => {
+                const b = e.target && e.target.closest ? e.target.closest('.code-copy') : null;
+                if (!b) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const c = b.closest('.code-block');
+                const code = c && c.querySelector('code');
+                if (!code) return;
+                dioxus.send({ t: 'copy', text: code.innerText.replace(/\n$/, '') });
+                const u = b.querySelector('use');
+                if (u) {
+                  u.setAttribute('href', '#lucide-check');
+                  b.classList.add('done');
+                  clearTimeout(b.__t);
+                  b.__t = setTimeout(() => { u.setAttribute('href', '#lucide-copy'); b.classList.remove('done'); }, 1400);
+                }
+              }, true);
+            }
             // Menus stay inside the window whatever loads into them after
             // they open: each open menu is re-fitted whenever its size
             // changes (more results, a longer list).
@@ -702,6 +724,13 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                 Ok(part) if v["edit"].as_bool() == Some(true) && app.editing.peek().msg.is_some() => app.editing.write().attachments.push(part),
                 Ok(part) => app.ui.write().attach_inbox.push(part),
                 Err(e) => app.toast_err(format!("Could not attach: {e}")),
+            }
+        }
+        // A code block's Copy button: through the system clipboard (the
+        // webview's own clipboard API isn't allowed to write).
+        Some("copy") => {
+            if let Some(t) = v["text"].as_str() {
+                app.copy_text(t);
             }
         }
         Some("paste-text") => {

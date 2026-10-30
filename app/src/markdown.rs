@@ -18,7 +18,6 @@ pub const CSS: &str = r#"
 .md .code-block pre code { font-family: var(--mono); font-size: var(--fs-code, 12px); line-height: 1.6; background: none; padding: 0; white-space: pre; }
 "#;
 
-const COPY_JS: &str = "(function(b){var c=b.closest('.code-block').querySelector('code');navigator.clipboard.writeText(c.innerText);var u=b.querySelector('use');if(u){u.setAttribute('href','#lucide-check');b.classList.add('done');clearTimeout(b.__t);b.__t=setTimeout(function(){u.setAttribute('href','#lucide-copy');b.classList.remove('done')},1400)}})(this)";
 
 pub fn to_html(src: &str) -> String {
     let mut opts = Options::empty();
@@ -81,7 +80,7 @@ fn code_block(info: &str, text: &str) -> String {
     let body = body.unwrap_or_else(|| highlight::escape(text.trim_end_matches('\n')));
     let label = if lang.is_empty() { "text".to_string() } else { highlight::escape(lang) };
     format!(
-        "<div class=\"code-block\"><div class=\"code-head\"><span class=\"code-lang\">{label}</span><button class=\"code-copy\" type=\"button\" title=\"Copy\" onclick=\"{COPY_JS}\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><use href=\"#lucide-copy\"/></svg></button></div><pre><code class=\"hl-code\">{body}</code></pre></div>\n"
+        "<div class=\"code-block\"><div class=\"code-head\"><span class=\"code-lang\">{label}</span><button class=\"code-copy\" type=\"button\" title=\"Copy\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><use href=\"#lucide-copy\"/></svg></button></div><pre><code class=\"hl-code\">{body}</code></pre></div>\n"
     )
 }
 

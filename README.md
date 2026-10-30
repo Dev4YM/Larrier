@@ -111,6 +111,33 @@ app/        larrier-desktop  Dioxus desktop UI (the agents window)
 docs/LSF.md                  session format spec
 ```
 
+## Install
+
+Download `Larrier-<version>-windows-x64.exe` from the
+[latest release](https://github.com/Dev4YM/Larrier/releases/latest) and run
+it. It installs itself:
+
+- **Just for me** — no administrator rights. The app goes to
+  `%LOCALAPPDATA%\Programs\Larrier`, with everything else in your profile.
+- **For everyone on this computer** — needs administrator rights. The app
+  goes to `Program Files\Larrier` and shared files to
+  `ProgramData\Larrier`; each person's sessions and settings stay in their
+  own profile.
+
+Either way you get a Start menu shortcut (and a Desktop one if you like),
+and Larrier appears in Settings → Apps, where it uninstalls (optionally
+with your data). **Run without installing** starts that copy as it is.
+
+Installed copies check the latest release now and then (Settings → About):
+they download its program, check it against its published SHA-256 and
+swap it in on restart — no building, no source code. The repository is
+private for now, so updates need a GitHub token (`LARRIER_GITHUB_TOKEN`,
+`GITHUB_TOKEN`, or a signed-in GitHub CLI).
+
+To publish a release, set the version in `Cargo.toml` and push a matching
+tag (`git tag v0.2.0 && git push origin v0.2.0`): the Release workflow
+builds the Windows program and attaches it with its checksum.
+
 ## Build and run
 
 Requires Rust 1.85 or newer. Windows also needs WebView2, which ships with

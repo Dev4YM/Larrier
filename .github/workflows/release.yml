@@ -1,0 +1,65 @@
+# Builds Larrier for Windows and publishes it as a GitHub release.
+#
+# Push a tag that matches the app version (`v0.2.0` for version 0.2.0 in
+# Cargo.toml), or run it by hand with that tag. The release carries
+# `Larrier-<version>-windows-x64.exe` — the app, which installs itself — and
+# its `.sha256`. Installed copies of Larrier update from the newest release.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release, e.g. v0.2.0 (must match the version in Cargo.toml)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: The tag matches the app version
+        shell: pwsh
+        run: |
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($meta.packages | Where-Object name -eq 'larrier-app').version
+          if ("v$version" -ne $env:TAG) { throw "Tag $env:TAG doesn't match the app version $version" }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release --locked -p larrier-app
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $name = "Larrier-$env:VERSION-windows-x64.exe"
+          Copy-Item target/release/larrier-desktop.exe "dist/$name"
+          $hash = (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "dist/$name.sha256" -Value "$hash  $name" -NoNewline -Encoding ascii
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG --title "Larrier $env:VERSION" --generate-notes
+          }
+          gh release upload $env:TAG (Get-ChildItem dist).FullName --clobber

@@ -63,6 +63,9 @@ impl LineParser for DroidStream {
             "message" => {
                 if s(&v, "role") == Some("assistant") {
                     if let Some(t) = s(&v, "text").filter(|t| !t.trim().is_empty()) {
+                        if t.contains("Exec ended early") && t.contains("permission") {
+                            sink.notice("Droid stopped: its next step needs more autonomy than this run allows, and `droid exec` can't ask. Raise Autonomy under Permissions to let it continue.");
+                        }
                         sink.send(AgentEvent::Text { text: t.to_string() });
                     }
                 }

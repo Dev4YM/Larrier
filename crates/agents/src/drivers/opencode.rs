@@ -28,11 +28,10 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         cmd.args(["-f", &f]);
     }
     cmd.args(&req.launch.extra_args);
-    let mut prompt = req.prompt_for_arg(24_000);
-    if prompt.starts_with('-') {
-        prompt.insert_str(0, "Task: ");
-    }
-    cmd.arg(prompt);
+    // `-f` takes several values: without `--` it swallows the prompt
+    // ("File not found: <prompt>", seen with OpenCode 1.17).
+    cmd.arg("--");
+    cmd.arg(req.prompt_for_arg(24_000));
     let mut parser = OpenCodeStream::default();
     run_stream("OpenCode", cmd, None, &sink, &mut control, &mut parser).await;
 }
@@ -41,6 +40,7 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
 pub struct OpenCodeStream {
     session: Option<String>,
     failed: bool,
+    refusal_noted: bool,
 }
 
 impl LineParser for OpenCodeStream {
@@ -82,6 +82,12 @@ impl LineParser for OpenCodeStream {
                 if status == "completed" || status == "error" {
                     let is_error = status == "error";
                     let output = if is_error { s(state, "error").unwrap_or("error").to_string() } else { content_text(&state["output"]) };
+                    if is_error && output.contains("rejected permission") && !self.refusal_noted {
+                        self.refusal_noted = true;
+                        sink.notice(format!(
+                            "OpenCode's rules ask before {name} runs, and `opencode run` can't ask, so it was refused. Pick Auto-approve under Permissions, or turn on Use ACP for OpenCode in Settings → Agents to approve each one here."
+                        ));
+                    }
                     let diffs = state["metadata"]
                         .get("diff")
                         .and_then(|d| d.as_str())

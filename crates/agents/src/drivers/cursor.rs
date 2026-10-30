@@ -51,6 +51,8 @@ pub struct CursorStream {
     /// After a `retry`, the model call restarts from its checkpoint and
     /// streams `segment` again: what is left to skip.
     replay: Option<String>,
+    /// A refusal was explained (once per turn).
+    refusal_noted: bool,
 }
 
 impl CursorStream {
@@ -212,6 +214,9 @@ impl CursorStream {
             "task" | "subagent" => ("task", ToolKind::Task),
             // Loads a deferred tool's schema before calling it.
             "getMcpTools" => ("get_mcp_tools", ToolKind::Other),
+            // Shown as a question card.
+            "askQuestion" => ("AskQuestion", ToolKind::Other),
+            "createPlan" => ("create_plan", ToolKind::Other),
             other => (other, ToolKind::classify(other)),
         };
         if kind == ToolKind::Todo {
@@ -242,6 +247,15 @@ impl CursorStream {
         if s(v, "subtype") != Some("completed") {
             return;
         }
+        if name == "create_plan" {
+            // Plan mode's plan: the plan itself, and its steps as a to-do list.
+            if let Some(plan) = s(&args, "plan").filter(|p| !p.trim().is_empty()) {
+                sink.send(AgentEvent::Text { text: plan.to_string() });
+            }
+            if let Some(entries) = args.get("todos").and_then(plan_entries) {
+                sink.send(AgentEvent::Plan { entries });
+            }
+        }
         // The docs don't place a `function` tool's result; accept it inside
         // `function` or beside it.
         let result = body.get("result").or_else(|| v["tool_call"].get("result")).cloned().unwrap_or(Value::Null);
@@ -252,6 +266,20 @@ impl CursorStream {
                 let msg = s(r, "error").or_else(|| s(r, "message")).or_else(|| s(r, "reason")).filter(|m| !m.trim().is_empty()).map(|s| s.to_string());
                 // Print mode without --force rejects shell commands with an empty reason.
                 let msg = msg.unwrap_or_else(|| if k == "rejected" { "Rejected".to_string() } else { k.clone() });
+                if k == "rejected" && !self.refusal_noted {
+                    // Cursor's CLI refuses what it would ask about: it has no
+                    // way to ask when another app runs it.
+                    if kind == ToolKind::Shell && s(r, "reason").unwrap_or("").is_empty() {
+                        self.refusal_noted = true;
+                        sink.notice(format!(
+                            "Cursor refused `{}`: it isn't on your Cursor allowlist, and Cursor's CLI can't ask for approval when Larrier runs it. Pick Auto-review or Run everything under Permissions to let it run commands.",
+                            s(&args, "command").unwrap_or("the command")
+                        ));
+                    } else if name == "AskQuestion" {
+                        self.refusal_noted = true;
+                        sink.notice("Cursor's CLI can't wait for answers when Larrier runs it, so it went on without them. Answer the question here and Cursor gets your answers as your next message.");
+                    }
+                }
                 (if k == "rejected" { ToolStatus::Cancelled } else { ToolStatus::Failed }, msg, k != "rejected")
             }
             // `function` tools report a plain result.
@@ -380,6 +408,9 @@ mod tests {
         let edits: Vec<(u32, u32)> = ev.iter().filter_map(|e| match e { AgentEvent::ToolUpdate { diffs, .. } if !diffs.is_empty() => Some((diffs[0].added, diffs[0].removed)), _ => None }).collect();
         assert_eq!(edits, [(1, 1), (1, 0)]);
         assert!(output(&ev, "shell").iter().all(|(st, o)| **st == ToolStatus::Cancelled && *o == "Rejected"));
+        let notices: Vec<&str> = ev.iter().filter_map(|e| match e { AgentEvent::Notice { text } => Some(text.as_str()), _ => None }).collect();
+        assert_eq!(notices.len(), 1, "one explanation per turn: {notices:?}");
+        assert!(notices[0].contains("allowlist"));
         assert!(output(&ev, "glob")[0].1.contains("notes.txt"));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Usage { usage } if usage.input_tokens == 271 && usage.cache_read_tokens == 30592)));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
@@ -415,6 +446,23 @@ mod tests {
         assert!(matches!(&ev[1], AgentEvent::ToolUpdate { output: Some(o), .. } if o == "fn main() {}"), "{:?}", &ev[1]);
         assert!(matches!(&ev[2], AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Write));
         assert!(matches!(&ev[3], AgentEvent::ToolUpdate { diffs, .. } if diffs[0].added == 2));
+    }
+
+    /// Real print-mode shapes (cursor-agent 2026.10.22): a question the CLI
+    /// skips on its own, and plan mode's plan.
+    #[test]
+    fn questions_and_plans_in_print_mode() {
+        let lines = [
+            r#"{"type":"tool_call","subtype":"started","call_id":"q1","tool_call":{"askQuestionToolCall":{"args":{"title":"","questions":[{"id":"colour","prompt":"Which colour do you prefer?","options":[{"id":"red","label":"red"},{"id":"blue","label":"blue"}],"allowMultiple":false}],"runAsync":false}}}}"#,
+            r#"{"type":"tool_call","subtype":"completed","call_id":"q1","tool_call":{"askQuestionToolCall":{"args":{"title":"","questions":[{"id":"colour","prompt":"Which colour do you prefer?","options":[{"id":"red","label":"red"},{"id":"blue","label":"blue"}],"allowMultiple":false}]},"result":{"rejected":{"reason":"Questions skipped by the user, continue with the information you already have"}}}}}"#,
+            r##"{"type":"tool_call","subtype":"started","call_id":"p1","tool_call":{"createPlanToolCall":{"args":{"plan":"# Add hello.txt\n\n1. Create hello.txt","todos":[{"id":"a","content":"Create hello.txt","status":"TODO_STATUS_PENDING"}],"overview":"x","name":"Add hello.txt"}}}}"##,
+            r##"{"type":"tool_call","subtype":"completed","call_id":"p1","tool_call":{"createPlanToolCall":{"args":{"plan":"# Add hello.txt\n\n1. Create hello.txt","todos":[{"id":"a","content":"Create hello.txt","status":"TODO_STATUS_PENDING"}],"overview":"x","name":"Add hello.txt"},"result":{"success":{},"planUri":""}}}}"##,
+        ];
+        let ev = collect(&mut CursorStream::default(), &lines);
+        assert!(matches!(&ev[0], AgentEvent::ToolStart { tool } if tool.name == "AskQuestion"), "shown as a question card");
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Notice { text } if text.contains("can't wait for answers"))));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Text { text } if text.starts_with("# Add hello.txt"))));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Plan { entries } if entries[0].content == "Create hello.txt")));
     }
 
     #[test]

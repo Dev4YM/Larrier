@@ -80,7 +80,14 @@ impl LineParser for HermesStream {
                 let (_, id) = self.pending.remove(pos).unwrap();
                 // Tools answer with JSON ({"output": …, "exit_code": …}); show
                 // the readable part, as imported sessions do.
-                let (output, failed) = larrier_formats::hermes::tool_output(&content_text(&v["output"]));
+                let raw = content_text(&v["output"]);
+                let (output, failed) = larrier_formats::hermes::tool_output(&raw);
+                if raw.contains("\"status\": \"blocked\"") || raw.contains("\"status\":\"blocked\"") {
+                    sink.notice("Hermes blocked a command it flags as dangerous: in one-shot mode it can't ask for approval. Pick YOLO under Permissions, or turn on Use ACP for Hermes in Settings → Agents to approve such commands here.");
+                }
+                if name == "clarify" && raw.contains("undelivered") {
+                    sink.notice("Hermes can't wait for answers in one-shot mode, so it went on without them. Answer the question here and Hermes gets your answers as your next message.");
+                }
                 let is_error = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false) || failed;
                 sink.send(AgentEvent::ToolUpdate {
                     id,

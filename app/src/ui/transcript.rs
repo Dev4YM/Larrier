@@ -954,6 +954,18 @@ fn Reasoning(text: String, duration_ms: Option<u64>, live: bool) -> Element {
         None => ("Thought".to_string(), String::new()),
     };
     let is_live = live && duration_ms.is_none();
+    // Some models think without sharing it (Claude Code's own runs get the
+    // thinking redacted): nothing to open.
+    if text.trim().is_empty() {
+        return rsx! {
+            div {
+                class: if is_live { "step running" } else { "step quiet" },
+                title: if is_live { "" } else { "The model didn't share its reasoning for this step" },
+                span { class: "verb", "{verb}" }
+                if !rest.is_empty() { span { class: "target", "{rest}" } }
+            }
+        };
+    }
     rsx! {
         div {
             class: if is_live { "step running" } else { "step" },

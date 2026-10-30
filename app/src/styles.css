@@ -1304,3 +1304,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .tool-card.live .preview .pv-line:last-child { animation: pv-in .25s ease-out; }
 @keyframes pv-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .tool-card .desc.shimmer { color: transparent; }
+
+/* A thought the model kept to itself: a plain row, nothing to open */
+.step.quiet { cursor: default; }
+.step.quiet:hover .verb { color: var(--fg-2); }
+.step.quiet:hover .target { color: var(--fg-3); }

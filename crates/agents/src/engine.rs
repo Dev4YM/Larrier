@@ -97,6 +97,15 @@ impl TurnRecorder {
                 }
                 false
             }
+            AgentEvent::ModelName { name } => {
+                self.model = Some(name.clone());
+                if let Some(i) = self.msg_index {
+                    if let Some(m) = session.messages.get_mut(i) {
+                        m.model = Some(name.clone());
+                    }
+                }
+                false
+            }
             AgentEvent::TextDelta { text } => {
                 self.close_reasoning(session);
                 self.msg(session).push_text(text);
@@ -375,7 +384,7 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
         _ => {}
     }
     let parts: usize = msgs.iter().map(|m| m.parts.len()).sum();
-    if parts >= MAX_NESTED_PARTS && !matches!(event, AgentEvent::TextDelta { .. } | AgentEvent::ReasoningDelta { .. } | AgentEvent::Usage { .. } | AgentEvent::Model { .. }) {
+    if parts >= MAX_NESTED_PARTS && !matches!(event, AgentEvent::TextDelta { .. } | AgentEvent::ReasoningDelta { .. } | AgentEvent::Usage { .. } | AgentEvent::Model { .. } | AgentEvent::ModelName { .. }) {
         return;
     }
     if msgs.last().map(|m| m.role != Role::Assistant).unwrap_or(true) {
@@ -385,7 +394,7 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
     }
     let m = msgs.last_mut().expect("assistant message");
     match event {
-        AgentEvent::Model { model } => m.model = Some(model.clone()),
+        AgentEvent::Model { model } | AgentEvent::ModelName { name: model } => m.model = Some(model.clone()),
         AgentEvent::TextDelta { text } => m.push_text(text),
         AgentEvent::Text { text } => m.parts.push(Part::Text { text: text.clone() }),
         AgentEvent::ReasoningDelta { text } => m.push_reasoning(text),

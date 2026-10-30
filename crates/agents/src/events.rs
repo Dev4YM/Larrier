@@ -10,8 +10,12 @@ use tokio::sync::mpsc;
 pub enum AgentEvent {
     /// The agent's own session id (used to resume natively next turn).
     NativeSession { id: String, path: Option<String> },
-    /// Model actually used, when the agent reports it.
+    /// Model actually used, when the agent reports it as an id it accepts
+    /// back (`--model`): it becomes the session's model.
     Model { model: String },
+    /// The model by its display name only (Cursor's "Composer 2"): shown on
+    /// the reply, never passed back to the agent.
+    ModelName { name: String },
     /// Streamed assistant text.
     TextDelta { text: String },
     /// A complete assistant text block (non-streaming agents). Starts a new

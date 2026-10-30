@@ -20,7 +20,9 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     if let Some(id) = &req.resume_id {
         cmd.args(["--resume", id]);
     }
-    if let Some(m) = &req.model {
+    // Model ids have no spaces; a display name ("Grok 4.7 256K Low", saved
+    // by older versions from Cursor's own report) would be refused.
+    if let Some(m) = req.model.as_ref().filter(|m| !m.trim().contains(char::is_whitespace)) {
         cmd.args(["--model", m]);
     }
     // --mode plan|ask and --force / --auto-review from the chosen modes.
@@ -86,7 +88,9 @@ impl LineParser for CursorStream {
                         sink.send(AgentEvent::NativeSession { id: id.to_string(), path: None });
                     }
                     if let Some(m) = s(&v, "model") {
-                        sink.send(AgentEvent::Model { model: m.to_string() });
+                        // Cursor names its model ("Composer 2"), it doesn't
+                        // give the id `--model` takes.
+                        sink.send(AgentEvent::ModelName { name: m.to_string() });
                     }
                 }
             }
@@ -432,6 +436,9 @@ mod tests {
         // Final assistant message had no deltas before it → kept as Text.
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Text { text } if text == "All set.")));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolStart { tool } if tool.kind == ToolKind::Shell)));
+        // "Composer 2" is a display name: shown, never passed back as --model.
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ModelName { name } if name == "Composer 2")));
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Model { .. })));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { output: Some(o), .. } if o.contains("a.txt"))));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { diffs, .. } if diffs.first().map(|d| d.added) == Some(3))));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));

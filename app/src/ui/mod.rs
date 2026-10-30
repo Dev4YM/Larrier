@@ -215,16 +215,44 @@ pub fn Root() -> Element {
                 const top = minTop(), bottom = innerHeight - pad;
                 const natural = m.scrollHeight;
                 if (m.classList.contains('mention-menu')) {
-                  // Above the composer while it fits there, else below it.
+                  // Visible room: the window under the menu bar, inside every
+                  // box that scrolls or clips (New Agent's page scrolls under
+                  // its drag strip).
+                  let lo = top, hi = bottom;
+                  for (let a = m.parentElement; a && a !== document.body; a = a.parentElement) {
+                    const cs = getComputedStyle(a);
+                    if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+                    const ar = a.getBoundingClientRect();
+                    lo = Math.max(lo, ar.top + pad);
+                    hi = Math.min(hi, ar.bottom - pad);
+                  }
                   const wrap = m.parentElement.getBoundingClientRect();
                   const box = (m.parentElement.querySelector('.composer') || m.parentElement).getBoundingClientRect();
-                  const above = box.top - 4 - top, below = bottom - (box.bottom + 4);
-                  const up = above >= Math.min(natural, 220) || above >= below;
-                  const room = Math.max(96, Math.min(340, up ? above : below));
+                  const above = box.top - 4 - lo, below = hi - (box.bottom + 4);
+                  // Above the composer when the whole list fits there, else
+                  // below when it fits there, else on the roomier side; the
+                  // side it opened on stays while the list still fits it.
+                  const want = Math.min(natural, 340);
+                  const was = m.dataset.side;
+                  const up = was === 'up' && above >= want ? true
+                    : was === 'down' && below >= want ? false
+                    : above >= want ? true : below >= want ? false : above >= below;
+                  m.dataset.side = up ? 'up' : 'down';
+                  const room = Math.max(48, Math.min(340, up ? above : below));
                   set(m, 'maxHeight', room + 'px');
                   if (up) { set(m, 'top', 'auto'); set(m, 'bottom', (wrap.bottom - box.top + 4) + 'px'); }
                   else { set(m, 'bottom', 'auto'); set(m, 'top', (box.bottom - wrap.top + 4) + 'px'); }
                   m.classList.toggle('flip-up', up);
+                  // Anything still drawn over its far edge (a header, a drag
+                  // strip) takes that much off.
+                  const r2 = m.getBoundingClientRect();
+                  const y = up ? r2.top + 2 : r2.bottom - 2;
+                  const hit = document.elementFromPoint(r2.left + 24, y);
+                  if (hit && !m.contains(hit) && !hit.closest('.l-tip')) {
+                    const hr = hit.getBoundingClientRect();
+                    const lost = up ? hr.bottom - r2.top : r2.bottom - hr.top;
+                    if (lost > 0 && lost < room) set(m, 'maxHeight', Math.max(48, room - lost - pad) + 'px');
+                  }
                   return;
                 }
                 if (getComputedStyle(m).position !== 'fixed') return;

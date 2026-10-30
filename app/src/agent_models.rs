@@ -66,6 +66,7 @@ impl App {
         let targets: Vec<(AgentKind, Option<PathBuf>)> = detected
             .into_iter()
             .filter(|d| d.installed() || only.as_ref() == Some(&d.kind))
+            .filter(|d| only.is_some() || self.config.peek().agent(&d.kind).enabled)
             .filter(|d| only.as_ref().map(|k| *k == d.kind).unwrap_or(true))
             .map(|d| (d.kind, d.path))
             .collect();

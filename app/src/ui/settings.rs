@@ -287,9 +287,19 @@ fn Agents() -> Element {
                     let ac = app.config.read().agent(&spec.kind);
                     let k = spec.kind.clone();
                     let (k1, k2, k4, k5, k6) = (k.clone(), k.clone(), k.clone(), k.clone(), k.clone());
+                    let installed = d.as_ref().is_some_and(|d| d.installed());
+                    let enabled = ac.enabled;
+                    let (k7, k8) = (k.clone(), k.clone());
+                    let row_class = if enabled { "set-row agent-row" } else { "set-row agent-row off" };
+                    let detected_path = d.as_ref().and_then(|d| d.path.clone()).map(|p| p.to_string_lossy().to_string());
+                    let model_now = crate::agent_models::short_name(&app, &k2, ac.default_model.as_deref().unwrap_or(app.agent_models(&k2).and_then(|n| n.default_model).as_deref().unwrap_or("auto")));
+                    let live_note = match spec.kind {
+                        AgentKind::ClaudeCode => "Its own protocol: live approvals, questions, plans and steering.",
+                        _ => "Its own headless mode: what it would ask about is refused, and Larrier says so.",
+                    };
                     rsx! {
                         div { key: "{id}",
-                            div { class: "set-row", style: "cursor: pointer;",
+                            div { class: "{row_class}", style: "cursor: pointer;",
                                 onclick: move |_| open.set(if is_open { None } else { Some(id2.clone()) }),
                                 AgentGlyph { kind: spec.kind.clone(), class: "lg" }
                                 div { class: "lbl",
@@ -301,21 +311,28 @@ fn Agents() -> Element {
                                     Some(_) => rsx! { span { class: "status-pill missing", "Not installed" } },
                                     None => rsx! { div { class: "spinner" } },
                                 }
-                                span { class: "faint", if is_open { Icon { i: I::ChevronDown, size: 13 } } else { Icon { i: I::ChevronRight, size: 13 } } }
+                                if installed {
+                                    div { class: "agent-on", title: if enabled { "On: offered in pickers, its sessions sync" } else { "Off: hidden from pickers, its sessions don't sync" },
+                                        onclick: move |e| e.stop_propagation(),
+                                        Toggle { on: enabled, onchange: move |v| app.update_config(|c| c.agent_mut(&k7).enabled = v) }
+                                    }
+                                }
+                                span { class: "faint chev", if is_open { Icon { i: I::ChevronDown, size: 13 } } else { Icon { i: I::ChevronRight, size: 13 } } }
                             }
                             if is_open {
                                 div { class: "agent-detail",
-                                    div { class: "kv",
-                                        span { class: "k", "Executable" }
-                                        input { class: "input full",
-                                            placeholder: d.as_ref().and_then(|d| d.path.clone()).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| spec.binaries.join(" / ")),
-                                            value: "{ac.binary.clone().unwrap_or_default()}",
-                                            onchange: move |e| { let v = e.value(); app.update_config(|c| c.agent_mut(&k1).binary = if v.trim().is_empty() { None } else { Some(v) }); app.detect_agents(); },
-                                        }
-                                        span { class: "k", "Models" }
-                                        div { class: "row",
-                                            span { class: "code-inline", {crate::agent_models::short_name(&app, &k2, ac.default_model.as_deref().unwrap_or(app.agent_models(&k2).and_then(|n| n.default_model).as_deref().unwrap_or("auto")))} }
-                                            button { class: "ghost-btn sm", onclick: { let k = k2.clone(); move |_| app.open_models(Some(k.clone())) }, "Models & API keys…" }
+                                    div { class: "ad-sec",
+                                        div { class: "ad-title", "Running" }
+                                        div { class: "ad-row",
+                                            span { class: "k", "Executable" }
+                                            div { class: "v",
+                                                input { class: "input full",
+                                                    placeholder: detected_path.clone().unwrap_or_else(|| spec.binaries.join(" / ")),
+                                                    value: "{ac.binary.clone().unwrap_or_default()}",
+                                                    onchange: move |e| { let v = e.value(); app.update_config(|c| c.agent_mut(&k1).binary = if v.trim().is_empty() { None } else { Some(v) }); app.detect_agents(); },
+                                                }
+                                                div { class: "h", if detected_path.is_some() { "Found on this PC. Set a path to use another copy." } else { "Not found: install it below, or set its path." } }
+                                            }
                                         }
                                         // The agent's own mode groups (Claude Code modes, Codex
                                         // plan + permissions, …): default for new agents.
@@ -328,61 +345,106 @@ fn Agents() -> Element {
                                                     .chain(g.options.iter().map(|o| (o.id.to_string(), o.label.to_string())))
                                                     .collect();
                                                 rsx! {
-                                                    span { key: "k{gi}", class: "k", "Default {g.label.to_lowercase()}" }
-                                                    super::Select { key: "s{gi}", value: current.unwrap_or_default(), options, wide: true,
-                                                        onchange: move |v: String| {
-                                                            let v = if v.is_empty() { None } else { Some(v) };
-                                                            let k = kk.clone();
-                                                            app.update_config(move |c| if gi == 0 { c.agent_mut(&k).default_mode = v } else { c.agent_mut(&k).default_permission = v });
-                                                        } }
+                                                    div { key: "m{gi}", class: "ad-row",
+                                                        span { class: "k", "Default {g.label.to_lowercase()}" }
+                                                        div { class: "v",
+                                                            super::Select { value: current.unwrap_or_default(), options, wide: true,
+                                                                onchange: move |v: String| {
+                                                                    let v = if v.is_empty() { None } else { Some(v) };
+                                                                    let k = kk.clone();
+                                                                    app.update_config(move |c| if gi == 0 { c.agent_mut(&k).default_mode = v } else { c.agent_mut(&k).default_permission = v });
+                                                                } }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
-                                        span { class: "k", "Extra arguments" }
-                                        input { class: "input full", placeholder: "e.g. --max-turns 40",
-                                            value: "{ac.extra_args.join(\" \")}",
-                                            onchange: move |e| { let v: Vec<String> = e.value().split_whitespace().map(|s| s.to_string()).collect(); app.update_config(|c| c.agent_mut(&k4).extra_args = v); },
-                                        }
-                                        span { class: "k", "Protocol" }
-                                        div { class: "row",
-                                            span { class: "code-inline", "{protocol_label(spec.protocol)}" }
-                                            if let Some(acp) = spec.acp_command {
-                                                span { class: "faint", "· ACP:" }
-                                                span { class: "code-inline", "{acp.join(\" \")}" }
-                                                span { class: "faint", "prefer" }
-                                                Toggle { on: ac.prefer_acp, onchange: move |v| app.update_config(|c| c.agent_mut(&k5).prefer_acp = v) }
+                                        div { class: "ad-row",
+                                            span { class: "k", "Extra arguments" }
+                                            div { class: "v",
+                                                input { class: "input full", placeholder: "e.g. --max-turns 40",
+                                                    value: "{ac.extra_args.join(\" \")}",
+                                                    onchange: move |e| { let v: Vec<String> = e.value().split_whitespace().map(|s| s.to_string()).collect(); app.update_config(|c| c.agent_mut(&k4).extra_args = v); },
+                                                }
                                             }
                                         }
-                                        span { class: "k", "Import sessions" }
-                                        div { class: "row",
-                                            Toggle { on: ac.import && spec.can_import, onchange: move |v| app.update_config(|c| c.agent_mut(&k6).import = v) }
-                                            span { class: "code-inline", "{spec.session_location}" }
+                                        div { class: "ad-row",
+                                            span { class: "k", "Connection" }
+                                            div { class: "v",
+                                                if let Some(acp) = spec.acp_command {
+                                                    div { class: "seg",
+                                                        button { class: if !ac.prefer_acp { "on" } else { "" }, onclick: move |_| app.update_config(|c| c.agent_mut(&k5).prefer_acp = false), "Native" }
+                                                        button { class: if ac.prefer_acp { "on" } else { "" }, onclick: move |_| app.update_config(|c| c.agent_mut(&k8).prefer_acp = true), "ACP" }
+                                                    }
+                                                    div { class: "h",
+                                                        if ac.prefer_acp { "Agent Client Protocol: " span { class: "mono", "{acp.join(\" \")}" } } else { "{live_note}" }
+                                                    }
+                                                } else {
+                                                    span { class: "plain", "{protocol_label(spec.protocol)}" }
+                                                    div { class: "h", "{live_note}" }
+                                                }
+                                            }
                                         }
-                                        span { class: "k", "Install" }
-                                        div { class: "col", style: "gap: 4px;",
+                                    }
+                                    div { class: "ad-sec",
+                                        div { class: "ad-title", "Models" }
+                                        div { class: "ad-row",
+                                            span { class: "k", "Default model" }
+                                            div { class: "v row",
+                                                span { class: "plain strong", "{model_now}" }
+                                                div { class: "grow" }
+                                                button { class: "ghost-btn", onclick: { let k = k2.clone(); move |_| app.open_models(Some(k.clone())) }, "Models & API keys…" }
+                                            }
+                                        }
+                                    }
+                                    if spec.can_import {
+                                        div { class: "ad-sec",
+                                            div { class: "ad-title", "Sessions" }
+                                            div { class: "ad-row",
+                                                span { class: "k", "Import sessions" }
+                                                div { class: "v",
+                                                    Toggle { on: ac.import, onchange: move |v| app.update_config(|c| c.agent_mut(&k6).import = v) }
+                                                    div { class: "h", "From " span { class: "mono", "{spec.session_location}" } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    div { class: "ad-sec",
+                                        div { class: "ad-title", if installed { "Account" } else { "Install" } }
+                                        if !installed {
                                             for (lbl, cmd) in spec.install.iter() {
-                                                div { class: "row",
-                                                    span { class: "faint", style: "width: 90px; font-size: 11px;", "{lbl}" }
-                                                    span { class: "code-inline grow", "{cmd}" }
-                                                    button { class: "icon-btn sm", title: "Run in terminal",
-                                                        onclick: { let c = cmd.to_string(); move |_| { let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or(".".into()); let _ = crate::state::open_terminal(&home, &c); } },
-                                                        Icon { i: I::Play, size: 11 }
+                                                div { key: "{lbl}", class: "ad-row",
+                                                    span { class: "k", "{lbl}" }
+                                                    div { class: "v row",
+                                                        span { class: "cmd mono", title: "{cmd}", "{cmd}" }
+                                                        button { class: "ghost-btn", title: "Run in a terminal",
+                                                            onclick: { let c = cmd.to_string(); move |_| { let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or(".".into()); let _ = crate::state::open_terminal(&home, &c); } },
+                                                            Icon { i: I::Play, size: 11 } "Run"
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                         if let Some(login) = spec.login_command {
-                                            span { class: "k", "Sign in" }
-                                            div { class: "row",
-                                                span { class: "code-inline", "{login}" }
-                                                button { class: "ghost-btn", onclick: { let l = login.to_string(); move |_| { let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or(".".into()); let _ = crate::state::open_terminal(&home, &l); } }, "Open login" }
+                                            div { class: "ad-row",
+                                                span { class: "k", "Sign in" }
+                                                div { class: "v row",
+                                                    span { class: "cmd mono", "{login}" }
+                                                    button { class: "ghost-btn", onclick: { let l = login.to_string(); move |_| { let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or(".".into()); let _ = crate::state::open_terminal(&home, &l); } }, "Open login" }
+                                                }
+                                            }
+                                        }
+                                        div { class: "ad-row",
+                                            span { class: "k", "Accounts" }
+                                            div { class: "v row",
+                                                span { class: "plain faint", "Run it under more than one login" }
+                                                div { class: "grow" }
+                                                button { class: "ghost-btn", onclick: { let k = spec.kind.clone(); move |_| app.ui.write().modal = Some(Modal::AddAccount(k.clone())) }, Icon { i: I::Plus, size: 12 } "Add account" }
                                             }
                                         }
                                     }
-                                    div { class: "row",
-                                        a { href: "{spec.homepage}", "Documentation" }
-                                        div { class: "grow" }
-                                        button { class: "ghost-btn", onclick: { let k = spec.kind.clone(); move |_| app.ui.write().modal = Some(Modal::AddAccount(k.clone())) }, Icon { i: I::Plus, size: 12 } "Add account" }
+                                    div { class: "ad-foot",
+                                        a { href: "{spec.homepage}", "Documentation" Icon { i: I::ArrowUpRight, size: 11 } }
                                     }
                                 }
                             }
@@ -552,7 +614,7 @@ fn Models() -> Element {
     // Agents with models to manage: the installed ones, then Chat.
     let detected = app.detected.read().clone();
     let mut kinds: Vec<AgentKind> = larrier_core::agent::runnable()
-        .filter(|s| !s.binaries.is_empty() && detected.iter().any(|d| d.kind == s.kind && d.installed()))
+        .filter(|s| !s.binaries.is_empty() && app.config.read().agent(&s.kind).enabled && detected.iter().any(|d| d.kind == s.kind && d.installed()))
         .map(|s| s.kind.clone())
         .collect();
     kinds.push(AgentKind::Chat);

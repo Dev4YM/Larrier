@@ -970,7 +970,7 @@ pub fn Composer(
                         }
                         Dropdown { open: multi_menu, up: false,
                             div { class: "menu-label", "Run the prompt on several agents at once" }
-                            for spec in larrier_core::agent::runnable().filter(|s| s.binaries.is_empty() || detected.iter().any(|d| d.kind == s.kind && d.installed())) {
+                            for spec in larrier_core::agent::runnable().filter(|s| app.config.read().agent(&s.kind).enabled && (s.binaries.is_empty() || detected.iter().any(|d| d.kind == s.kind && d.installed()))) {
                                 {
                                     let k = spec.kind.clone();
                                     let on = multi_now.contains(&k);

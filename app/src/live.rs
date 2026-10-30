@@ -93,7 +93,7 @@ pub fn start(app: App) {
 pub fn restart(app: App) {
     let (on, agents) = {
         let cfg = app.config.read();
-        let agents: Vec<_> = larrier_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import).collect();
+        let agents: Vec<_> = larrier_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect();
         (cfg.settings.live_sync, agents)
     };
     // Dropping the old watcher stops it.

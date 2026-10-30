@@ -1652,7 +1652,7 @@ impl App {
     pub fn sync_imports(mut self, quiet: bool) {
         let agents: Vec<AgentKind> = {
             let cfg = self.config.read();
-            larrier_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import).collect()
+            larrier_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect()
         };
         self.sync_status.set("Importing sessions…".into());
         spawn_forever(async move {

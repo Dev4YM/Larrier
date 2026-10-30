@@ -188,6 +188,8 @@ pub struct Ui {
     /// An agent's terminal shown read-only in the Terminal tab:
     /// (session id, shell tool call id).
     pub agent_term: Option<(String, String)>,
+    /// Agent whose models Settings → Models shows.
+    pub models_agent: Option<AgentKind>,
 }
 
 impl Ui {
@@ -308,6 +310,8 @@ pub struct Draft {
     pub mode: Option<String>,
     /// Option of its second group (permissions / autonomy).
     pub permission: Option<String>,
+    /// Reasoning effort; `None` follows the agent's default.
+    pub effort: Option<String>,
     pub account_id: Option<String>,
     pub workspace: Option<String>,
     pub worktree: bool,
@@ -345,6 +349,11 @@ pub struct App {
     /// (subagents, commands) keeps the turn open: not "generating".
     pub idle: Signal<HashSet<String>>,
     pub update: Signal<UpdateState>,
+    /// Each agent's own models and defaults, by agent id (see
+    /// `crate::agent_models`).
+    pub native_models: Signal<HashMap<String, larrier_agents::models::AgentModels>>,
+    /// Agents whose models are being re-read.
+    pub models_refreshing: Signal<HashSet<String>>,
 }
 
 /// Signals owned by the root scope so background tasks can use them for the
@@ -372,6 +381,7 @@ impl App {
             model: None,
             mode: None,
             permission: None,
+            effort: None,
             account_id: None,
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
             worktree: cfg.settings.use_worktrees,
@@ -408,6 +418,7 @@ impl App {
             compose_inbox: Vec::new(),
             tab_ctx: None,
             agent_term: None,
+            models_agent: None,
         };
         App {
             sessions: root_signal(store().list()),
@@ -429,6 +440,8 @@ impl App {
             live: root_signal(HashMap::new()),
             idle: root_signal(HashSet::new()),
             update: root_signal(UpdateState::default()),
+            native_models: root_signal(crate::agent_models::load()),
+            models_refreshing: root_signal(HashSet::new()),
         }
     }
 
@@ -851,6 +864,14 @@ impl App {
         self.navigate(View::Settings(tab));
     }
 
+    /// Settings → Models, on one agent's models.
+    pub fn open_models(mut self, agent: Option<AgentKind>) {
+        if agent.is_some() {
+            self.ui.write().models_agent = agent;
+        }
+        self.navigate(View::Settings(SettingsTab::Models));
+    }
+
     /// Make sure a session is loaded into memory.
     pub fn ensure_loaded(self, id: &str) -> bool {
         if self.is_loaded(id) {
@@ -1196,6 +1217,7 @@ impl App {
         });
         let mut s = Session::new(d.agent.clone(), ws.clone());
         s.model = d.model.clone();
+        s.effort = d.effort.clone();
         s.mode = d.mode.clone();
         s.permission = d.permission.clone();
         s.account_id = d.account_id.clone();
@@ -1424,6 +1446,7 @@ impl App {
             }
             s.agent = target2.clone();
             s.model = None;
+            s.effort = None;
             s.mode = None;
             s.permission = None;
             s.account_id = None;
@@ -1436,6 +1459,10 @@ impl App {
 
     pub fn set_session_model(self, id: &str, model: Option<String>) {
         self.update_session(id, |s| s.model = model);
+    }
+
+    pub fn set_session_effort(self, id: &str, effort: Option<String>) {
+        self.update_session(id, |s| s.effort = effort);
     }
 
     pub fn set_session_mode(self, id: &str, mode: Option<String>) {

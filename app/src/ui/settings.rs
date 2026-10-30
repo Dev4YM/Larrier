@@ -277,7 +277,7 @@ fn Agents() -> Element {
                     let id2 = id.clone();
                     let ac = app.config.read().agent(&spec.kind);
                     let k = spec.kind.clone();
-                    let (k1, k2, k3, k4, k5, k6) = (k.clone(), k.clone(), k.clone(), k.clone(), k.clone(), k.clone());
+                    let (k1, k2, k4, k5, k6) = (k.clone(), k.clone(), k.clone(), k.clone(), k.clone());
                     rsx! {
                         div { key: "{id}",
                             div { class: "set-row", style: "cursor: pointer;",
@@ -303,10 +303,10 @@ fn Agents() -> Element {
                                             value: "{ac.binary.clone().unwrap_or_default()}",
                                             onchange: move |e| { let v = e.value(); app.update_config(|c| c.agent_mut(&k1).binary = if v.trim().is_empty() { None } else { Some(v) }); app.detect_agents(); },
                                         }
-                                        span { class: "k", "Default model" }
-                                        input { class: "input full", placeholder: "agent default",
-                                            value: "{ac.default_model.clone().unwrap_or_default()}",
-                                            onchange: move |e| { let v = e.value(); app.update_config(|c| c.agent_mut(&k2).default_model = if v.trim().is_empty() { None } else { Some(v) }); },
+                                        span { class: "k", "Models" }
+                                        div { class: "row",
+                                            span { class: "code-inline", {crate::agent_models::short_name(&app, &k2, ac.default_model.as_deref().unwrap_or(app.agent_models(&k2).and_then(|n| n.default_model).as_deref().unwrap_or("auto")))} }
+                                            button { class: "ghost-btn sm", onclick: { let k = k2.clone(); move |_| app.open_models(Some(k.clone())) }, "Models & API keys…" }
                                         }
                                         // The agent's own mode groups (Claude Code modes, Codex
                                         // plan + permissions, …): default for new agents.
@@ -328,11 +328,6 @@ fn Agents() -> Element {
                                                         } }
                                                 }
                                             }
-                                        }
-                                        span { class: "k", "Extra models" }
-                                        input { class: "input full", placeholder: "comma separated model ids",
-                                            value: "{ac.extra_models.join(\", \")}",
-                                            onchange: move |e| { let v: Vec<String> = e.value().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(); app.update_config(|c| c.agent_mut(&k3).extra_models = v); },
                                         }
                                         span { class: "k", "Extra arguments" }
                                         input { class: "input full", placeholder: "e.g. --max-turns 40",
@@ -543,34 +538,58 @@ fn Accounts() -> Element {
 
 #[component]
 fn Models() -> Element {
-    let app = use_app();
+    let mut app = use_app();
     let providers = app.config.read().providers.clone();
+    // Agents with models to manage: the installed ones, then Chat.
+    let detected = app.detected.read().clone();
+    let mut kinds: Vec<AgentKind> = larrier_core::agent::runnable()
+        .filter(|s| !s.binaries.is_empty() && detected.iter().any(|d| d.kind == s.kind && d.installed()))
+        .map(|s| s.kind.clone())
+        .collect();
+    kinds.push(AgentKind::Chat);
+    let picked = app.ui.read().models_agent.clone();
+    let sel = picked.filter(|k| kinds.contains(k)).unwrap_or_else(|| kinds[0].clone());
     rsx! {
         h1 { "Models & API Keys" }
-        div { class: "sub", "Every model Larrier knows, with context windows and prices, plus providers for the built-in Chat agent. Keys live in your OS keychain." }
-        super::models::ModelRegistry {}
-        div { class: "set-group-title", style: "margin-top: 22px;", "Chat providers" }
-        for p in providers {
-            ProviderCard { key: "{p.id}", p }
-        }
-        div { class: "set-group-title", "Add provider" }
-        div { class: "set-card",
-            div { class: "set-row",
-                div { class: "lbl", div { class: "t", "OpenAI-compatible endpoint" } div { class: "d", "Groq, Together, DeepSeek, Mistral, LM Studio, vLLM, Nous Portal…" } }
-                button { class: "ghost-btn",
-                    onclick: move |_| app.update_config(|c| c.providers.push(Provider {
-                        id: format!("custom-{}", &new_id()[30..]),
-                        name: "Custom provider".into(),
-                        kind: ProviderKind::OpenAiCompatible,
-                        base_url: "https://api.example.com/v1".into(),
-                        secret_ref: None,
-                        models: Vec::new(),
-                        enabled: false,
-                        default_model: None,
-                    })),
-                    Icon { i: I::Plus, size: 12 } "Add"
+        div { class: "sub", "Each agent's models, synced from its own settings. Choose what the picker shows, set defaults, add models, and bring your own API keys where the agent can use them. Keys live in your OS keychain." }
+        div { class: "am-tabs",
+            for k in kinds.clone() {
+                button { key: "{k.id()}", class: if k == sel { "am-tab on" } else { "am-tab" },
+                    onclick: { let k = k.clone(); move |_| app.ui.write().models_agent = Some(k.clone()) },
+                    AgentGlyph { kind: k.clone() }
+                    span { "{k.display_name()}" }
                 }
             }
+        }
+        if sel == AgentKind::Chat {
+            div { class: "set-group-title", "Chat providers" }
+            for p in providers {
+                ProviderCard { key: "{p.id}", p }
+            }
+            div { class: "set-group-title", "Add provider" }
+            div { class: "set-card",
+                div { class: "set-row",
+                    div { class: "lbl", div { class: "t", "OpenAI-compatible endpoint" } div { class: "d", "Groq, Together, DeepSeek, Mistral, LM Studio, vLLM, Nous Portal…" } }
+                    button { class: "ghost-btn",
+                        onclick: move |_| app.update_config(|c| c.providers.push(Provider {
+                            id: format!("custom-{}", &new_id()[30..]),
+                            name: "Custom provider".into(),
+                            kind: ProviderKind::OpenAiCompatible,
+                            base_url: "https://api.example.com/v1".into(),
+                            secret_ref: None,
+                            models: Vec::new(),
+                            enabled: false,
+                            default_model: None,
+                        })),
+                        Icon { i: I::Plus, size: 12 } "Add"
+                    }
+                }
+            }
+        } else {
+            super::agent_models::AgentModelsPanel { key: "{sel.id()}", kind: sel.clone() }
+        }
+        div { style: "margin-top: 28px;",
+            super::models::ModelRegistry {}
         }
     }
 }

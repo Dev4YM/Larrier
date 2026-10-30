@@ -1377,3 +1377,54 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .agent-body > .tools-col.collapsed { align-self: flex-start; width: auto; margin: 2px 10px 0 0; padding: 4px; gap: 2px;
   border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 4px 14px -8px rgba(0, 0, 0, .12); }
 .agent-body > .tools-col.collapsed .rail-head { height: 34px; justify-content: center; }
+
+/* Reasoning effort in the model picker (and Cursor's speed). */
+.picker .lb.eff { font-size: 12px; }
+.mp-effort { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--border); background: var(--card-2); }
+.mp-effort .lbl { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-3); flex-shrink: 0; }
+.mp-effort .seg { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 8px; background: var(--chip); min-width: 0; }
+.mp-effort .seg button { height: 22px; padding: 0 8px; border-radius: 6px; font-size: 11.5px; color: var(--fg-2); transition: background .12s ease, color .12s ease; }
+.mp-effort .seg button:hover { color: var(--fg); }
+.mp-effort .seg button.on { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.mp-effort .seg button.on.dflt { color: var(--fg-2); }
+.mp-effort .fast { margin-left: auto; height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 7px; font-size: 11.5px; color: var(--fg-3); border: 1px solid var(--border); }
+.mp-effort .fast.on { color: var(--amber, #b7791f); border-color: currentColor; }
+.app.no-motion .mp-effort .seg button { transition: none; }
+@media (max-width: 1000px) {
+  .picker .lb.eff { display: none; }
+}
+
+/* Settings → Models: one agent at a time. */
+.am-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px; }
+.am-tab { height: 30px; display: inline-flex; align-items: center; gap: 7px; padding: 0 11px; border-radius: 8px; font-size: 12.5px; color: var(--fg-2); border: 1px solid transparent; transition: background .12s ease, color .12s ease, border-color .12s ease; }
+.am-tab:hover { background: var(--hover); color: var(--fg); }
+.am-tab.on { background: var(--card); border-color: var(--border); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .05); }
+.am-tab .agent-glyph, .am-tab svg { flex-shrink: 0; }
+.seg-mini { display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px; background: var(--chip); flex-shrink: 0; }
+.seg-mini button { height: 22px; padding: 0 9px; border-radius: 5px; font-size: 11.5px; color: var(--fg-2); }
+.seg-mini button.on { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.am-list { max-height: 460px; overflow-y: auto; overscroll-behavior: contain; padding: 2px 0; }
+.am-row { display: grid; grid-template-columns: 18px minmax(80px, auto) auto minmax(0, 1fr) auto 44px auto; align-items: center; gap: 8px; height: 34px; padding: 0 12px; font-size: 12.5px; }
+.am-row + .am-row { border-top: 1px solid var(--border-soft, var(--border)); }
+.am-row .lg { display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); }
+.am-row .nm { color: var(--fg); }
+.am-row .id { font-family: var(--mono); font-size: 11px; color: var(--fg-4); }
+.am-row .eff, .am-row .ctx { font-size: 11px; color: var(--fg-3); white-space: nowrap; text-align: right; }
+.am-row.off .nm, .am-row.off .lg { opacity: .55; }
+.am-row .toggle { justify-self: end; }
+.am-row > .mr-tag { justify-self: start; }
+.am-add { flex-wrap: wrap; gap: 8px; }
+.am-add .input { width: 180px; }
+.am-add .input.wide { flex: 1; min-width: 200px; }
+.am-ep + .am-ep, .set-row + .am-ep { border-top: 1px solid var(--border); }
+.am-ep .set-row + .set-row { border-top: none; }
+.am-ep-fields { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.am-ep-fields .input { width: 160px; }
+.am-ep-fields .input.wide { flex: 1; min-width: 220px; width: auto; }
+.am-ep-sub { min-height: 0; padding-top: 0; padding-left: 40px; flex-wrap: wrap; }
+.am-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-2); cursor: pointer; }
+.app.no-motion .am-tab { transition: none; }
+@media (max-width: 760px) {
+  .am-row { grid-template-columns: 18px minmax(0, 1fr) auto; height: auto; padding: 8px 12px; }
+  .am-row .id, .am-row .eff, .am-row .ctx, .am-row > .mr-tag { display: none; }
+}

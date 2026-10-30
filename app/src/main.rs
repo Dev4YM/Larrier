@@ -1,6 +1,7 @@
 //! Larrier — one window for every coding agent and AI chat.
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
+mod agent_models;
 mod automations;
 mod highlight;
 mod icons;

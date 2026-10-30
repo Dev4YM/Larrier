@@ -10,6 +10,7 @@ mod files;
 mod home;
 pub mod mentions;
 mod menubar;
+mod agent_models;
 mod models;
 mod overlays;
 mod right;
@@ -50,6 +51,7 @@ pub fn Root() -> Element {
         crate::models_sync::start();
         crate::automations::start(app);
         app.detect_agents();
+        crate::agent_models::start(app);
         if app.config.read().settings.auto_import {
             app.sync_imports(true);
         }

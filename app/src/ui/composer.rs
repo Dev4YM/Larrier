@@ -15,27 +15,16 @@ use crate::icons::{Icon, I};
 use crate::logos::{agent_logo, model_logo, Logo};
 use crate::state::{use_app, App, SettingsTab};
 
-/// Model choices for an agent (Chat agent lists provider models).
-pub fn model_options(app: &App, agent: &AgentKind) -> Vec<String> {
+/// Model choices of the Chat agent (provider models) and custom agents.
+fn listed_models(app: &App, agent: &AgentKind) -> Option<Vec<String>> {
     let cfg = app.config.read();
     if agent.spec().protocol == Protocol::HttpChat {
-        return cfg
-            .providers
-            .iter()
-            .filter(|p| p.enabled)
-            .flat_map(|p| p.models.iter().map(move |m| format!("{}/{}", p.id, m)))
-            .collect();
+        return Some(cfg.providers.iter().filter(|p| p.enabled).flat_map(|p| p.models.iter().map(move |m| format!("{}/{}", p.id, m))).collect());
     }
-    let mut v: Vec<String> = match agent {
-        AgentKind::Custom(id) => cfg.custom_agent(id).map(|c| c.models.clone()).unwrap_or_default(),
-        _ => agent.spec().models.iter().map(|s| s.to_string()).collect(),
-    };
-    for m in cfg.agent(agent).extra_models {
-        if !v.contains(&m) {
-            v.push(m);
-        }
+    match agent {
+        AgentKind::Custom(id) => Some(cfg.custom_agent(id).map(|c| c.models.clone()).unwrap_or_default()),
+        _ => None,
     }
-    v
 }
 
 /// One option of an agent mode group, as the composer shows it.
@@ -97,19 +86,29 @@ fn plan_option(agent: &AgentKind) -> Option<&'static str> {
     agent.spec().mode_groups.first().and_then(|g| g.find("plan")).map(|o| o.id)
 }
 
-/// Short model name for the composer button ("Opus 5.5", "GPT-6.1 Sol").
-fn model_display(agent: &AgentKind, model: &Option<String>) -> String {
-    use larrier_core::models;
-    match model {
-        Some(m) if m != "default" && m != "auto" => {
-            let id = if agent.spec().protocol == Protocol::HttpChat { m.split_once('/').map(|(_, b)| b).unwrap_or(m) } else { m.as_str() };
-            if let Some((_, label)) = models::alias(id) {
-                return label.to_string();
-            }
-            models::lookup(id).map(|i| i.short_name()).unwrap_or_else(|| models::pretty_name(id))
-        }
-        _ => "Auto".into(),
+/// Model and effort for the composer button ("Opus 5.5", "Extra high"):
+/// the session's picks, else the defaults — the agent's own when Larrier
+/// has none, so it reads what will really run.
+fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &Option<String>) -> (String, String) {
+    use crate::agent_models as am;
+    if agent.spec().protocol == Protocol::HttpChat {
+        let name = match model {
+            Some(m) => larrier_core::models::lookup(m.split_once('/').map(|(_, b)| b).unwrap_or(m)).map(|i| i.short_name()).unwrap_or_else(|| larrier_core::models::pretty_name(m)),
+            None => "Auto".into(),
+        };
+        return (name, String::new());
     }
+    let r = am::resolve(app, agent, model.as_deref(), effort.as_deref());
+    let name = match (&r.family, &r.model) {
+        (Some(f), Some(m)) if f != m => am::short_name(app, agent, f),
+        (_, Some(m)) => am::short_name(app, agent, m),
+        _ => "Auto".into(),
+    };
+    let mut extra: Vec<String> = r.effort.as_deref().map(larrier_agents::models::effort_label).into_iter().collect();
+    if r.fast {
+        extra.push("Fast".into());
+    }
+    (name, extra.join(" · "))
 }
 
 /// How a model choice reads in the picker: (label, note, "1M · $4 / $20",
@@ -177,6 +176,7 @@ struct SessInfo {
     model: Option<String>,
     mode: Option<String>,
     permission: Option<String>,
+    effort: Option<String>,
     worktree: bool,
     usage: larrier_core::Usage,
     cwd: Option<String>,
@@ -279,6 +279,7 @@ pub fn Composer(
             model: s.model.clone(),
             mode: s.mode.clone(),
             permission: s.permission.clone(),
+            effort: s.effort.clone(),
             worktree: matches!(s.environment, larrier_core::Environment::Worktree { .. }),
             usage: s.usage.clone(),
             cwd: s.cwd(),
@@ -318,6 +319,10 @@ pub fn Composer(
         Some(_) => sess.read().as_ref().and_then(|s| s.permission.clone()),
         None => app.draft.read().permission.clone(),
     };
+    let effort = match &session_id {
+        Some(_) => sess.read().as_ref().and_then(|s| s.effort.clone()),
+        None => app.draft.read().effort.clone(),
+    };
     // The agent's own modes, e.g. Claude Code Auto / Manual / Plan …
     let groups = mode_view(&app, &agent, [mode.clone(), permission.clone()]);
     let plan_id = plan_option(&agent);
@@ -342,7 +347,7 @@ pub fn Composer(
     let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || !chips_now.is_empty() || quote.is_some();
     // The harness's logo: "Cursor Agent · Opus 5.5" is Cursor, whoever made the model.
     let model_logo_svg = agent_logo(&agent);
-    let model_text = model_display(&agent, &model);
+    let (model_text, effort_text) = model_display(&app, &agent, &model, &effort);
     let env_text = if worktree { "Worktree" } else { "This PC" };
 
     // "@" mentions and "/" commands: one suggestion list, keyboard navigable.
@@ -406,16 +411,29 @@ pub fn Composer(
         }
         document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
     };
-    // Choose agent (+ model). On an existing session this ports it.
+    // Choose agent (+ model). On an existing session this ports it. Cursor
+    // stores the model's default variant; an effort the new model doesn't
+    // offer goes back to the default.
     let choose = move |k: AgentKind, m: Option<String>, sid: Option<String>| {
         let mut app = app;
+        let (m, keep_effort) = match m {
+            Some(id) => {
+                let (id, _) = crate::agent_models::compose(&app, &k, &id, None, false);
+                let efforts = crate::agent_models::choices(&app, &k).into_iter().find(|c| c.id == id).map(|c| c.efforts).unwrap_or_default();
+                (Some(id), efforts)
+            }
+            None => (None, Vec::new()),
+        };
+        let fit = |e: Option<String>| e.filter(|e| keep_effort.contains(e));
         match &sid {
             Some(id) => {
                 let current = app.peek_session(id, |s| s.agent.clone());
                 if current.as_ref() != Some(&k) {
                     app.port(id, k);
                 }
+                let e = app.peek_session(id, |s| s.effort.clone()).flatten();
                 app.set_session_model(id, m);
+                app.set_session_effort(id, fit(e));
             }
             None => {
                 let mut d = app.draft.write();
@@ -426,6 +444,42 @@ pub fn Composer(
                 }
                 d.agent = k;
                 d.model = m;
+                d.effort = fit(d.effort.clone());
+            }
+        }
+    };
+    // Effort (and Cursor's speed) for the model in use: Cursor switches to
+    // that variant, other agents keep the effort beside the model.
+    let set_effort = move |e: Option<String>, fast: bool, sid: Option<String>| {
+        let mut app = app;
+        let (agent, model, effort) = match &sid {
+            Some(id) => match app.peek_session(id, |s| (s.agent.clone(), s.model.clone(), s.effort.clone())) {
+                Some(x) => x,
+                None => return,
+            },
+            None => {
+                let d = app.draft.read();
+                (d.agent.clone(), d.model.clone(), d.effort.clone())
+            }
+        };
+        let now = crate::agent_models::resolve(&app, &agent, model.as_deref(), effort.as_deref());
+        let Some(family) = now.family.clone().or(now.model.clone()) else { return };
+        let (m, e) = crate::agent_models::compose(&app, &agent, &family, e.as_deref(), fast);
+        // Picking the agent's own default model and effort keeps following it.
+        let model_changed = Some(m.as_str()) != now.model.as_deref() || model.is_some();
+        match &sid {
+            Some(id) => {
+                if model_changed {
+                    app.set_session_model(id, Some(m));
+                }
+                app.set_session_effort(id, e);
+            }
+            None => {
+                let mut d = app.draft.write();
+                if model_changed {
+                    d.model = Some(m);
+                }
+                d.effort = e;
             }
         }
     };
@@ -492,12 +546,17 @@ pub fn Composer(
             up: !home,
             agent: agent.clone(),
             model: model.clone(),
+            effort: effort.clone(),
             onpick: {
                 let sid = session_id.clone();
                 move |(k, m): (AgentKind, Option<String>)| {
                     model_menu.set(false);
                     choose(k, m, sid.clone());
                 }
+            },
+            oneffort: {
+                let sid = session_id.clone();
+                move |(e, fast): (Option<String>, bool)| set_effort(e, fast, sid.clone())
             },
         }
     };
@@ -735,6 +794,7 @@ pub fn Composer(
                             if let Some(svg) = model_logo_svg { Logo { svg, size: 14 } }
                             span { class: "lb sub", "{agent.display_name()}" }
                             span { class: "lb", "{model_text}" }
+                            if !effort_text.is_empty() { span { class: "lb sub eff", "{effort_text}" } }
                             span { class: "chev", Icon { i: I::ChevronDown, size: 12 } }
                         }
                         {picker_menu}
@@ -841,15 +901,75 @@ fn pickable_agents(app: &App, current: &AgentKind) -> Vec<(AgentKind, String, St
     out
 }
 
-fn agent_models(app: &App, kind: &AgentKind) -> Vec<Option<String>> {
-    std::iter::once(None).chain(model_options(app, kind).into_iter().filter(|m| m != "default" && m != "auto").map(Some)).collect()
+/// A row of the model picker.
+#[derive(Clone, PartialEq)]
+struct PickRow {
+    /// What picking stores (`None`: the default); for Cursor, a family.
+    id: Option<String>,
+    label: String,
+    note: String,
+    meta: String,
+    tip: String,
+    /// Model id for its maker's logo.
+    logo_id: Option<String>,
+}
+
+/// The picker's rows for an agent: its default, then the models shown in
+/// Larrier's picker, or every model it offers when `all` (search).
+fn pick_rows(app: &App, kind: &AgentKind, all: bool) -> Vec<PickRow> {
+    use crate::agent_models as am;
+    let mut rows = Vec::new();
+    if let Some(list) = listed_models(app, kind) {
+        rows.push(PickRow { id: None, label: "Auto".into(), note: "Default".into(), meta: String::new(), tip: "The default model".into(), logo_id: None });
+        for m in list.into_iter().filter(|m| m != "default" && m != "auto") {
+            let (label, note, meta, tip) = model_row_text(&Some(m.clone()));
+            rows.push(PickRow { id: Some(m.clone()), label, note, meta, tip, logo_id: Some(m) });
+        }
+        return rows;
+    }
+    // The default row says what it is: Larrier's default, or the agent's own.
+    let r = am::resolve(app, kind, None, None);
+    let mut def_note: Vec<String> = r.model.as_deref().map(|m| am::short_name(app, kind, r.family.as_deref().unwrap_or(m))).into_iter().collect();
+    def_note.extend(r.effort.as_deref().map(larrier_agents::models::effort_label));
+    let whose = if r.model_from_agent { format!("{}'s own default (from its settings)", kind.display_name()) } else { "Your default for this agent in Larrier".to_string() };
+    rows.push(PickRow { id: None, label: "Default".into(), note: def_note.join(" · "), meta: String::new(), tip: whose, logo_id: r.model.clone() });
+    let choices = if all { am::choices(app, kind) } else { am::picker_choices(app, kind) };
+    for c in choices {
+        let (_, reg_note, meta, reg_tip) = model_row_text(&Some(c.id.clone()));
+        let mut note: Vec<String> = Vec::new();
+        if let Some(e) = &c.endpoint {
+            note.push(format!("via {e}"));
+        } else if c.added || c.custom {
+            note.push("Custom".into());
+        }
+        if let Some(n) = c.note.clone().filter(|n| n.len() < 40) {
+            note.push(n);
+        } else if !reg_note.is_empty() && reg_note != "Default" && !c.id.contains('/') {
+            note.push(reg_note);
+        }
+        let meta = if meta.is_empty() { c.context.map(larrier_core::models::tokens_short).unwrap_or_default() } else { meta };
+        let tip = if c.efforts.is_empty() { reg_tip } else { format!("{reg_tip}
+Effort: {}", c.efforts.iter().map(|e| larrier_agents::models::effort_label(e)).collect::<Vec<_>>().join(", ")) };
+        rows.push(PickRow { id: Some(c.id.clone()), label: c.name.trim_start_matches("Claude ").to_string(), note: note.join(" · "), meta, tip, logo_id: Some(c.id) });
+    }
+    rows
 }
 
 /// Agent + model picker: enabled agents on the left, the hovered agent's
-/// models on the right; typing searches every model. Fixed size so it never
-/// jumps while you browse, and it folds into one column on narrow windows.
+/// models on the right; typing searches every model each agent offers. The
+/// effort row under it sets the reasoning effort (and Cursor's speed). Fixed
+/// size so it never jumps while you browse; it folds into one column on
+/// narrow windows.
 #[component]
-fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<String>, onpick: EventHandler<(AgentKind, Option<String>)>) -> Element {
+fn ModelPicker(
+    open: Signal<bool>,
+    up: bool,
+    agent: AgentKind,
+    model: Option<String>,
+    effort: Option<String>,
+    onpick: EventHandler<(AgentKind, Option<String>)>,
+    oneffort: EventHandler<(Option<String>, bool)>,
+) -> Element {
     let app = use_app();
     let mut query = use_signal(String::new);
     let mut browse = use_signal(|| agent.clone());
@@ -865,24 +985,40 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
     let q = query.read().trim().to_lowercase();
     let cur = browse();
     let cur_meta = agents.iter().find(|(k, _, _)| *k == cur).cloned();
-    let results: Vec<(AgentKind, String, Option<String>)> = if q.is_empty() {
+    // The family in use (Cursor stores a variant of it).
+    let now = crate::agent_models::resolve(&app, &agent, model.as_deref(), effort.as_deref());
+    let in_use = |row: &Option<String>| -> bool {
+        match (row, &model) {
+            (None, None) => true,
+            (Some(r), Some(m)) => r == m || now.family.as_deref() == Some(r.as_str()),
+            _ => false,
+        }
+    };
+    let results: Vec<(AgentKind, String, PickRow)> = if q.is_empty() {
         Vec::new()
     } else {
         let mut v = Vec::new();
         for (k, name, _) in agents.iter() {
             let agent_hit = name.to_lowercase().contains(&q);
-            for m in agent_models(&app, k) {
-                let label = model_row_text(&m).0.to_lowercase();
-                let raw = m.clone().unwrap_or_default().to_lowercase();
-                if agent_hit || label.contains(&q) || raw.contains(&q) {
-                    v.push((k.clone(), name.clone(), m));
+            for row in pick_rows(&app, k, true) {
+                let raw = row.id.clone().unwrap_or_default().to_lowercase();
+                if agent_hit || row.label.to_lowercase().contains(&q) || raw.contains(&q) {
+                    v.push((k.clone(), name.clone(), row));
                 }
             }
         }
+        v.truncate(200);
         v
     };
     let typed = query.read().trim().to_string();
     let cur_name = cur_meta.as_ref().map(|m| m.1.clone()).unwrap_or_else(|| cur.display_name().to_string());
+    // Effort (and speed) of the model in use, when browsing its agent.
+    let family = now.family.clone().or(now.model.clone());
+    let fam_choice = family.as_deref().and_then(|f| crate::agent_models::choices(&app, &agent).into_iter().find(|c| c.id == f));
+    let efforts = fam_choice.as_ref().map(|c| c.efforts.clone()).unwrap_or_default();
+    let has_fast = fam_choice.as_ref().map(|c| c.fast).unwrap_or(false);
+    let show_effort = cur == agent && q.is_empty() && (!efforts.is_empty() || has_fast);
+    let (cur_effort, cur_fast, effort_default) = (now.effort.clone(), now.fast, now.effort_from_agent && effort.is_none());
     rsx! {
         Dropdown { open, up, right: true, class: "model-picker",
             div { class: "menu-search",
@@ -899,7 +1035,7 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
                             if e.key() == Key::Enter {
                                 e.prevent_default();
                                 match &first {
-                                    Some((k, _, m)) => onpick.call((k.clone(), m.clone())),
+                                    Some((k, _, row)) => onpick.call((k.clone(), row.id.clone())),
                                     None => {
                                         let t = query.read().trim().to_string();
                                         if !t.is_empty() {
@@ -938,23 +1074,22 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
                             span { class: "nm", "{cur_name}" }
                             if let Some((_, _, sub)) = cur_meta.clone() { span { class: "sub", "{sub}" } }
                         }
-                        for m in agent_models(&app, &cur) {
+                        for row in pick_rows(&app, &cur, false) {
                             {
-                                let checked = cur == agent && model.as_deref() == m.as_deref();
-                                let (label, note, meta, tip) = model_row_text(&m);
-                                let row_key = m.clone().unwrap_or_else(|| "auto".into());
-                                let mlogo = m.as_deref().and_then(model_logo);
+                                let checked = cur == agent && in_use(&row.id);
+                                let row_key = row.id.clone().unwrap_or_else(|| "default".into());
+                                let mlogo = row.logo_id.as_deref().and_then(model_logo);
                                 let k = cur.clone();
-                                let m2 = m.clone();
+                                let m2 = row.id.clone();
                                 rsx! {
-                                    button { key: "{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{tip}",
+                                    button { key: "{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{row.tip}",
                                         onclick: move |_| onpick.call((k.clone(), m2.clone())),
                                         span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } else { Icon { i: I::Sparkle, size: 13, stroke: 1.5 } } }
                                         span { class: "mp-name",
-                                            span { class: "ellipsis", "{label}" }
-                                            if !note.is_empty() { span { class: "mp-note", "{note}" } }
+                                            span { class: "ellipsis", "{row.label}" }
+                                            if !row.note.is_empty() { span { class: "mp-note", "{row.note}" } }
                                         }
-                                        if !meta.is_empty() { span { class: "mp-meta", "{meta}" } }
+                                        if !row.meta.is_empty() { span { class: "mp-meta", "{row.meta}" } }
                                         span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
                                     }
                                 }
@@ -964,22 +1099,21 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
                 }
             } else {
                 div { class: "mp-results",
-                    for (k, name, m) in results.clone() {
+                    for (k, name, row) in results.clone() {
                         {
-                            let checked = k == agent && model.as_deref() == m.as_deref();
-                            let (label, _note, meta, tip) = model_row_text(&m);
-                            let row_key = m.clone().unwrap_or_else(|| "auto".into());
-                            let mlogo = m.as_deref().and_then(model_logo).or_else(|| agent_logo(&k));
-                            let (k2, m2) = (k.clone(), m.clone());
+                            let checked = k == agent && in_use(&row.id);
+                            let row_key = row.id.clone().unwrap_or_else(|| "default".into());
+                            let mlogo = row.logo_id.as_deref().and_then(model_logo).or_else(|| agent_logo(&k));
+                            let (k2, m2) = (k.clone(), row.id.clone());
                             rsx! {
-                                button { key: "{k.id()}-{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{tip}",
+                                button { key: "{k.id()}-{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{row.tip}",
                                     onclick: move |_| onpick.call((k2.clone(), m2.clone())),
                                     span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } }
                                     span { class: "mp-name",
-                                        span { class: "ellipsis", "{label}" }
+                                        span { class: "ellipsis", "{row.label}" }
                                         span { class: "mp-note", "{name}" }
                                     }
-                                    if !meta.is_empty() { span { class: "mp-meta", "{meta}" } }
+                                    if !row.meta.is_empty() { span { class: "mp-meta", "{row.meta}" } }
                                     span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
                                 }
                             }
@@ -1002,15 +1136,45 @@ fn ModelPicker(open: Signal<bool>, up: bool, agent: AgentKind, model: Option<Str
                     }
                 }
             }
+            if show_effort {
+                div { class: "mp-effort",
+                    span { class: "lbl", Icon { i: I::Brain, size: 13 } "Effort" }
+                    div { class: "seg",
+                        for e in efforts.clone() {
+                            {
+                                let on = cur_effort.as_deref() == Some(e.as_str());
+                                let e2 = e.clone();
+                                rsx! {
+                                    button { key: "{e}", class: if on && effort_default { "on dflt" } else if on { "on" } else { "" },
+                                        title: if on && effort_default { "The default" } else { "" },
+                                        onclick: move |_| oneffort.call((Some(e2.clone()), cur_fast)),
+                                        {larrier_agents::models::effort_label(&e)}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if has_fast {
+                        button { class: if cur_fast { "fast on" } else { "fast" }, title: "Faster responses, at a higher price",
+                            onclick: { let ce = cur_effort.clone(); move |_| oneffort.call((ce.clone(), !cur_fast)) },
+                            Icon { i: I::Zap, size: 12 }
+                            "Fast"
+                        }
+                    }
+                }
+            }
             div { class: "mp-foot",
                 button { class: "menu-item",
-                    onclick: move |_| {
-                        let mut o = open;
-                        o.set(false);
-                        app.open_settings(SettingsTab::Agents);
+                    onclick: {
+                        let k = cur.clone();
+                        move |_| {
+                            let mut o = open;
+                            o.set(false);
+                            app.open_models(Some(k.clone()));
+                        }
                     },
                     span { class: "muted", Icon { i: I::Settings, size: 14 } }
-                    span { class: "ellipsis", "Manage agents & models…" }
+                    span { class: "ellipsis", "Manage {cur_name} models…" }
                 }
                 span { class: "mp-keys", "↑↓ ↵" }
             }

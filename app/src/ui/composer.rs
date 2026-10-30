@@ -473,7 +473,7 @@ pub fn Composer(
     let ws_label = ws_now
         .as_ref()
         .map(|p| std::path::Path::new(p).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or(p.clone()))
-        .unwrap_or_else(|| "No Repo".into());
+        .unwrap_or_else(|| "Home".into());
     let is_repo = branch.read().clone().flatten().is_some();
 
     // The agent + model picker menu.
@@ -516,7 +516,7 @@ pub fn Composer(
                             Icon { i: I::ChevronDown, size: 12 }
                         }
                         Dropdown { open: ws_menu, up: false,
-                            div { class: "menu-label", "Repository" }
+                            div { class: "menu-label", "Project" }
                             for w in workspaces.clone() {
                                 MenuItem {
                                     key: "{w.id}",
@@ -530,7 +530,7 @@ pub fn Composer(
                                     },
                                 }
                             }
-                            MenuItem { label: "No Repo".to_string(), icon: Some(I::Home), checked: ws_now.is_none(),
+                            MenuItem { label: "Home".to_string(), sub: Some("No project folder".to_string()), icon: Some(I::Home), checked: ws_now.is_none(),
                                 onclick: move |_| { ws_menu.set(false); app.draft.write().workspace = None; } }
                             div { class: "menu-sep" }
                             MenuItem { label: "Open Folder…".to_string(), icon: Some(I::FolderOpen), onclick: move |_| { ws_menu.set(false); app.pick_workspace(true); } }

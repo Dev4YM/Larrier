@@ -101,7 +101,7 @@ impl SettingsTab {
             SettingsTab::Accounts => "Accounts",
             SettingsTab::Models => "Models & API Keys",
             SettingsTab::Sessions => "Sessions & Import",
-            SettingsTab::Workspaces => "Workspaces",
+            SettingsTab::Workspaces => "Projects",
             SettingsTab::Shortcuts => "Keyboard Shortcuts",
             SettingsTab::About => "About",
         }
@@ -166,7 +166,7 @@ pub struct Ui {
     /// Back / forward navigation.
     pub history: Vec<View>,
     pub hist_pos: usize,
-    /// Repositories expanded / collapsed by the user (overrides the default).
+    /// Projects expanded / collapsed by the user (overrides the default).
     pub repo_open: BTreeSet<String>,
     pub repo_closed: BTreeSet<String>,
     /// Open top-level menu in the menu bar.
@@ -1149,7 +1149,7 @@ impl App {
         self.mutate_session(session_id, |s| s.status = SessionStatus::Running);
     }
 
-    fn create_session_from_draft(self) -> anyhow::Result<String> {
+    fn create_session_from_draft(mut self) -> anyhow::Result<String> {
         let d = self.draft.read().clone();
         let ws = d.workspace.clone().map(|p| {
             let mut w = WorkspaceRef::from_path(p.clone());
@@ -1201,6 +1201,11 @@ impl App {
         self.save_session(&s);
         self.put_session(s);
         self.ensure_tab(&View::Agent(id.clone()), true);
+        // Its project opens, so the new chat is seen arriving in it.
+        let key = project_key(d.workspace.as_deref());
+        let mut ui = self.ui.write();
+        ui.repo_closed.remove(&key);
+        ui.repo_open.insert(key);
         Ok(id)
     }
 
@@ -1668,6 +1673,24 @@ pub fn flush_saves() {
 /// and Codex mark turn ends in the transcript (`external_turn`); a turn left
 /// open by a crashed CLI stops counting after a while. Agents without turn
 /// markers count while their files are being written (`live_recent`).
+/// Sidebar key of Home, the project of chats that have none.
+pub const HOME_KEY: &str = "~home";
+
+/// Sidebar key of a session's project: its folder, or [`HOME_KEY`] for
+/// chats without a folder, in the home folder itself, or in Codex's
+/// project-less thread folders (`~/Documents/Codex/<date>/<name>`).
+pub fn project_key(path: Option<&str>) -> String {
+    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let Some(p) = path.map(norm).filter(|p| !p.is_empty()) else { return HOME_KEY.into() };
+    static HOME: OnceLock<Option<String>> = OnceLock::new();
+    if let Some(h) = HOME.get_or_init(|| dirs::home_dir().map(|h| norm(&h.to_string_lossy()))) {
+        if p == *h || p.starts_with(&format!("{h}/documents/codex/")) {
+            return HOME_KEY.into();
+        }
+    }
+    p
+}
+
 /// Back / forward history without the views of session `id`: where `pos`
 /// lands (the nearest view before it), and no view twice in a row.
 fn without_session(history: Vec<View>, pos: usize, id: &str) -> (Vec<View>, usize) {
@@ -1867,6 +1890,17 @@ pub fn rel_time(t: chrono::DateTime<chrono::Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chats_without_a_project_go_home() {
+        assert_eq!(project_key(None), HOME_KEY);
+        assert_eq!(project_key(Some("")), HOME_KEY);
+        assert_eq!(project_key(Some("D:\\Work\\App\\")), "d:/work/app");
+        let home = dirs::home_dir().unwrap().to_string_lossy().to_string();
+        assert_eq!(project_key(Some(&home)), HOME_KEY);
+        assert_eq!(project_key(Some(&format!("{home}/Documents/Codex/2026-10-30/fix-login"))), HOME_KEY);
+        assert_ne!(project_key(Some(&format!("{home}/projects/app"))), HOME_KEY);
+    }
 
     #[test]
     fn a_deleted_session_leaves_the_history() {

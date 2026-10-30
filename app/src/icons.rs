@@ -164,6 +164,7 @@ icons! {
     Minus => "minus",
     Gauge => "gauge",
     Timer => "timer",
+    CheckCheck => "check-check",
 }
 
 /// Hand-drawn Windows caption glyphs.

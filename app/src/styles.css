@@ -1323,6 +1323,35 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
   background: var(--pane); animation: fade-in .16s ease-out; }
 .app.no-motion .sub-layer { animation: none; }
 
+/* Sidebar motion: projects (and their agents, in Mixed) grow open and
+   shrink closed, the chevron turns, a new chat slides into its project,
+   and a dragged project lifts and the others make room. */
+.collapse { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .28s cubic-bezier(.2, .8, .2, 1), opacity .22s ease; }
+.collapse.open { grid-template-rows: 1fr; opacity: 1; }
+@starting-style { .collapse.open { grid-template-rows: 0fr; opacity: 0; } }
+.collapse-inner { min-height: 0; overflow: hidden; }
+.repo-group { margin-bottom: 0; transition: margin-bottom .28s cubic-bezier(.2, .8, .2, 1); }
+.repo-group.open { margin-bottom: 8px; }
+.repo-row .ic-chev svg, .agent-sub-row .chev svg { transition: transform .22s cubic-bezier(.2, .8, .2, 1); }
+.repo-row.open .ic-chev svg, .agent-sub-row.open .chev svg { transform: rotate(90deg); }
+.agent-sub-row { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; border-radius: 7px; font-size: 12px;
+  color: var(--fg-3); width: 100%; cursor: pointer; user-select: none; }
+.agent-sub-row:hover { background: var(--hover); color: var(--fg-2); }
+.agent-sub-row .chev { display: inline-flex; width: 12px; color: var(--fg-3); }
+.agent-sub-row .lg { display: inline-flex; }
+.agent-sub-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.agent-sub-row .cnt { font-size: 11px; font-variant-numeric: tabular-nums; }
+.agent-sub .chat-row { padding-left: 16px; }
+.chat-row.fresh { overflow: hidden; animation: row-slide-in .42s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes row-slide-in { from { height: 0; opacity: 0; transform: translateX(-10px); } 60% { opacity: 1; } }
+.repo-group.project-lifted { position: relative; z-index: 6; border-radius: 8px; background: var(--win); box-shadow: 0 8px 24px -10px rgba(0, 0, 0, .25);
+  opacity: .96; cursor: grabbing; }
+html.dragging-project, html.dragging-project * { cursor: grabbing !important; user-select: none !important; }
+.project-drop-line { position: fixed; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; z-index: 400;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 18%, transparent); transition: top .12s ease; }
+.app.no-motion .collapse, .app.no-motion .repo-group, .app.no-motion .repo-row .ic-chev svg, .app.no-motion .agent-sub-row .chev svg { transition: none; }
+.app.no-motion .chat-row.fresh { animation: none; }
+
 /* Button corners (Appearance → Layout). Balanced is the default look;
    Solid squares them off, Rounded makes pills and circles. */
 .app.corners-solid :is(.pill-btn, .ghost-btn, .primary-btn, .danger-btn, .select-btn, .picker, .chip, .env-chip, .tk-stop-all, .seg) { border-radius: 3px; }

@@ -152,6 +152,10 @@ pub struct Settings {
     /// Show archived agents in the sidebar.
     #[serde(default)]
     pub show_archived: bool,
+    /// Projects in the order the user dragged them into (sidebar keys;
+    /// `~home` is Home). Projects not listed come first, Home last.
+    #[serde(default)]
+    pub project_order: Vec<String>,
     #[serde(default = "yes")]
     pub notify_on_finish: bool,
 
@@ -310,6 +314,7 @@ impl Default for Settings {
             sidebar_group: SidebarGroup::default(),
             sidebar_sort: SidebarSort::default(),
             show_archived: false,
+            project_order: Vec::new(),
             notify_on_finish: true,
             accent: String::new(),
             ui_font: None,
@@ -350,6 +355,8 @@ pub enum SidebarGroup {
     Status,
     Workspace,
     Agent,
+    /// By project, then by agent inside each project.
+    Mixed,
 }
 
 /// Order of agents inside each sidebar group.

@@ -1,6 +1,9 @@
 //! Left sidebar, laid out like Cursor's Agents Window: navigation, pinned
-//! agents, then every repository with its agents nested underneath.
+//! agents, then every project with its agents nested underneath (or every
+//! agent, or projects with their agents grouped by harness). Chats without
+//! a project live in Home.
 
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
@@ -10,12 +13,12 @@ use dioxus::html::input_data::MouseButton;
 
 use super::{AgentGlyph, Dropdown, MenuItem};
 use crate::icons::{Icon, I};
-use crate::state::{rel_time, use_app, use_ui, user_name, CtxMenu, SettingsTab, View};
+use crate::state::{project_key, rel_time, use_app, use_ui, user_name, CtxMenu, SettingsTab, View, HOME_KEY};
 
 const PAGE: usize = 5;
 const OPEN_IF_ACTIVE_WITHIN_DAYS: i64 = 7;
 
-/// One group (a repository, or an agent) with its chats.
+/// One group (a project, or an agent) with its chats.
 struct Repo {
     key: String,
     name: String,
@@ -23,6 +26,7 @@ struct Repo {
     items: Vec<SessionSummary>,
     latest: chrono::DateTime<chrono::Utc>,
     agent: Option<AgentKind>,
+    home: bool,
 }
 
 fn sort_items(items: &mut [SessionSummary], sort: SidebarSort) {
@@ -44,6 +48,7 @@ fn build_agent_groups(list: &[SessionSummary], sort: SidebarSort) -> Vec<Repo> {
             items: Vec::new(),
             latest: s.created_at,
             agent: Some(s.agent.clone()),
+            home: false,
         });
         e.latest = e.latest.max(s.created_at);
         e.items.push(s.clone());
@@ -57,24 +62,22 @@ fn build_agent_groups(list: &[SessionSummary], sort: SidebarSort) -> Vec<Repo> {
 }
 
 fn repo_key(s: &SessionSummary) -> String {
-    match &s.workspace {
-        Some(w) => w.path.replace('\\', "/").trim_end_matches('/').to_lowercase(),
-        None => String::new(),
-    }
+    project_key(s.workspace.as_ref().map(|w| w.path.as_str()))
 }
 
-fn build_repos(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], sort: SidebarSort) -> (Vec<SessionSummary>, Option<Repo>, Vec<Repo>) {
+/// Projects with their chats (Home among them), in the user's order.
+fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], sort: SidebarSort, order: &[String]) -> (Vec<SessionSummary>, Vec<Repo>) {
     let mut pinned = Vec::new();
     let mut map: BTreeMap<String, Repo> = BTreeMap::new();
-    let mut no_repo = Repo { key: String::new(), name: "No Repo".into(), path: None, items: Vec::new(), latest: chrono::DateTime::<chrono::Utc>::MIN_UTC, agent: None };
+    let mut home = Repo { key: HOME_KEY.into(), name: "Home".into(), path: None, items: Vec::new(), latest: chrono::DateTime::<chrono::Utc>::MIN_UTC, agent: None, home: true };
     for s in list.iter() {
         if s.pinned {
             pinned.push(s.clone());
         }
         let key = repo_key(s);
-        if key.is_empty() {
-            no_repo.latest = no_repo.latest.max(s.created_at);
-            no_repo.items.push(s.clone());
+        if key == HOME_KEY {
+            home.latest = home.latest.max(s.created_at);
+            home.items.push(s.clone());
             continue;
         }
         let w = s.workspace.as_ref().unwrap();
@@ -85,23 +88,50 @@ fn build_repos(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], 
             items: Vec::new(),
             latest: s.created_at,
             agent: None,
+            home: false,
         });
         e.latest = e.latest.max(s.created_at);
         e.items.push(s.clone());
     }
-    // Workspaces added in settings show even without agents yet.
+    // Folders added in settings show even without agents yet.
     for w in workspaces {
-        let key = w.path.replace('\\', "/").trim_end_matches('/').to_lowercase();
-        map.entry(key.clone()).or_insert_with(|| Repo { key, name: w.name.clone(), path: Some(w.path.clone()), items: Vec::new(), latest: w.added_at, agent: None });
+        let key = project_key(Some(&w.path));
+        if key != HOME_KEY {
+            map.entry(key.clone()).or_insert_with(|| Repo { key, name: w.name.clone(), path: Some(w.path.clone()), items: Vec::new(), latest: w.added_at, agent: None, home: false });
+        }
     }
-    let mut repos: Vec<Repo> = map.into_values().collect();
-    repos.sort_by(|a, b| b.latest.cmp(&a.latest));
-    for r in repos.iter_mut() {
+    let mut projects: Vec<Repo> = map.into_values().collect();
+    if !home.items.is_empty() {
+        projects.push(home);
+    }
+    order_projects(&mut projects, order);
+    for r in projects.iter_mut() {
         sort_items(&mut r.items, sort);
     }
-    sort_items(&mut no_repo.items, sort);
-    let no_repo = if no_repo.items.is_empty() { None } else { Some(no_repo) };
-    (pinned, no_repo, repos)
+    (pinned, projects)
+}
+
+/// The user's order (dragged in the sidebar); projects not in it yet come
+/// first, newest first, and Home last.
+fn order_projects(projects: &mut [Repo], order: &[String]) {
+    projects.sort_by_key(|r| match order.iter().position(|k| *k == r.key) {
+        Some(i) => (1, i, Reverse(r.latest)),
+        None if r.home => (2, 0, Reverse(r.latest)),
+        None => (0, 0, Reverse(r.latest)),
+    });
+}
+
+/// A project's chats by agent, the most recently used agent first.
+fn by_agent(items: &[SessionSummary]) -> Vec<(AgentKind, Vec<SessionSummary>)> {
+    let mut groups: Vec<(AgentKind, Vec<SessionSummary>)> = Vec::new();
+    for s in items {
+        match groups.iter_mut().find(|(a, _)| *a == s.agent) {
+            Some((_, v)) => v.push(s.clone()),
+            None => groups.push((s.agent.clone(), vec![s.clone()])),
+        }
+    }
+    groups.sort_by_key(|(_, v)| Reverse(v.iter().map(|s| s.created_at).max()));
+    groups
 }
 
 #[component]
@@ -115,9 +145,9 @@ pub fn Sidebar() -> Element {
     let running: Vec<String> = app.active_ids();
     let all = app.sessions.read().clone();
     let workspaces = app.config.read().workspaces.clone();
-    let (group, sort, show_archived) = {
+    let (group, sort, show_archived, order) = {
         let c = app.config.read();
-        (c.settings.sidebar_group, c.settings.sidebar_sort, c.settings.show_archived)
+        (c.settings.sidebar_group, c.settings.sidebar_sort, c.settings.show_archived, c.settings.project_order.clone())
     };
     let mut filter_menu = use_signal(|| false);
     let all: Vec<SessionSummary> = all.into_iter().filter(|s| show_archived || !s.archived).collect();
@@ -134,16 +164,20 @@ pub fn Sidebar() -> Element {
             .collect()
     };
     let rest: Vec<SessionSummary> = filtered.clone();
-    let (pinned, no_repo, repos) = if group == SidebarGroup::Agent {
+    let (pinned, repos) = if group == SidebarGroup::Agent {
         let pinned: Vec<SessionSummary> = rest.iter().filter(|s| s.pinned).cloned().collect();
-        (pinned, None, build_agent_groups(&rest, sort))
+        (pinned, build_agent_groups(&rest, sort))
     } else {
-        build_repos(&rest, if query.is_empty() { &workspaces } else { &[] }, sort)
+        build_projects(&rest, if query.is_empty() { &workspaces } else { &[] }, sort, &order)
     };
     let group_label = match group {
         SidebarGroup::Agent => "Agents",
-        _ => "Repositories",
+        _ => "Projects",
     };
+    let mixed = group == SidebarGroup::Mixed;
+    // Projects can be dragged into another order (not agents, not while
+    // searching).
+    let draggable = group != SidebarGroup::Agent && query.is_empty();
     let selected = app.current_id();
     let selected_repo = selected
         .as_ref()
@@ -223,8 +257,9 @@ pub fn Sidebar() -> Element {
                             }
                             Dropdown { open: filter_menu, up: false, right: true,
                                 div { class: "menu-label", "Group by" }
-                                MenuItem { label: "Repository".to_string(), checked: group != SidebarGroup::Agent, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Workspace) }
+                                MenuItem { label: "Project".to_string(), checked: matches!(group, SidebarGroup::Workspace | SidebarGroup::Status), onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Workspace) }
                                 MenuItem { label: "Agent".to_string(), checked: group == SidebarGroup::Agent, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Agent) }
+                                MenuItem { label: "Mixed".to_string(), sub: Some("Project, then agent".to_string()), checked: mixed, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Mixed) }
                                 div { class: "menu-sep" }
                                 div { class: "menu-label", "Sort by" }
                                 MenuItem { label: "Date created".to_string(), checked: sort != SidebarSort::Name, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Created) }
@@ -232,14 +267,14 @@ pub fn Sidebar() -> Element {
                                 div { class: "menu-sep" }
                                 MenuItem { label: "Show archived".to_string(), checked: show_archived, onclick: move |_| app.update_config(|c| c.settings.show_archived = !c.settings.show_archived) }
                                 div { class: "menu-sep" }
-                                MenuItem { label: "Mark all as read".to_string(), icon: Some(I::Check), onclick: move |_| app.mark_all_read() }
+                                MenuItem { label: "Mark all as read".to_string(), icon: Some(I::CheckCheck), onclick: move |_| app.mark_all_read() }
                             }
                         }
-                        button { class: "icon-btn", title: "Add a repository", onclick: move |_| app.pick_workspace(false),
+                        button { class: "icon-btn", title: "Add a project", onclick: move |_| app.pick_workspace(false),
                             Icon { i: I::FolderPlus, size: 15, stroke: 1.5 }
                         }
                     }
-                    if repos.is_empty() && no_repo.is_none() {
+                    if repos.is_empty() {
                         div { style: "padding: 8px 12px; color: var(--fg-3); font-size: 12px; line-height: 18px;",
                             if query.is_empty() { "Add a folder, or import your agent sessions from Settings → Sessions." } else { "No matching agents" }
                         }
@@ -251,22 +286,12 @@ pub fn Sidebar() -> Element {
                             name: r.name.clone(),
                             path: r.path.clone(),
                             items: r.items.clone(),
-                            default_open: ctx.searching || selected_repo.as_deref() == Some(r.key.as_str()) || (i < 3 && (chrono::Utc::now() - r.latest).num_days() < OPEN_IF_ACTIVE_WITHIN_DAYS),
+                            default_open: ctx.searching || selected_repo.as_deref() == Some(r.key.as_str()) || (!r.home && i < 3 && (chrono::Utc::now() - r.latest).num_days() < OPEN_IF_ACTIVE_WITHIN_DAYS),
                             ctx: ctx.clone(),
-                            home: false,
+                            home: r.home,
                             agent: r.agent.clone(),
-                        }
-                    }
-                    if let Some(r) = no_repo {
-                        RepoGroup {
-                            rkey: "~no-repo".to_string(),
-                            name: r.name.clone(),
-                            path: None,
-                            items: r.items.clone(),
-                            default_open: ctx.searching || selected_repo.as_deref() == Some(""),
-                            ctx: ctx.clone(),
-                            home: true,
-                            agent: None,
+                            mixed,
+                            draggable,
                         }
                     }
                 }
@@ -318,20 +343,18 @@ struct SideCtx {
 }
 
 #[component]
-fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<SessionSummary>, default_open: bool, ctx: SideCtx, home: bool, agent: Option<AgentKind>) -> Element {
+fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<SessionSummary>, default_open: bool, ctx: SideCtx, home: bool, agent: Option<AgentKind>, mixed: bool, draggable: bool) -> Element {
     let mut app = use_app();
-    let mut more = use_signal(|| false);
     let rk = rkey.clone();
     let user_choice = use_ui(move |u| if u.repo_open.contains(&rk) { Some(true) } else if u.repo_closed.contains(&rk) { Some(false) } else { None })();
     let open = user_choice.unwrap_or(default_open);
     let k = rkey.clone();
     let count = items.len();
-    let shown: Vec<SessionSummary> = if more() { items.clone() } else { items.iter().take(PAGE).cloned().collect() };
-    let hidden = count.saturating_sub(shown.len());
-    let title = path.clone().unwrap_or_else(|| if agent.is_some() { name.clone() } else { "Agents and chats without a folder".into() });
+    let title = path.clone().unwrap_or_else(|| if agent.is_some() { name.clone() } else { "Chats without a project".into() });
+    let drag = if draggable { rkey.clone() } else { String::new() };
     rsx! {
-        div { class: if open && !items.is_empty() { "repo-group" } else { "" },
-            div { class: "repo-row", role: "button", title: "{title}",
+        div { class: if open && !items.is_empty() { "repo-group open" } else { "repo-group" }, "data-project": "{drag}",
+            div { class: if open { "repo-row open" } else { "repo-row" }, role: "button", title: "{title}", "data-drag-project": "{drag}",
                 onclick: move |_| {
                     let mut ui = app.ui.write();
                     if open {
@@ -350,14 +373,12 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
                         else if open { Icon { i: I::FolderOpen, size: 16, stroke: 1.5 } }
                         else { Icon { i: I::Folder, size: 16, stroke: 1.5 } }
                     }
-                    span { class: "ic-chev",
-                        if open { Icon { i: I::ChevronDown, size: 15, stroke: 1.6 } } else { Icon { i: I::ChevronRight, size: 15, stroke: 1.6 } }
-                    }
+                    span { class: "ic-chev", Icon { i: I::ChevronRight, size: 15, stroke: 1.6 } }
                 }
                 span { class: "nm", dir: "auto", "{name}" }
                 if count > 0 { span { class: "cnt", "{count}" } }
                 if agent.is_none() {
-                    button { class: "icon-btn sm add", title: if path.is_some() { "New agent in {name}" } else { "New agent without a folder" },
+                    button { class: "icon-btn sm add", title: if path.is_some() { "New agent in {name}" } else { "New agent in Home" },
                         onclick: {
                             let p = path.clone();
                             move |e: MouseEvent| {
@@ -370,14 +391,58 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
                     }
                 }
             }
-            if open {
-                for s in shown {
-                    ChatRow { key: "{s.id}", s: s.clone(), ctx: ctx.clone(), logo: false }
-                }
-                if hidden > 0 {
-                    button { class: "show-more", onclick: move |_| more.set(true), "More" }
+            super::Collapse { open,
+                if mixed && agent.is_none() {
+                    for (a, list) in by_agent(&items) {
+                        AgentSub { key: "{a.id()}", pkey: rkey.clone(), agent: a.clone(), items: list, ctx: ctx.clone() }
+                    }
+                } else {
+                    Rows { items: items.clone(), ctx: ctx.clone() }
                 }
             }
+        }
+    }
+}
+
+/// One agent's chats inside a project (Mixed grouping).
+#[component]
+fn AgentSub(pkey: String, agent: AgentKind, items: Vec<SessionSummary>, ctx: SideCtx) -> Element {
+    let mut app = use_app();
+    let key = format!("{pkey}|{}", agent.id());
+    let k2 = key.clone();
+    let open = !use_ui(move |u| u.repo_closed.contains(&k2))();
+    let count = items.len();
+    rsx! {
+        div { class: "agent-sub",
+            div { class: if open { "agent-sub-row open" } else { "agent-sub-row" }, role: "button",
+                onclick: move |_| {
+                    let mut ui = app.ui.write();
+                    if open { ui.repo_closed.insert(key.clone()); } else { ui.repo_closed.remove(&key); }
+                },
+                span { class: "chev", Icon { i: I::ChevronRight, size: 12, stroke: 1.7 } }
+                span { class: "lg", AgentGlyph { kind: agent.clone() } }
+                span { class: "nm", "{agent.display_name()}" }
+                span { class: "cnt", "{count}" }
+            }
+            super::Collapse { open,
+                Rows { items: items.clone(), ctx: ctx.clone() }
+            }
+        }
+    }
+}
+
+/// A list of chats, the first few then "More".
+#[component]
+fn Rows(items: Vec<SessionSummary>, ctx: SideCtx) -> Element {
+    let mut more = use_signal(|| false);
+    let shown: Vec<SessionSummary> = if more() { items.clone() } else { items.iter().take(PAGE).cloned().collect() };
+    let hidden = items.len().saturating_sub(shown.len());
+    rsx! {
+        for s in shown {
+            ChatRow { key: "{s.id}", s: s.clone(), ctx: ctx.clone(), logo: false }
+        }
+        if hidden > 0 {
+            button { class: "show-more", onclick: move |_| more.set(true), "More" }
         }
     }
 }
@@ -391,6 +456,10 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
     let mut cls = String::from("chat-row");
     if selected {
         cls.push_str(" selected");
+    }
+    // Just started here: it slides into its project.
+    if chrono::Utc::now() - s.created_at < chrono::Duration::seconds(8) {
+        cls.push_str(" fresh");
     }
     if s.unread {
         cls.push_str(" unread");

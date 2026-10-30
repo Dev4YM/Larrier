@@ -659,7 +659,7 @@ pub fn AppearancePage() -> Element {
                             sample: "steps", onchange: move |v| app.update_config(|c| c.settings.text_sizes.steps = v) }
                         SizeRow { title: "Code", desc: "Code blocks, diffs and tool output.", value: s.text_sizes.code, min: 10, max: 20,
                             sample: "code", onchange: move |v| app.update_config(|c| c.settings.text_sizes.code = v) }
-                        SizeRow { title: "Sidebar", desc: "Chat and repository names.", value: s.text_sizes.sidebar, min: 11, max: 18,
+                        SizeRow { title: "Sidebar", desc: "Chat and project names.", value: s.text_sizes.sidebar, min: 11, max: 18,
                             sample: "side", onchange: move |v| app.update_config(|c| c.settings.text_sizes.sidebar = v) }
                         SizeRow { title: "Terminal", desc: "The built-in terminal (new terminals).", value: s.text_sizes.terminal, min: 10, max: 22,
                             sample: "term", onchange: move |v| app.update_config(|c| c.settings.text_sizes.terminal = v) }
@@ -701,15 +701,15 @@ pub fn AppearancePage() -> Element {
                             div { class: "lbl", div { class: "t", "Transcript Width" } div { class: "d", "Widest the conversation column gets." } }
                             div { class: "ap-range wide",
                                 div { class: "ap-tw", div { class: "ap-tw-col", style: "width: {((s.transcript_width.clamp(560, 1600) - 480) as f64 / 11.2).round()}%;" } }
-                                super::Stepper { value: s.transcript_width.clamp(560, 1600), min: 560, max: 1600, step: 40,
+                                super::Stepper { value: s.transcript_width.clamp(560, 1600), min: 560, max: 1600, step: 20,
                                     onchange: move |v| app.update_config(|c| c.settings.transcript_width = v) }
                             }
                         }
                         div { class: "set-row",
-                            div { class: "lbl", div { class: "t", "Sidebar Grouping" } div { class: "d", "How agents are grouped in the sidebar." } }
+                            div { class: "lbl", div { class: "t", "Sidebar Grouping" } div { class: "d", "Projects, agents, or projects with their agents grouped inside." } }
                             div { class: "seg",
-                                for (g, l) in [(SidebarGroup::Status, "Repositories"), (SidebarGroup::Agent, "Agent")] {
-                                    button { key: "{l}", class: seg(s.sidebar_group == g || (l == "Repositories" && s.sidebar_group == SidebarGroup::Workspace)),
+                                for (g, l) in [(SidebarGroup::Workspace, "Projects"), (SidebarGroup::Agent, "Agent"), (SidebarGroup::Mixed, "Mixed")] {
+                                    button { key: "{l}", class: seg(s.sidebar_group == g || (g == SidebarGroup::Workspace && s.sidebar_group == SidebarGroup::Status)),
                                         onclick: move |_| app.update_config(|c| c.settings.sidebar_group = g), "{l}" }
                                 }
                             }
@@ -1030,7 +1030,7 @@ fn PreviewPane(dark: bool) -> Element {
                             div { class: "nav-row", span { class: "ic", Icon { i: I::SquarePen, size: 15, stroke: 1.5 } } "New Agent" }
                             div { class: "nav-row", span { class: "ic", Icon { i: I::CalendarClock, size: 15, stroke: 1.5 } } "Automations" }
                         }
-                        div { class: "ap-m-sec", "Repositories" }
+                        div { class: "ap-m-sec", "Projects" }
                         div { class: "repo-row", span { class: "ic", Icon { i: I::FolderOpen, size: 15, stroke: 1.5 } } span { class: "nm", "larrier" } }
                         div { class: "chat-row selected", span { class: "bullet", span { class: "pt" } } span { class: "t", "Refactor parser" } span { class: "tm", "2m" } }
                         div { class: "chat-row", span { class: "bullet", super::Spinner { size: 13 } } span { class: "t", "Add dark mode" } span { class: "tm", "now" } }

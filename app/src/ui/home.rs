@@ -1,4 +1,4 @@
-//! New agent screen: a centered composer with the repository and
+//! New agent screen: a centered composer with the project and
 //! environment pickers above it — Cursor's empty state.
 
 use dioxus::prelude::*;

@@ -262,6 +262,90 @@ pub fn Root() -> Element {
               window.addEventListener('blur', () => end(true));
               window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && st && st.active) { e.stopPropagation(); end(true); } }, true);
             })();
+            // Drag a project (its header row) into another place in the
+            // sidebar: it lifts and follows the pointer, a line shows where
+            // it lands, and on drop the projects slide into their new order.
+            (() => {
+              let pd = null;
+              const groups = () => [...document.querySelectorAll('[data-project]')].filter(g => g.getAttribute('data-project'));
+              document.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0 || !(e.target instanceof Element)) return;
+                const row = e.target.closest('[data-drag-project]');
+                if (!row || !row.getAttribute('data-drag-project') || e.target.closest('button')) return;
+                pd = { key: row.getAttribute('data-drag-project'), x0: e.clientX, y0: e.clientY, active: false, group: row.closest('[data-project]'), line: null, before: undefined };
+              }, true);
+              window.addEventListener('pointermove', (e) => {
+                if (!pd) return;
+                if (!pd.active) {
+                  if (Math.hypot(e.clientX - pd.x0, e.clientY - pd.y0) < 6 || !pd.group) return;
+                  pd.active = true;
+                  pd.group.classList.add('project-lifted');
+                  document.documentElement.classList.add('dragging-project');
+                  pd.line = document.createElement('div');
+                  pd.line.className = 'project-drop-line';
+                  document.body.appendChild(pd.line);
+                  window.getSelection()?.removeAllRanges();
+                }
+                pd.group.style.transform = 'translateY(' + (e.clientY - pd.y0) + 'px)';
+                // Lands before the first project whose header is below the pointer.
+                const others = groups().filter(g => g !== pd.group);
+                pd.before = null;
+                for (const g of others) {
+                  const h = (g.querySelector('[data-drag-project]') || g).getBoundingClientRect();
+                  if (e.clientY < h.top + h.height / 2) { pd.before = g; break; }
+                }
+                const ref = pd.before || others[others.length - 1];
+                if (ref) {
+                  const r = ref.getBoundingClientRect();
+                  const y = pd.before ? r.top - 1 : r.bottom + 1;
+                  Object.assign(pd.line.style, { left: (r.left + 8) + 'px', width: Math.max(0, r.width - 16) + 'px', top: y + 'px' });
+                }
+              }, true);
+              const done = (cancel) => {
+                if (!pd) return;
+                const d = pd; pd = null;
+                if (!d.active) return;
+                d.line && d.line.remove();
+                document.documentElement.classList.remove('dragging-project');
+                d.group.classList.remove('project-lifted');
+                const all = groups();
+                const first = new Map(all.map(g => [g.getAttribute('data-project'), g.getBoundingClientRect().top]));
+                const keys = all.filter(g => g !== d.group).map(g => g.getAttribute('data-project'));
+                const at = d.before ? keys.indexOf(d.before.getAttribute('data-project')) : keys.length;
+                keys.splice(at < 0 ? keys.length : at, 0, d.key);
+                if (!cancel) dioxus.send({ t: 'project-order', order: keys });
+                // Once the sidebar shows the new order, each project slides
+                // from where it was into its place.
+                const want = cancel ? all.map(g => g.getAttribute('data-project')).join('|') : keys.join('|');
+                let tries = 0;
+                const flip = () => {
+                  const now = groups();
+                  if (now.map(g => g.getAttribute('data-project')).join('|') !== want && tries++ < 30) { requestAnimationFrame(flip); return; }
+                  d.group.style.transition = 'none';
+                  d.group.style.transform = '';
+                  for (const g of now) {
+                    const f = first.get(g.getAttribute('data-project'));
+                    if (f == null) continue;
+                    const dy = f - g.getBoundingClientRect().top;
+                    if (!dy) continue;
+                    g.style.transition = 'none';
+                    g.style.transform = 'translateY(' + dy + 'px)';
+                    g.getBoundingClientRect();
+                    g.style.transition = 'transform .3s cubic-bezier(.2, .8, .2, 1)';
+                    g.style.transform = '';
+                    g.addEventListener('transitionend', () => { g.style.transition = ''; }, { once: true });
+                  }
+                };
+                requestAnimationFrame(flip);
+                const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+                window.addEventListener('click', swallow, { capture: true, once: true });
+                setTimeout(() => window.removeEventListener('click', swallow, true), 60);
+              };
+              window.addEventListener('pointerup', () => done(false), true);
+              window.addEventListener('pointercancel', () => done(true), true);
+              window.addEventListener('blur', () => done(true));
+              window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pd && pd.active) { e.stopPropagation(); done(true); } }, true);
+            })();
             "#,
         );
         while let Ok(v) = ev.recv::<serde_json::Value>().await {
@@ -444,6 +528,17 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
         }
         Some("nav") => app.go(v["d"].as_i64().unwrap_or(0) as isize),
         Some("drag") => app.drag.set(v["id"].as_str().map(|s| s.to_string())),
+        // Projects dragged into a new order; ones not shown keep their place
+        // after them.
+        Some("project-order") => {
+            let shown: Vec<String> = v["order"].as_array().map(|a| a.iter().filter_map(|k| k.as_str().map(String::from)).collect()).unwrap_or_default();
+            if !shown.is_empty() {
+                app.update_config(|c| {
+                    let rest: Vec<String> = c.settings.project_order.iter().filter(|k| !shown.contains(k)).cloned().collect();
+                    c.settings.project_order = shown.into_iter().chain(rest).collect();
+                });
+            }
+        }
         Some("drop") => {
             app.drag.set(None);
             let id = v["id"].as_str().unwrap_or("").to_string();
@@ -854,6 +949,36 @@ pub fn Spinner(#[props(default = 14)] size: u32) -> Element {
         svg { class: "spin", width: "{size}", height: "{size}", view_box: "0 0 16 16", role: "img", "aria-label": "Running",
             circle { class: "spin-track", cx: "8", cy: "8", r: "6", fill: "none", stroke_width: "2" }
             circle { class: "spin-arc", cx: "8", cy: "8", r: "6", fill: "none", stroke_width: "2", stroke_linecap: "round", "pathLength": "100" }
+        }
+    }
+}
+
+/// Children that open and close by growing and shrinking (and fading).
+/// They stay mounted until the close has played out, then leave the page.
+#[component]
+pub fn Collapse(open: bool, children: Element) -> Element {
+    let mut mounted = use_signal(|| open);
+    let mut turn = use_signal(|| 0u32);
+    use_effect(use_reactive!(|open| {
+        let t = turn.peek().wrapping_add(1);
+        turn.set(t);
+        if open {
+            mounted.set(true);
+        } else if *mounted.peek() {
+            spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(280)).await;
+                if *turn.peek() == t {
+                    mounted.set(false);
+                }
+            });
+        }
+    }));
+    if !open && !mounted() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: if open { "collapse open" } else { "collapse" },
+            div { class: "collapse-inner", {children} }
         }
     }
 }

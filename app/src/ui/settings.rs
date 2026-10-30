@@ -718,8 +718,8 @@ fn Workspaces() -> Element {
     let app = use_app();
     let list = app.config.read().workspaces.clone();
     rsx! {
-        h1 { "Workspaces" }
-        div { class: "sub", "Folders and repositories your agents work in." }
+        h1 { "Projects" }
+        div { class: "sub", "Folders your agents work in. Chats without one are in Home." }
         div { class: "set-card",
             for w in list {
                 div { key: "{w.id}", class: "set-row",

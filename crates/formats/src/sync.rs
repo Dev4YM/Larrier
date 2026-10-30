@@ -4,6 +4,7 @@
 //! ([`crate::live::sync_paths`]) share [`apply`], which is serialized so two
 //! passes can never import the same native session twice.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -30,7 +31,39 @@ static SYNC_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
     let infos: Vec<NativeSessionInfo> = agents.iter().flat_map(discover).collect();
-    apply(store, infos, &|_| false)
+    let mut report = apply(store, infos, &|_| false);
+    report.removed = drop_copies(store);
+    report
+}
+
+/// Older versions imported a native session twice when two of its agent's
+/// stores listed it in the same pass (a Cursor chat in its CLI store and
+/// its transcript). No import record points to such a copy while another
+/// session holds the native session; copies nobody changed are removed.
+/// Forks, ported, renamed, pinned or rated sessions are always kept.
+pub fn drop_copies(store: &Store) -> usize {
+    let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let held = store.imported_session_ids();
+    let mut removed = 0;
+    for sum in store.list() {
+        if held.contains(&sum.id) || sum.pinned || sum.parent_id.is_some() {
+            continue;
+        }
+        let Ok(s) = store.load(&sum.id) else { continue };
+        let Some(native) = s.origin.native_id.clone() else { continue };
+        let Some(rec) = store.import_record(&import_key(&s.origin.agent, &native)) else { continue };
+        if rec.deleted || rec.session_id.is_empty() || rec.session_id == s.id || !store.exists(&rec.session_id) {
+            continue;
+        }
+        let untouched = s.parent.is_none()
+            && s.native.iter().all(|l| l.id == native)
+            && s.extra.get("import_title").and_then(|t| t.as_str()) == Some(s.title.as_str())
+            && !s.extra.keys().any(|k| k.starts_with("feedback:"));
+        if untouched && store.delete(&s.id).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Import new and changed sessions among `infos`. `skip(session_id)` leaves
@@ -45,8 +78,14 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
     let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut report = SyncReport::default();
     let mut todo: Vec<(NativeSessionInfo, Plan, String)> = Vec::new();
+    // A native session listed twice (two of its agent's stores) is imported
+    // once, from the first listing (agents list their richest store first).
+    let mut seen: HashSet<String> = HashSet::new();
     for info in infos {
         let key = import_key(&info.agent, &info.native_id);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
         match store.import_record(&key) {
             Some(r) if r.linked || r.deleted => report.skipped += 1,
             Some(r) if !r.session_id.is_empty() && skip(&r.session_id) => report.skipped += 1,
@@ -228,6 +267,56 @@ mod tests {
         let mut new = imported("plan");
         merge_user_state(&mut new, &old);
         assert_eq!(new.mode.as_deref(), Some("acceptEdits"));
+    }
+
+    /// Two listings of one native session in a pass import it once.
+    #[test]
+    fn a_session_listed_twice_is_imported_once() {
+        let native = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let id = "31111111-2222-3333-4444-555555555555";
+        let mut s = Session::new(AgentKind::ClaudeCode, None);
+        s.push(larrier_core::Message::user_text("hello"));
+        let mut infos = Vec::new();
+        for dir in ["a", "b"] {
+            let d = native.path().join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            let f = d.join(format!("{id}.jsonl"));
+            std::fs::write(&f, crate::claude::export_lines(&s, id)).unwrap();
+            infos.push(crate::claude::file_info(&f).unwrap());
+        }
+        let r = apply(&store, infos, &|_| false);
+        assert_eq!((r.imported, store.list().len()), (1, 1), "{r:?}");
+    }
+
+    /// Copies left by older versions go; the session that holds the native
+    /// session, forks and changed copies stay.
+    #[test]
+    fn untouched_copies_are_removed() {
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let imported = |title: &str| {
+            let mut s = Session::new(AgentKind::Cursor, None);
+            s.title = title.into();
+            s.extra.insert("import_title".into(), Value::String("Chat".into()));
+            s.origin.native_id = Some("chat-1".into());
+            s.push(larrier_core::Message::user_text("hi"));
+            s
+        };
+        let held = imported("Chat");
+        store.save(&held).unwrap();
+        store.set_import_record(&import_key(&AgentKind::Cursor, "chat-1"), ImportRecord { session_id: held.id.clone(), ..Default::default() });
+        let copy = imported("Chat");
+        let renamed = imported("My chat");
+        let mut fork = imported("Chat");
+        fork.parent = Some(larrier_core::lsf::ForkRef { session_id: held.id.clone(), message_id: None });
+        for s in [&copy, &renamed, &fork] {
+            store.save(s).unwrap();
+        }
+        assert_eq!(drop_copies(&store), 1);
+        assert!(!store.exists(&copy.id));
+        assert!(store.exists(&held.id) && store.exists(&renamed.id) && store.exists(&fork.id));
     }
 
     #[test]

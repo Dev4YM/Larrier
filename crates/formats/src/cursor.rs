@@ -67,6 +67,16 @@ fn kv(con: &rusqlite::Connection, key: &str) -> Option<Value> {
     raw.and_then(|b| serde_json::from_slice(&b).ok())
 }
 
+/// Keep the newest of two copies of the same chat.
+fn keep_newest(map: &mut HashMap<String, NativeSessionInfo>, id: String, info: NativeSessionInfo) {
+    match map.get(&id) {
+        Some(old) if old.mtime_ms >= info.mtime_ms => {}
+        _ => {
+            map.insert(id, info);
+        }
+    }
+}
+
 pub fn discover() -> Vec<NativeSessionInfo> {
     let mut out = Vec::new();
     let mut ide_ids: HashSet<String> = HashSet::new();
@@ -82,7 +92,28 @@ pub fn discover() -> Vec<NativeSessionInfo> {
         }
     }
     let cfg = config_dir();
-    // Agent transcripts (Agents Window / CLI runs). Prefer the richer IDE copy.
+    // Each chat once, from its richest copy: the IDE's database, else the
+    // CLI's chat store, else the agent transcript; of two copies in the
+    // same kind of store, the newest.
+    let mut cli: HashMap<String, NativeSessionInfo> = HashMap::new();
+    let chats = cfg.join("chats");
+    if chats.exists() {
+        for e in walkdir::WalkDir::new(&chats).max_depth(3).into_iter().flatten() {
+            if e.file_name() == "store.db" {
+                let id = e.path().parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                if id.is_empty() || ide_ids.contains(&id) {
+                    continue;
+                }
+                let mut info = util::info(AGENT, id.clone(), e.path());
+                if let Ok(m) = cli_meta(e.path()) {
+                    info.title = chat_name(&m);
+                }
+                keep_newest(&mut cli, id, info);
+            }
+        }
+    }
+    // Agent transcripts (Agents Window / CLI runs).
+    let mut transcripts: HashMap<String, NativeSessionInfo> = HashMap::new();
     if let Ok(projects) = std::fs::read_dir(cfg.join("projects")) {
         for p in projects.flatten() {
             let tdir = p.path().join("agent-transcripts");
@@ -97,10 +128,10 @@ pub fn discover() -> Vec<NativeSessionInfo> {
                 } else {
                     continue;
                 };
-                if ide_ids.contains(&id) || !file.exists() {
+                if ide_ids.contains(&id) || cli.contains_key(&id) || !file.exists() {
                     continue;
                 }
-                let mut info = util::info(AGENT, id, &file);
+                let mut info = util::info(AGENT, id.clone(), &file);
                 if info.size < 16 {
                     continue;
                 }
@@ -115,27 +146,12 @@ pub fn discover() -> Vec<NativeSessionInfo> {
                         }
                     }
                 }
-                out.push(info);
+                keep_newest(&mut transcripts, id, info);
             }
         }
     }
-    // CLI chat stores.
-    let chats = cfg.join("chats");
-    if chats.exists() {
-        for e in walkdir::WalkDir::new(&chats).max_depth(3).into_iter().flatten() {
-            if e.file_name() == "store.db" {
-                let id = e.path().parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                if ide_ids.contains(&id) {
-                    continue;
-                }
-                let mut info = util::info(AGENT, id, e.path());
-                if let Ok(m) = cli_meta(e.path()) {
-                    info.title = chat_name(&m);
-                }
-                out.push(info);
-            }
-        }
-    }
+    out.extend(cli.into_values());
+    out.extend(transcripts.into_values());
     out
 }
 

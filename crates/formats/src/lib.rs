@@ -110,6 +110,9 @@ pub struct SyncReport {
     /// last import (not just touched its files, or a newer importer).
     #[serde(default)]
     pub grew: Vec<String>,
+    /// Untouched duplicate copies removed (see `sync::drop_copies`).
+    #[serde(default)]
+    pub removed: usize,
 }
 
 /// Agents whose native sessions this crate can read.

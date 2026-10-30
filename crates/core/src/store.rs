@@ -252,6 +252,11 @@ impl Store {
         f(guard.as_mut().unwrap())
     }
 
+    /// Sessions that a (non-deleted) import record points to.
+    pub fn imported_session_ids(&self) -> std::collections::HashSet<String> {
+        self.with_imports(|m| m.values().filter(|r| !r.deleted && !r.session_id.is_empty()).map(|r| r.session_id.clone()).collect())
+    }
+
     pub fn import_record(&self, key: &str) -> Option<ImportRecord> {
         self.with_imports(|m| m.get(key).cloned())
     }

@@ -5,6 +5,24 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.9 — 2026-10-30
+
+### New
+
+- MCP servers a Claude agent defines for itself
+- Run a Claude Code chat as one of the user's agents
+- Pick the agent a new chat runs as from @
+
+### Look and feel
+
+- A reply starts where the prompt's text does
+
+### Fixed
+
+- The @ menu stays in view and opens down when it fits only there
+- The gliding cursor glides only along a line
+- Opened projects stay open across launches
+- Wait for Claude Code's MCP servers before listing them
 ## 0.1.8 — 2026-10-30
 
 ### New

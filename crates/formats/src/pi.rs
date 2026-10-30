@@ -262,7 +262,7 @@ pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<
     let stamp = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true).replace([':', '.'], "-");
     let path = root(home_override).join("sessions").join(encode_cwd(&cwd)).join(format!("{stamp}_{id}.jsonl"));
     util::write_new_file(&path, &export_lines(session, &id, &cwd))?;
-    Ok(NativeLink { agent: AGENT, id, path: Some(path.to_string_lossy().to_string()), synced_messages: session.messages.len(), account_id: None })
+    Ok(NativeLink { agent: AGENT, id, path: Some(path.to_string_lossy().to_string()), synced_messages: session.messages.len(), account_id: None, resume_at: None })
 }
 
 #[cfg(test)]

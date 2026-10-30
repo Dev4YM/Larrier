@@ -37,6 +37,9 @@ pub struct TurnRequest {
     /// Path of the native session file, when known (Claude Code and Pi can
     /// resume directly from a file path, which is the most robust form).
     pub resume_path: Option<String>,
+    /// Resume the native session only up to this entry, dropping what came
+    /// after it (an earlier prompt was edited). Claude Code only.
+    pub resume_at: Option<String>,
     /// Transcript of earlier turns the agent has not seen (ported sessions).
     pub handoff: Option<String>,
     pub launch: Launch,
@@ -487,6 +490,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
     let link = session.native_link(agent);
     let resume_id = link.map(|l| l.id.clone());
     let resume_path = link.and_then(|l| l.path.clone()).filter(|p| Path::new(p).exists());
+    let resume_at = link.and_then(|l| l.resume_at.clone()).filter(|_| resume_id.is_some());
     let handoff = if protocol != Protocol::HttpChat && engine::needs_handoff(session, agent) {
         let from = engine::unsynced_from(session, agent);
         let upto = session.messages.len().saturating_sub(1);
@@ -527,6 +531,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         run_mode: cfg.settings.run_mode,
         resume_id,
         resume_path,
+        resume_at,
         handoff,
         launch,
         chat,

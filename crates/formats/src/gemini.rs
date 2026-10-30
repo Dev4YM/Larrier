@@ -328,7 +328,7 @@ pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<
     let local = now.with_timezone(&chrono::Local);
     let path = root.join("tmp").join(&slug).join("chats").join(format!("session-{}-{}.jsonl", local.format("%Y-%m-%dT%H-%M"), &sid[..8]));
     util::write_new_file(&path, &export_lines(session, &sid, &cwd, now))?;
-    Ok(NativeLink { agent: AGENT, id: sid, path: Some(path.to_string_lossy().to_string()), synced_messages: session.messages.len(), account_id: None })
+    Ok(NativeLink { agent: AGENT, id: sid, path: Some(path.to_string_lossy().to_string()), synced_messages: session.messages.len(), account_id: None, resume_at: None })
 }
 
 #[cfg(test)]

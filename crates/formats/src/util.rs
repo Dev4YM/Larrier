@@ -827,6 +827,7 @@ pub fn finish_as(mut conv: Conv, origin: AgentKind, agent: AgentKind, meta: Meta
             path: meta.resume_path.clone().or(path_str),
             synced_messages: s.messages.len(),
             account_id: None,
+            resume_at: None,
         });
     }
     s.recompute_usage();

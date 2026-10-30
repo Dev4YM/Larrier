@@ -870,7 +870,13 @@ impl App {
     // ------------------------------------------------------------- running agents
 
     /// Send a prompt. `session_id == None` starts a new agent from the draft.
-    pub fn send(mut self, session_id: Option<String>, text: String, attachments: Vec<Part>) {
+    pub fn send(self, session_id: Option<String>, text: String, attachments: Vec<Part>) {
+        self.send_with(session_id, text, attachments, None);
+    }
+
+    /// [`App::send`], opening the reply with `notice` (what happened to the
+    /// agent's own session, say).
+    fn send_with(mut self, session_id: Option<String>, text: String, attachments: Vec<Part>, notice: Option<String>) {
         if text.trim().is_empty() && attachments.is_empty() {
             return;
         }
@@ -929,6 +935,9 @@ impl App {
         let cfg = self.config.read().clone();
         let request = self.peek_session(&id, |s| larrier_agents::build_request(&cfg, s, &agent)).expect("loaded");
         let mut recorder = self.mutate_session(&id, |s| TurnRecorder::begin(s, agent.clone(), model, account)).expect("loaded");
+        if let Some(text) = notice {
+            self.mutate_session(&id, |s| recorder.apply(s, &AgentEvent::Notice { text }));
+        }
         match request {
             Ok(req) => {
                 if let Some(h) = &req.handoff {
@@ -1428,27 +1437,64 @@ impl App {
 }
 
 impl App {
-    /// Edit a past prompt: continue in a fork that ends just before it, so
-    /// the original conversation stays intact.
+    /// Edit a past prompt in place: the prompt and everything after it are
+    /// replaced by the new one, and the agent's own session follows as far
+    /// as the agent allows ([`larrier_formats::Rewind`]). Where it can't, the
+    /// reply says so.
     pub fn edit_and_resend(self, session_id: &str, message_id: &str, text: String) {
         if text.trim().is_empty() || !self.ensure_loaded(session_id) {
             return;
         }
-        let forked = self.peek_session(session_id, |s| {
+        if self.is_running(session_id) {
+            return self.toast("Stop the agent before editing an earlier prompt");
+        }
+        let cfg = self.config.read().clone();
+        let found = self.peek_session(session_id, |s| {
             let idx = s.messages.iter().position(|m| m.id == message_id)?;
-            let mut f = s.fork(if idx > 0 { Some(s.messages[idx - 1].id.as_str()) } else { None });
-            if idx == 0 {
-                f.messages.clear();
-            }
-            f.title = s.title.clone();
-            Some(f)
+            // The prompt's images and files go with the new text.
+            let attachments: Vec<Part> = s.messages[idx].parts.iter().filter(|p| matches!(p, Part::Image { .. } | Part::File { .. })).cloned().collect();
+            let home = account_home(&cfg, &s.agent, s.account_id.as_deref());
+            let old_link = s.native_link(&s.agent).map(|l| l.id.clone());
+            Some((idx, attachments, larrier_formats::rewind(s, idx, home.as_deref()), s.agent.clone(), old_link))
         });
-        let Some(Some(forked)) = forked else { return };
-        let fid = forked.id.clone();
-        self.save_session(&forked);
-        self.put_session(forked);
-        self.ensure_tab(&View::Agent(fid.clone()), true);
-        self.send(Some(fid), text, Vec::new());
+        let Some(Some((idx, attachments, rewind, agent, old_link))) = found else { return };
+        let name = agent.display_name();
+        let notice = match &rewind {
+            larrier_formats::Rewind::ResumeAt(_) | larrier_formats::Rewind::Fresh => None,
+            larrier_formats::Rewind::Copy(_) => Some(format!("{name} can't rewind its own session: it continues from a copy written up to this prompt.")),
+            larrier_formats::Rewind::Handoff if old_link.is_some() => {
+                Some(format!("{name} can't rewind its own chat: it continues in a new one, with the conversation before this prompt as context."))
+            }
+            larrier_formats::Rewind::Handoff => None,
+        };
+        // Whatever the agent writes to its old session no longer belongs here.
+        if let Some(old) = &old_link {
+            store().set_import_record(&import_key(&agent, old), ImportRecord::linked(session_id));
+        }
+        if let larrier_formats::Rewind::Copy(link) = &rewind {
+            store().set_import_record(&import_key(&agent, &link.id), ImportRecord::linked(session_id));
+        }
+        store().flush_imports();
+        self.update_session(session_id, move |s| {
+            s.messages.truncate(idx);
+            match rewind {
+                larrier_formats::Rewind::ResumeAt(at) => {
+                    if let Some(l) = s.native_link_mut(&agent) {
+                        l.resume_at = Some(at);
+                        l.synced_messages = idx;
+                    }
+                }
+                larrier_formats::Rewind::Copy(link) => s.set_native_link(link),
+                larrier_formats::Rewind::Fresh | larrier_formats::Rewind::Handoff => s.native.retain(|l| l.agent != agent),
+            }
+            s.recompute_usage();
+        });
+        let editing = self.editing;
+        if editing.peek().msg.as_deref() == Some(message_id) {
+            let mut e = editing;
+            e.set(EditState::default());
+        }
+        self.send_with(Some(session_id.to_string()), text, attachments, notice);
     }
 
     /// Thumbs up / down on an assistant message (kept in the session extras).

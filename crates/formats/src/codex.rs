@@ -1526,7 +1526,7 @@ pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<
             let _ = writeln!(f, "{line}");
         }
     }
-    Ok(NativeLink { agent: AGENT, id, path: Some(path.to_string_lossy().to_string()), synced_messages: session.messages.len(), account_id: None })
+    Ok(NativeLink { agent: AGENT, id, path: Some(path.to_string_lossy().to_string()), synced_messages: session.messages.len(), account_id: None, resume_at: None })
 }
 
 #[cfg(test)]

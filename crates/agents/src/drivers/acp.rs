@@ -987,6 +987,7 @@ mod tests {
             run_mode,
             resume_id: None,
             resume_path: None,
+            resume_at: None,
             handoff: None,
             launch: Launch::default(),
             chat: None,

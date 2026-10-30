@@ -82,6 +82,7 @@ impl TurnRecorder {
                     path: path.clone(),
                     synced_messages: synced,
                     account_id: self.account_id.clone(),
+                    resume_at: None,
                 };
                 session.set_native_link(link);
                 false

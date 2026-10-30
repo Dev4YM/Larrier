@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use larrier_core::{AgentKind, NativeLink, Session, Store};
+use larrier_core::{AgentKind, NativeLink, Role, Session, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -273,6 +273,57 @@ pub fn export_native(session: &Session, agent: &AgentKind, home: Option<&Path>) 
         AgentKind::Pi => pi::export_native(session, home),
         other => Err(anyhow!("{} cannot load external sessions natively", other.display_name())),
     }
+}
+
+/// How an agent's own session follows when an earlier prompt is edited
+/// (the prompt at `idx` and everything after it are dropped).
+#[derive(Debug, PartialEq)]
+pub enum Rewind {
+    /// The agent resumes its own session from just before the prompt
+    /// (Claude Code: this chain entry).
+    ResumeAt(String),
+    /// Nothing comes before the prompt: the agent starts a new session.
+    Fresh,
+    /// The agent can't rewind its session; it resumes a copy written up to
+    /// the prompt (Codex, Gemini CLI, Pi).
+    Copy(NativeLink),
+    /// The agent can't continue its own session from there: it starts a new
+    /// one and gets the conversation so far as context.
+    Handoff,
+}
+
+/// Rewind the agent's own session for an edit of the prompt at `idx`.
+/// `home` overrides the agent's config dir (multi-account setups). May
+/// write a copy of the session into the agent's storage ([`Rewind::Copy`]).
+pub fn rewind(session: &Session, idx: usize, home: Option<&Path>) -> Rewind {
+    let agent = &session.agent;
+    if !session.messages[..idx.min(session.messages.len())].iter().any(|m| m.role == Role::User) {
+        return Rewind::Fresh;
+    }
+    let Some(link) = session.native_link(agent) else { return Rewind::Handoff };
+    if *agent == AgentKind::ClaudeCode {
+        let later = session.messages.get(idx + 1..).unwrap_or_default().iter().filter(|m| m.role == Role::User).count();
+        let text = session.messages.get(idx).map(|m| m.text()).unwrap_or_default();
+        let file = link
+            .path
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .or_else(|| claude::session_file(&link.id, session.cwd().as_deref(), home));
+        match file.and_then(|f| claude::rewind_point(&f, later, &text)) {
+            Some(claude::Rewind::At(at)) => return Rewind::ResumeAt(at),
+            Some(claude::Rewind::Fresh) => return Rewind::Fresh,
+            None => {}
+        }
+    }
+    if supports_native_export(agent) {
+        let mut cut = session.clone();
+        cut.messages.truncate(idx);
+        if let Ok(link) = export_native(&cut, agent, home) {
+            return Rewind::Copy(link);
+        }
+    }
+    Rewind::Handoff
 }
 
 /// Incrementally import new/changed native sessions into the store.

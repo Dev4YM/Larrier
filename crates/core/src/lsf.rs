@@ -193,6 +193,10 @@ pub struct NativeLink {
     pub synced_messages: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+    /// Resume the native session only up to this entry on the next turn
+    /// (an earlier prompt was edited: what came after it is dropped).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

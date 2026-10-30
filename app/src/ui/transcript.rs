@@ -654,7 +654,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                         }
                     } else {
                         div { class: "composer-row", style: "padding-top: 0;",
-                            span { class: "faint edit-hint", "Edit and resend — continues in a fork, the original stays · Esc to cancel" }
+                            span { class: "faint edit-hint", "Resend from here — the replies after it are replaced · Esc to cancel" }
                             div { class: "grow" }
                             if let Some(l) = agent_label { span { class: "picker", style: "cursor: default;", span { class: "lb sub", "{l}" } } }
                             button { class: "ghost-btn", style: "border: none;", onclick: move |_| app.request_edit(None), "Cancel" }

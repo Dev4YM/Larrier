@@ -25,6 +25,11 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         // sessions Larrier wrote and avoids cross-project id clashes).
         if let Some(target) = req.resume_path.as_ref().or(req.resume_id.as_ref()) {
             cmd.args(["--resume", target]);
+            // An earlier prompt was edited: continue from just before it, in
+            // a new session file (the original stays as it was).
+            if let Some(at) = &req.resume_at {
+                cmd.args(["--resume-session-at", at, "--fork-session"]);
+            }
         }
         if let Some(m) = &req.model {
             cmd.args(["--model", m]);

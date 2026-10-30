@@ -1057,6 +1057,87 @@ pub fn export_lines(session: &Session, sid: &str) -> String {
     out
 }
 
+/// Where a Claude Code session resumes so that one of its prompts, and
+/// everything after it, are dropped.
+#[derive(Debug, PartialEq)]
+pub enum Rewind {
+    /// Resume up to and including this chain entry (`--resume-session-at`).
+    At(String),
+    /// The prompt opens the conversation: start a new session instead.
+    Fresh,
+}
+
+/// The rewind point for the prompt `later` prompts before the newest one on
+/// the session's active branch. `text` is the prompt as Larrier shows it,
+/// to make sure the right one was found; `None` when it can't be told.
+/// The branch is followed back to the last compaction only: Claude Code
+/// can't resume a conversation from before it.
+pub fn rewind_point(path: &Path, later: usize, text: &str) -> Option<Rewind> {
+    let raw = util::read_text(path).ok()?;
+    let lines: Vec<Value> = raw.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    let index: HashMap<&str, usize> = lines.iter().enumerate().filter_map(|(i, v)| s(v, "uuid").map(|u| (u, i))).collect();
+    let on_branch = |v: &Value| matches!(s(v, "type"), Some("user") | Some("assistant")) && !v["isSidechain"].as_bool().unwrap_or(false);
+    let leaf = lines.iter().rposition(|v| on_branch(v))?;
+    // Prompts on the active branch, newest first.
+    let mut prompts: Vec<usize> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cur = Some(leaf);
+    while let Some(i) = cur {
+        if !seen.insert(i) {
+            break;
+        }
+        if prompt_text(&lines[i]).is_some() {
+            prompts.push(i);
+        }
+        cur = s(&lines[i], "parentUuid").and_then(|p| index.get(p).copied());
+    }
+    let at = *prompts.get(later)?;
+    let shown = prompt_text(&lines[at])?;
+    let squash = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+    let want: String = squash(text).chars().take(120).collect();
+    if want.is_empty() || !squash(&shown).contains(&want) {
+        return None;
+    }
+    if prompts.len() == later + 1 {
+        return Some(Rewind::Fresh);
+    }
+    s(&lines[at], "parentUuid").map(|p| Rewind::At(p.to_string()))
+}
+
+/// The text of a prompt the user typed (not a tool result, a harness note
+/// or another session's message).
+fn prompt_text(v: &Value) -> Option<String> {
+    if s(v, "type") != Some("user") || v["isSidechain"].as_bool().unwrap_or(false) || v["isMeta"].as_bool().unwrap_or(false) || v["isCompactSummary"].as_bool().unwrap_or(false) {
+        return None;
+    }
+    let text = match &v["message"]["content"] {
+        Value::String(t) => t.clone(),
+        Value::Array(blocks) => {
+            if blocks.iter().any(|b| s(b, "type") == Some("tool_result")) {
+                return None;
+            }
+            blocks.iter().filter_map(|b| s(b, "text")).collect::<Vec<_>>().join("\n")
+        }
+        _ => return None,
+    };
+    if peer_notice(&text, &v["origin"]).is_some() {
+        return None;
+    }
+    let t = clean_user_text(&text);
+    (!t.is_empty() && !t.starts_with("[Request interrupted")).then_some(t)
+}
+
+/// The file of a Claude Code session by id: in its project's folder, else
+/// wherever it is.
+pub fn session_file(id: &str, cwd: Option<&str>, home_override: Option<&Path>) -> Option<PathBuf> {
+    let projects = root(home_override).join("projects");
+    let name = format!("{id}.jsonl");
+    if let Some(p) = cwd.map(|c| projects.join(encode_project(c)).join(&name)).filter(|p| p.exists()) {
+        return Some(p);
+    }
+    std::fs::read_dir(&projects).ok()?.flatten().map(|d| d.path().join(&name)).find(|p| p.exists())
+}
+
 pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<NativeLink> {
     let sid = uuid::Uuid::new_v4().to_string();
     let cwd = util::session_cwd(session);
@@ -1069,6 +1150,7 @@ pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<
         path: Some(path.to_string_lossy().to_string()),
         synced_messages: session.messages.len(),
         account_id: None,
+        resume_at: None,
     })
 }
 
@@ -1092,6 +1174,28 @@ mod tests {
         let out = |id: &str| s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == id).and_then(|t| t.output.clone());
         assert_eq!(out("t1").as_deref(), Some("a.rs"));
         assert_eq!(out("t2").as_deref(), Some("fn a()"));
+    }
+
+    #[test]
+    fn rewind_point_is_the_entry_before_the_prompt() {
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","message":{"role":"user","content":"Add a multiply function"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","sessionId":"S","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Edit","input":{}}]}}"#,
+            r#"{"type":"user","uuid":"r1","parentUuid":"a1","sessionId":"S","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"r1","sessionId":"S","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"Done."}]}}"#,
+            r#"{"type":"user","uuid":"x1","parentUuid":"a2","isMeta":true,"sessionId":"S","message":{"role":"user","content":"<system-reminder>note</system-reminder>"}}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"x1","sessionId":"S","message":{"role":"user","content":[{"type":"text","text":"Now   add tests\nfor it"}]}}"#,
+            r#"{"type":"assistant","uuid":"a3","parentUuid":"u2","sessionId":"S","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"Added."}]}}"#,
+            r#"{"type":"user","uuid":"u3","parentUuid":"a3","sessionId":"S","message":{"role":"user","content":"Thanks"}}"#,
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("S.jsonl");
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        assert_eq!(rewind_point(&path, 0, "Thanks"), Some(Rewind::At("a3".into())));
+        assert_eq!(rewind_point(&path, 1, "Now add tests for it"), Some(Rewind::At("x1".into())));
+        assert_eq!(rewind_point(&path, 2, "Add a multiply function"), Some(Rewind::Fresh));
+        assert_eq!(rewind_point(&path, 1, "Something else"), None, "the prompt must match");
+        assert_eq!(rewind_point(&path, 3, "Thanks"), None);
     }
 
     #[test]

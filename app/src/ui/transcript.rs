@@ -170,6 +170,8 @@ pub fn Transcript(id: String) -> Element {
     };
     let first = total - rows.len();
     let running = app.is_active(&id);
+    // The agent finished its reply; only background work keeps it running.
+    let writing = running && !app.idle.read().contains(&id);
     let permission = app.permissions.read().get(&id).cloned();
     let show_reasoning = app.config.read().settings.show_reasoning;
     let n_rows = rows.len();
@@ -337,7 +339,7 @@ pub fn Transcript(id: String) -> Element {
                         fp: r.fp,
                         started: r.started,
                         ended: r.ended,
-                        live: running && i + 1 == n_rows,
+                        live: writing && i + 1 == n_rows,
                         show_reasoning,
                     }
                 }

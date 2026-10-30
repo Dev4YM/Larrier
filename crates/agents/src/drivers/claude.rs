@@ -282,6 +282,8 @@ impl ClaudeStream {
                 self.cutoff_noted = true;
                 sink.notice("Response hit the output token limit");
             }
+            // The reply is done; background work may still keep the turn.
+            "message_delta" if s(&ev["delta"], "stop_reason") == Some("end_turn") => sink.send(AgentEvent::Idle),
             "content_block_delta" => {
                 let d = &ev["delta"];
                 match s(d, "type").unwrap_or("") {
@@ -381,6 +383,10 @@ impl ClaudeStream {
                     }
                 }
             }
+        }
+        // Without partial messages the end of the reply comes with it.
+        if s(msg, "stop_reason") == Some("end_turn") {
+            sink.send(AgentEvent::Idle);
         }
     }
 
@@ -981,6 +987,23 @@ mod tests {
         assert_eq!(count(|e| matches!(e, AgentEvent::Model { model } if model == "claude-haiku-4-5")), 1);
         assert_eq!(count(|e| matches!(e, AgentEvent::Usage { usage } if usage.context_tokens == Some(1200))), 1);
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), .. } if id == "agent_1")));
+    }
+
+    /// The reply ends while a background subagent still works: the turn
+    /// stays open, but the agent is no longer writing.
+    #[test]
+    fn end_of_reply_is_idle_not_done() {
+        let lines = [
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m9"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Waiting on the audit."}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}},"parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}},"parent_tool_use_id":"agent_1"}"#,
+        ];
+        let mut p = ClaudeStream::default();
+        let ev = collect(&mut p, &lines);
+        assert_eq!(ev.iter().filter(|e| matches!(e, AgentEvent::Idle)).count(), 1, "a subagent's end is not the agent's");
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Done { .. })));
+        assert!(!p.done);
     }
 
     #[test]

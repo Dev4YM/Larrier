@@ -1,6 +1,6 @@
 //! Application state (signals) and every action the UI can take.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -324,6 +324,9 @@ pub struct App {
     /// Sessions another app (a terminal CLI, an IDE) is writing right now:
     /// id → when Larrier first saw it live. See `crate::live`.
     pub live: Signal<HashMap<String, Instant>>,
+    /// Running sessions whose agent finished its reply while background work
+    /// (subagents, commands) keeps the turn open: not "generating".
+    pub idle: Signal<HashSet<String>>,
 }
 
 /// Signals owned by the root scope so background tasks can use them for the
@@ -405,6 +408,7 @@ impl App {
             editing: root_signal(EditState::default()),
             drag: root_signal(None),
             live: root_signal(HashMap::new()),
+            idle: root_signal(HashSet::new()),
         }
     }
 
@@ -967,12 +971,27 @@ impl App {
                     batch.push(e);
                 }
                 let mut snapshot = None;
+                // Whether the agent is writing (false) or finished its reply
+                // with background work still running (true).
+                let mut idle = None;
                 {
                     let mut s = sig.write();
                     let s = &mut *s;
                     for e in &batch {
                         match e {
+                            AgentEvent::Idle => idle = Some(true),
+                            AgentEvent::TextDelta { .. }
+                            | AgentEvent::Text { .. }
+                            | AgentEvent::ReasoningDelta { .. }
+                            | AgentEvent::Reasoning { .. }
+                            | AgentEvent::ToolStart { .. }
+                            | AgentEvent::Plan { .. }
+                            | AgentEvent::Error { .. } => idle = Some(false),
+                            _ => {}
+                        }
+                        match e {
                             AgentEvent::Permission { request } => {
+                                idle = Some(false);
                                 app.permissions.write().insert(id.clone(), request.clone());
                                 crate::notify::agent_event(&s.title, &format!("{} needs your input", s.title), true);
                             }
@@ -998,6 +1017,13 @@ impl App {
                     if last_row.elapsed() > Duration::from_millis(400) {
                         snapshot = Some(s.summary());
                         last_row = Instant::now();
+                    }
+                }
+                if let Some(v) = idle.filter(|v| *v != app.idle.peek().contains(&id)) {
+                    if v {
+                        app.idle.write().insert(id.clone());
+                    } else {
+                        app.idle.write().remove(&id);
                     }
                 }
                 if done {
@@ -1028,6 +1054,9 @@ impl App {
             });
             app.running.write().remove(&id);
             app.permissions.write().remove(&id);
+            if app.idle.peek().contains(&id) {
+                app.idle.write().remove(&id);
+            }
             crate::live::mark_idle(&id);
             if let Some((t, st)) = &title {
                 let ok = *st != SessionStatus::Error;

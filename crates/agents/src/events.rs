@@ -54,6 +54,10 @@ pub enum AgentEvent {
     /// Code's `rate_limit_event`): percent used and when it resets (unix
     /// seconds). Not part of the transcript.
     RateLimit { window: String, used_pct: f64, resets_at: Option<i64> },
+    /// The agent finished its reply but the turn goes on: background work
+    /// (subagents, commands) still runs and may bring it back. Not part of
+    /// the transcript; content events after it mean it is replying again.
+    Idle,
     /// Diagnostic output from the agent process (not shown inline).
     Log { line: String },
     /// Turn finished. `ok == false` when the agent failed or was cancelled.

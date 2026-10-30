@@ -1485,6 +1485,13 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .app.sidebar-right.side-closed .agent-frame > .pane-toggle.panel { right: 46px; }
 .agent-frame.with-toggle > .main-head, .agent-frame .rp-head { padding-right: 46px; }
 
+/* Every row of a turn starts its first icon or word at the same inset as
+   a tool card's content (border + padding), so steps, thinking, the
+   "planning" row and cards line up. */
+.turn .step, .sub-steps .step, .sub-layer .step { padding-left: 9px; padding-right: 9px; }
+.thinking-row { padding: 4px 9px; }
+.turn .notice { margin-left: 0; margin-right: 0; }
+
 /* Behind Settings the sidebar stays as it was, out of sight. */
 .sidebar.parked { position: absolute; left: 0; top: 0; bottom: 0; visibility: hidden; pointer-events: none; transition: none; }
 

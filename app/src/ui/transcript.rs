@@ -1354,6 +1354,15 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
     if running && lines.len() > 4 {
         lines.drain(..lines.len() - 4);
     }
+    // Once the preview has grown, it keeps its height: partial input can
+    // briefly give fewer lines, which would make the card jump.
+    let peak = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(0usize)));
+    let pad = if running {
+        peak.set(peak.get().max(lines.len()));
+        peak.get() - lines.len()
+    } else {
+        0
+    };
     let path = diff.path.clone();
     // Colored by the file's language (the lines are read as one piece so
     // strings and comments that span lines stay right).
@@ -1378,8 +1387,11 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
                     if diff.removed > 0 { span { class: "del cnt", style: "--n: {diff.removed};", "aria-label": "-{diff.removed}" } }
                 }
             }
-            if !lines.is_empty() {
+            if !lines.is_empty() || pad > 0 {
                 div { class: if open() { "preview open" } else { "preview" }, onclick: move |_| open.toggle(),
+                    for i in 0..pad {
+                        div { key: "pad{i}", class: "pv-line ctx", "\u{a0}" }
+                    }
                     for (i, ((k, t), html)) in lines.into_iter().zip(colored).enumerate() {
                         if let Some(h) = html {
                             div { key: "{i}", class: "pv-line {k}", dangerous_inner_html: "{h}" }

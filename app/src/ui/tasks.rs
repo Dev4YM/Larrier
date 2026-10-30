@@ -576,7 +576,9 @@ pub struct TaskRow {
 /// Subagents and terminals running right now (recursive): the chips.
 fn live_rows(messages: &[Message]) -> Vec<TaskRow> {
     let mut out = Vec::new();
-    collect(messages, &mut out, 0, &|t: &ToolCall| t.is_active() && (t.is_subagent() || t.background || t.kind == ToolKind::Shell));
+    // Commands the agent waits on show in the transcript; only background
+    // ones are terminals.
+    collect(messages, &mut out, 0, &|t: &ToolCall| t.is_active() && (t.is_subagent() || t.background));
     out
 }
 
@@ -816,7 +818,11 @@ mod tests {
         let mut ls = ToolCall::new("s1", "Bash", json!({"command": "ls"}));
         ls.kind = ToolKind::Shell;
         ls.status = ToolStatus::Completed;
-        let rows = live_rows(&[msg(vec![agent, dev, ls])]);
+        // A command the agent waits on is no background terminal.
+        let mut fg = ToolCall::new("f1", "Bash", json!({"command": "cargo build"}));
+        fg.kind = ToolKind::Shell;
+        fg.status = ToolStatus::Running;
+        let rows = live_rows(&[msg(vec![agent, dev, ls, fg])]);
         assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a1", "b1"]);
         assert_eq!(rows[0].title, "Audit the parser");
         assert_eq!(rows[0].activity.as_deref(), Some("Read src/a.rs"));

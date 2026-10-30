@@ -68,7 +68,11 @@ pub struct AgentModels {
 
 impl AgentModels {
     pub fn model(&self, id: &str) -> Option<&AgentModel> {
-        self.models.iter().find(|m| m.id == id).or_else(|| self.models.iter().find(|m| m.variants.iter().any(|v| v.id == id)))
+        self.models
+            .iter()
+            .find(|m| m.id == id)
+            .or_else(|| self.models.iter().find(|m| m.variants.iter().any(|v| v.id == id)))
+            .or_else(|| self.models.iter().find(|m| m.aliases.iter().any(|a| a == id)))
     }
 
     /// The model and variant an id names (Cursor's ids name a variant).
@@ -112,6 +116,9 @@ pub struct AgentModel {
     /// The agent's default when nothing is chosen (from its listing).
     #[serde(default)]
     pub default: bool,
+    /// Other ids for the same model (what Claude Code's `opus` stands for).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
 }
 
 impl AgentModel {
@@ -164,7 +171,7 @@ pub struct NativeProvider {
 /// Whether Larrier can read a model list from the agent's CLI (slow: it
 /// may go to the network).
 pub fn has_cli_listing(agent: &AgentKind) -> bool {
-    matches!(agent, AgentKind::Cursor | AgentKind::OpenCode | AgentKind::Droid)
+    matches!(agent, AgentKind::ClaudeCode | AgentKind::Cursor | AgentKind::OpenCode | AgentKind::Droid)
 }
 
 /// Read what `agent` offers. `program` is its executable (for the CLI
@@ -196,7 +203,7 @@ fn keep_listed(p: &AgentModels) -> Vec<AgentModel> {
 /// The agent's files, on top of its CLI model list.
 pub fn read_files(agent: &AgentKind, listed: Vec<AgentModel>) -> AgentModels {
     let mut m = match agent {
-        AgentKind::ClaudeCode => claude(&larrier_formats::claude::root(None)),
+        AgentKind::ClaudeCode => claude(&larrier_formats::claude::root(None), listed),
         AgentKind::Codex => codex(&larrier_formats::codex::root(None)),
         AgentKind::Cursor => cursor(&larrier_formats::cursor::config_dir(), larrier_formats::cursor::ide_db().as_deref(), listed),
         AgentKind::OpenCode => opencode(&opencode_config_dir(), &opencode_state_dir(), listed),
@@ -307,6 +314,9 @@ async fn run_cli(program: &Path, args: &[&str], timeout: Duration) -> Result<Str
 }
 
 async fn cli_listing(agent: &AgentKind, program: &Path) -> Option<Result<Vec<AgentModel>, String>> {
+    if *agent == AgentKind::ClaudeCode {
+        return Some(claude_listing(program).await);
+    }
     let (args, secs): (&[&str], u64) = match agent {
         AgentKind::Cursor => (&["--list-models"], 60),
         AgentKind::OpenCode => (&["models", "--verbose"], 90),
@@ -338,9 +348,75 @@ fn clean(s: &str) -> String {
 
 // ------------------------------------------------------------------ Claude Code
 
+/// Claude Code's own model menu: what `initialize` answers over its control
+/// protocol (no prompt is sent, so nothing is spent).
+async fn claude_listing(program: &Path) -> Result<Vec<AgentModel>, String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (prog, prefix) = crate::request::unwrap_shim(program);
+    let mut cmd = tokio::process::Command::new(prog);
+    cmd.args(prefix).args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
+    cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    cmd.kill_on_drop(true);
+    cmd.env_remove("CLAUDECODE");
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't list models: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
+    let line = "{\"type\":\"control_request\",\"request_id\":\"larrier_models\",\"request\":{\"subtype\":\"initialize\"}}\n";
+    stdin.write_all(line.as_bytes()).await.map_err(|e| e.to_string())?;
+    let mut lines = BufReader::new(child.stdout.take().ok_or("no stdout")?).lines();
+    let read = async {
+        while let Ok(Some(l)) = lines.next_line().await {
+            let Ok(v) = serde_json::from_str::<Value>(&l) else { continue };
+            if v["type"] == "control_response" && v["response"]["request_id"] == "larrier_models" {
+                return Some(v);
+            }
+        }
+        None
+    };
+    let reply = tokio::time::timeout(Duration::from_secs(30), read).await.ok().flatten();
+    drop(stdin);
+    let _ = child.kill().await;
+    let v = reply.ok_or("Couldn't list models: Claude Code didn't answer")?;
+    let models = parse_claude_models(&v["response"]["response"]);
+    if models.is_empty() {
+        return Err(v["response"]["error"].as_str().map(|e| format!("Couldn't list models: {e}")).unwrap_or_else(|| "Couldn't list models: none reported".into()));
+    }
+    Ok(models)
+}
+
+/// Models from Claude Code's `initialize` reply: the latest of each family
+/// by alias (`opus` → "Opus 5.5"), older ones by their own id.
+pub fn parse_claude_models(init: &Value) -> Vec<AgentModel> {
+    let mut out = Vec::new();
+    for x in init["models"].as_array().into_iter().flatten() {
+        let Some(id) = str_of(x, &["value"]) else { continue };
+        let resolved = str_of(x, &["resolvedModel"]).unwrap_or(id).to_string();
+        let mut m = AgentModel::new(id, str_of(x, &["displayName"]).unwrap_or(id));
+        m.description = str_of(x, &["description"]).map(str::to_string);
+        m.efforts = x["supportedEffortLevels"].as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        m.listed = true;
+        m.context = larrier_core::models::lookup(&resolved).and_then(|i| i.context);
+        if id == "default" {
+            // The agent's own default: Larrier lists it as "Default".
+            m.default = true;
+            m.aliases = vec![resolved];
+        } else {
+            let alias = !id.starts_with("claude-");
+            m.featured = alias;
+            m.group = Some(if alias { "Latest".into() } else { "Older models".into() });
+            if resolved != id {
+                m.aliases = vec![resolved];
+            }
+        }
+        out.push(m);
+    }
+    out
+}
+
 const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
-fn claude(dir: &Path) -> AgentModels {
+fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
     use larrier_core::models::{self, ModelStatus, Source, Vendor};
     let mut m = AgentModels::default();
     let settings_path = dir.join("settings.json");
@@ -371,7 +447,25 @@ fn claude(dir: &Path) -> AgentModels {
     };
     m.default_effort = env("CLAUDE_CODE_EFFORT_LEVEL").or_else(|| effort_for(m.default_model.as_deref().unwrap_or("opus")));
     let allowed: Vec<String> = s.get("availableModels").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
-    for (alias, label) in [("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"), ("fable", "Fable")] {
+    if !listed.is_empty() {
+        // Claude Code's own menu, with the effort its settings keep per model.
+        let default_target = listed.iter().find(|x| x.default).and_then(|x| x.aliases.first().cloned());
+        for mut am in listed.into_iter().filter(|x| !x.default) {
+            if m.default_model.is_none() && default_target.as_ref().is_some_and(|t| am.aliases.contains(t) || &am.id == t) {
+                m.default_model = Some(am.id.clone());
+            }
+            am.default_effort = effort_for(&am.id).filter(|e| am.efforts.contains(e));
+            if !allowed.is_empty() {
+                am.featured = allowed.iter().any(|a| *a == am.id || am.aliases.contains(a));
+            }
+            m.models.push(am);
+        }
+        if m.default_effort.is_none() {
+            m.default_effort = effort_for(m.default_model.as_deref().unwrap_or("opus"));
+        }
+    }
+    let catalog = m.models.is_empty();
+    for (alias, label) in [("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"), ("fable", "Fable")].into_iter().filter(|_| catalog) {
         let target = resolve(alias);
         let mut am = AgentModel::new(alias, label);
         am.description = Some(format!("Latest · {}", models::display_name(&target)));
@@ -381,7 +475,7 @@ fn claude(dir: &Path) -> AgentModels {
         am.group = Some("Aliases".into());
         m.models.push(am);
     }
-    for info in models::all().into_iter().filter(|i| i.vendor == Vendor::Anthropic && i.source == Source::Official && matches!(i.status, ModelStatus::Active | ModelStatus::Legacy)) {
+    for info in models::all().into_iter().filter(|i| catalog && i.vendor == Vendor::Anthropic && i.source == Source::Official && matches!(i.status, ModelStatus::Active | ModelStatus::Legacy)) {
         let mut am = AgentModel::new(info.id.clone(), info.name.clone());
         am.efforts = if info.id.contains("haiku") { Vec::new() } else { efforts.clone() };
         am.default_effort = s.get("modelSettings").and_then(|ms| ms.get(&info.id)).and_then(|x| str_of(x, &["effortLevel"])).map(str::to_string);
@@ -1031,6 +1125,32 @@ mod tests {
         assert_eq!(effort_label("medium"), "Medium");
         assert_eq!(codex_name("GPT-6.1-Sol"), "GPT-6.1 Sol");
         assert_eq!(codex_name("GPT-6.1 Terra"), "GPT-6.1 Terra");
+    }
+
+    /// Claude Code 2.1.310's own menu (its `initialize` reply): the latest
+    /// models by alias under their real names, older ones to add.
+    #[test]
+    fn claude_models_from_its_menu() {
+        let v: Value = serde_json::from_str(include_str!("../tests/fixtures/claude_init_models.json")).unwrap();
+        let listed = parse_claude_models(&v);
+        let latest: Vec<(&str, &str)> = listed.iter().filter(|m| m.featured).map(|m| (m.id.as_str(), m.name.as_str())).collect();
+        assert_eq!(latest, [("opus", "Opus 5.5"), ("fable", "Fable 5.1"), ("sonnet", "Sonnet 5.5"), ("haiku", "Haiku 5.5")]);
+        let opus = listed.iter().find(|m| m.id == "opus").unwrap();
+        assert_eq!(opus.aliases, ["claude-opus-5-5"]);
+        assert_eq!(opus.efforts, ["low", "medium", "high", "xhigh", "max"]);
+        let older: Vec<&str> = listed.iter().filter(|m| m.group.as_deref() == Some("Older models")).map(|m| m.name.as_str()).collect();
+        assert!(older.contains(&"Opus 4.8") && older.contains(&"Haiku 4.5"), "{older:?}");
+        assert!(listed.iter().any(|m| m.default && m.aliases == ["claude-opus-5-5"]));
+
+        // In the reader: the default is the alias, and the id Claude reports
+        // after a turn finds the same model.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), r#"{"effortLevel":"xhigh"}"#).unwrap();
+        let m = claude(dir.path(), listed);
+        assert_eq!(m.default_model.as_deref(), Some("opus"));
+        assert_eq!(m.model("claude-opus-5-5").map(|x| x.id.as_str()), Some("opus"));
+        assert!(!m.models.iter().any(|x| x.default), "the default row isn't a model of its own");
+        assert_eq!(m.models.iter().find(|x| x.id == "opus").and_then(|x| x.default_effort.as_deref()), Some("xhigh"));
     }
 }
 

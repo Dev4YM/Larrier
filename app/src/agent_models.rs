@@ -242,8 +242,12 @@ pub fn resolve(app: &App, agent: &AgentKind, model: Option<&str>, effort: Option
 /// Short name for a model id ("Opus 5.5", "GPT-6.1 Sol", "Kimi K2.7 Code").
 pub fn short_name(app: &App, agent: &AgentKind, id: &str) -> String {
     use larrier_core::models as reg;
-    if let Some((_, label)) = reg::alias(id) {
-        return label.to_string();
+    // The agent's own name for it ("Opus 5.5" for Claude Code's `opus`).
+    if let Some(m) = app.agent_models(agent).as_ref().and_then(|n| n.model(id).filter(|m| m.listed).map(|m| m.name.clone())) {
+        return m.trim_start_matches("Claude ").to_string();
+    }
+    if let Some((target, label)) = reg::alias(id) {
+        return reg::lookup(target).map(|i| i.short_name()).unwrap_or_else(|| label.to_string());
     }
     let ac = app.config.read().agent(agent);
     if let Some(n) = ac.added_models().into_iter().find(|c| c.id == id).and_then(|c| c.name) {

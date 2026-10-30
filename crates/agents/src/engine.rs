@@ -88,8 +88,10 @@ impl TurnRecorder {
                 false
             }
             AgentEvent::Model { model } => {
+                // The reply records the model that answered; the session
+                // keeps the user's pick (Claude Code reports `opus` as
+                // `claude-opus-5-5`, which would unpick the alias).
                 self.model = Some(model.clone());
-                session.model = Some(model.clone());
                 if let Some(i) = self.msg_index {
                     if let Some(m) = session.messages.get_mut(i) {
                         m.model = Some(model.clone());

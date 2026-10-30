@@ -941,7 +941,7 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 .composer.tall .composer-row.cgrid, .composer.home-c .composer-row.cgrid { grid-template-areas: "text text text text text" "plus . mode model send"; }
 .cgrid .c-plus { grid-area: plus; display: flex; }
 .cgrid .c-text { grid-area: text; width: 100%; min-width: 0; }
-.cgrid .c-mode { grid-area: mode; }
+.cgrid .c-mode { grid-area: mode; display: flex; align-items: center; gap: 2px; min-width: 0; }
 .cgrid .c-model { grid-area: model; justify-self: end; min-width: 0; }
 .cgrid .c-send { grid-area: send; }
 .composer.tall .cgrid .c-text { padding: 4px 8px 2px; min-height: 44px; }

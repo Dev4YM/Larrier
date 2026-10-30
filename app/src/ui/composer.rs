@@ -932,12 +932,17 @@ pub fn Composer(
                             }
                         },
                     }
-                    // Shown only when a group is off its default.
-                    for (gi, g) in groups.iter().enumerate().filter(|(_, g)| g.chosen != g.default) {
-                        span { key: "{gi}", class: "picker c-mode", style: "color: var(--blue); cursor: default;",
-                            title: if gi == 0 { "{g.label} · Shift+Tab to change" } else { "{g.label}" },
-                            Icon { i: if Some(g.options[g.chosen].id) == plan_id && gi == 0 { I::List } else if gi == 0 { I::Infinity } else { I::Lock }, size: 13 }
-                            "{g.options[g.chosen].label}"
+                    // Shown only when a group is off its default (side by side
+                    // in the one grid cell).
+                    if groups.iter().any(|g| g.chosen != g.default) {
+                        div { class: "c-mode",
+                            for (gi, g) in groups.iter().enumerate().filter(|(_, g)| g.chosen != g.default) {
+                                span { key: "{gi}", class: "picker", style: "color: var(--blue); cursor: default;",
+                                    title: if gi == 0 { "{g.label} · Shift+Tab to change" } else { "{g.label}" },
+                                    Icon { i: if Some(g.options[g.chosen].id) == plan_id && gi == 0 { I::List } else if gi == 0 { I::Infinity } else { I::Lock }, size: 13 }
+                                    "{g.options[g.chosen].label}"
+                                }
+                            }
                         }
                     }
                     div { class: "menu-anchor c-model",

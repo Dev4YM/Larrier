@@ -1586,3 +1586,8 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ad-row .cmd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--code-bg); border-radius: 6px; padding: 5px 8px; color: var(--fg); user-select: text; }
 .ad-foot { display: flex; }
 .ad-foot a { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+
+/* A message sent into the running turn, until the agent reads it. */
+.user-msg.pending { position: relative; top: auto; animation: queue-in .18s ease-out both; }
+.user-msg.pending .user-card { opacity: .55; border-style: dashed; cursor: default; }
+.user-msg.pending .pending-note { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 4px; font-size: 11px; color: var(--fg-3); }

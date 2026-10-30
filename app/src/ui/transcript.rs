@@ -173,6 +173,7 @@ pub fn Transcript(id: String) -> Element {
     // The agent finished its reply; only background work keeps it running.
     let writing = running && !app.idle.read().contains(&id);
     let (permission, pending_more) = app.permissions.read().get(&id).map(|v| (v.first().cloned(), v.len().saturating_sub(1))).unwrap_or((None, 0));
+    let steering = app.steering.read().get(&id).cloned().unwrap_or_default();
     let show_reasoning = app.config.read().settings.show_reasoning;
     let n_rows = rows.len();
 
@@ -341,6 +342,23 @@ pub fn Transcript(id: String) -> Element {
                         ended: r.ended,
                         live: writing && i + 1 == n_rows,
                         show_reasoning,
+                    }
+                }
+                // Messages sent into the running turn, shown at once and
+                // greyed until the agent reads them.
+                for q in steering.iter() {
+                    div { key: "steer-{q.id}", class: "user-msg pending", title: "Sent into the running turn: the agent reads it at its next step",
+                        div { class: "user-card short", dir: "auto",
+                            if q.attachments.iter().any(|a| matches!(a, Part::Image { .. })) {
+                                div { class: "msg-images",
+                                    for (i, a) in q.attachments.iter().enumerate().filter(|(_, a)| matches!(a, Part::Image { .. })) {
+                                        if let Some(src) = crate::state::image_src(a) { img { key: "{i}", src: "{src}" } }
+                                    }
+                                }
+                            }
+                            "{q.text}"
+                        }
+                        div { class: "pending-note", super::Spinner { size: 10 } "Sending into this turn…" }
                     }
                 }
                 if let Some(req) = permission {

@@ -112,11 +112,19 @@ pub fn RequestCard(session_id: String, request: PermissionRequest, more: usize) 
         RequestKind::Tool => {
             let opts = request.options.clone();
             let deny = opts.iter().find(|o| o.kind.starts_with("reject")).map(|o| o.id.clone());
+            // What it is asking for, by the drivers' titles ("Write a.txt").
+            let lead = if ["Write ", "Edit ", "Delete ", "Change files"].iter().any(|p| request.title.starts_with(p)) {
+                "wants to change files"
+            } else if request.title.starts_with(agent.as_str()) || request.title.contains(" asks you ") {
+                "needs your OK"
+            } else {
+                "wants to run"
+            };
             rsx! {
                 div { key: "{rid}", class: "req-card",
                     div { class: "req-head",
                         span { class: "ic", Icon { i: I::Lock, size: 13 } }
-                        span { class: "grow", "{agent} wants to run" }
+                        span { class: "grow", "{agent} {lead}" }
                         if more > 0 { span { class: "faint", "{waiting}" } }
                     }
                     div { class: "req-title", "{request.title}" }

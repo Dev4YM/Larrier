@@ -193,6 +193,9 @@ fn General() -> Element {
                     },
                 }
             }
+            Row { title: "Browser for Agents".to_string(), desc: Some("Claude Code, Codex and agents connected over ACP can open pages, click, type and take screenshots in Larrier's browser, which you watch in the Browser tab.".to_string()),
+                Toggle { on: s.browser_tools, onchange: move |v| app.update_config(|c| c.settings.browser_tools = v) }
+            }
             Row { title: "Send with Ctrl+Enter".to_string(), desc: Some("Otherwise Enter sends and Shift+Enter adds a line.".to_string()),
                 Toggle { on: s.send_with_ctrl_enter, onchange: move |v| app.update_config(|c| c.settings.send_with_ctrl_enter = v) }
             }

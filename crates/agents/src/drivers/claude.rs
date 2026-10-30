@@ -46,6 +46,7 @@ async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedRecei
     if let Some(a) = &req.run_as {
         cmd.args(["--agent", a]);
     }
+    browser_args(&mut cmd, &req);
     cmd.args(&req.modes.args);
     cmd.env_remove("CLAUDECODE");
     cmd.env("CLAUDE_CODE_FORWARD_SUBAGENT_TEXT", "1");
@@ -88,6 +89,7 @@ async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedRece
         if let Some(a) = &req.run_as {
             cmd.args(["--agent", a]);
         }
+        browser_args(&mut cmd, &req);
         // --permission-mode from the chosen mode (Auto unless picked otherwise).
         cmd.args(&req.modes.args);
         // Claude Code refuses to start nested inside another Claude Code session.
@@ -132,6 +134,14 @@ pub async fn run_qwen(req: TurnRequest, sink: EventSink, mut control: UnboundedR
     cmd.args(["-p", &prompt]);
     let mut parser = ClaudeStream::default();
     run_stream("Qwen Code", cmd, None, &sink, &mut control, &mut parser).await;
+}
+
+/// Larrier's browser as an MCP server for this run, its tools allowed.
+fn browser_args(cmd: &mut tokio::process::Command, req: &TurnRequest) {
+    if let Some(b) = &req.browser {
+        cmd.arg("--mcp-config").arg(b.mcp_json().to_string());
+        cmd.arg("--allowedTools").arg(format!("mcp__{}", crate::browser::SERVER_NAME));
+    }
 }
 
 /// A request Claude is waiting on.

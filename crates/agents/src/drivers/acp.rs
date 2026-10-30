@@ -416,6 +416,11 @@ impl Acp {
         }
     }
 
+    /// MCP servers Larrier adds to the agent's session (its browser).
+    fn mcp_servers(&self) -> Value {
+        Value::Array(self.req.browser.iter().map(|b| b.acp()).collect())
+    }
+
     fn on_permission(&mut self, id: Value, params: Value) {
         let options: Vec<PermissionOption> = params["options"]
             .as_array()
@@ -433,7 +438,9 @@ impl Acp {
             self.respond(id, json!({ "outcome": { "outcome": "cancelled" } }));
             return;
         }
-        if self.req.run_mode == RunMode::FullAuto || approves_all(&self.req) {
+        // Larrier's own browser tools are always allowed.
+        let browser = self.req.browser.is_some() && params["toolCall"].to_string().contains(crate::browser::SERVER_NAME);
+        if self.req.run_mode == RunMode::FullAuto || approves_all(&self.req) || browser {
             let pick = options
                 .iter()
                 .find(|o| o.kind == "allow_once")
@@ -696,7 +703,7 @@ impl Acp {
         let mut handoff = self.req.handoff.clone();
         if let Some(rid) = self.req.resume_id.clone().filter(|_| can_load) {
             self.replaying = true;
-            let r = self.call("session/load", json!({ "sessionId": rid, "cwd": cwd, "mcpServers": [] })).await;
+            let r = self.call("session/load", json!({ "sessionId": rid, "cwd": cwd, "mcpServers": self.mcp_servers() })).await;
             self.replaying = false;
             match r {
                 Ok(v) => {
@@ -712,7 +719,7 @@ impl Acp {
                 // The agent can't reload its old session: hand it the whole history.
                 handoff = Some(full_history(&self.req));
             }
-            match self.call("session/new", json!({ "cwd": cwd, "mcpServers": [] })).await {
+            match self.call("session/new", json!({ "cwd": cwd, "mcpServers": self.mcp_servers() })).await {
                 Ok(v) => {
                     match s(&v, "sessionId") {
                         Some(id) => self.session_id = Some(id.to_string()),
@@ -1010,6 +1017,7 @@ mod tests {
             chat: None,
             notice: None,
             run_as: None,
+            browser: None,
         }
     }
 

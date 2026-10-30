@@ -102,10 +102,15 @@ enum Start {
 
 fn main() {
     scrub_host_session_env();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // An agent's browser tools: an MCP server on stdio (before any logging,
+    // which would write into its replies).
+    if args.first().map(String::as_str) == Some("mcp-browser") {
+        std::process::exit(larrier_agents::browser::mcp::serve());
+    }
     let filter = std::env::var("LARRIER_LOG").unwrap_or_else(|_| "info,larrier=debug".into());
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = headless(&args) {
         std::process::exit(code);
     }
@@ -119,6 +124,10 @@ fn main() {
     };
 
     let root = state::store().root().to_path_buf();
+    // Agents start this program for their browser tools.
+    if let Ok(exe) = std::env::current_exe() {
+        larrier_agents::browser::register(&exe);
+    }
     let dark = state::store().load_config().settings.theme == larrier_core::Theme::Dark;
     let bg = if dark { (26, 26, 24, 255) } else { (247, 247, 244, 255) };
 

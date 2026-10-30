@@ -35,6 +35,9 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     };
     cmd.args(config_args(&modes));
     cmd.args(config_args(&req.launch.extra_args));
+    if let Some(b) = &req.browser {
+        cmd.args(b.codex_args());
+    }
     cmd.arg("app-server");
     let outcome = run_interactive(cmd, Vec::new(), &sink, &mut control, &mut live).await;
     if !live.initialized && !outcome.cancelled {
@@ -416,7 +419,14 @@ impl CodexLive {
             "mcpServer/elicitation/request" => {
                 let server = s(p, "serverName").unwrap_or("An MCP server");
                 let message = s(p, "message").unwrap_or("").to_string();
-                if s(p, "mode") == Some("url") {
+                let fields = p["requestedSchema"]["properties"].as_object().map(|o| o.len()).unwrap_or(0);
+                if s(p, "mode") != Some("url") && fields == 0 {
+                    // Nothing to fill in: a yes or no (Codex asks this way
+                    // before an MCP tool runs).
+                    req.title = if message.is_empty() { format!("{server} asks to go ahead") } else { message.clone() };
+                    req.options = vec![opt("accept", "Allow", "allow_once"), opt("decline", "Deny", "reject_once")];
+                    (AskKind::Link, Value::Null)
+                } else if s(p, "mode") == Some("url") {
                     req.title = format!("{server} asks you to open a link");
                     req.detail = Some(format!("{message}\n{}", s(p, "url").unwrap_or("")).trim().to_string());
                     req.options = vec![opt("accept", "Done, continue", "allow_once"), opt("decline", "Decline", "reject_once")];
@@ -495,7 +505,7 @@ impl CodexLive {
                     json!({"action": "decline", "content": null, "_meta": null})
                 }
             }
-            AskKind::Link => json!({"action": if allowed { "accept" } else { "decline" }, "content": null, "_meta": null}),
+            AskKind::Link => json!({"action": if allowed { "accept" } else { "decline" }, "content": if allowed { json!({}) } else { Value::Null }, "_meta": null}),
             AskKind::Plan => return self.answer_plan(opt, reply.message, sink),
         };
         if let Some(id) = ask.item.filter(|i| self.open.contains(i)) {
@@ -992,6 +1002,7 @@ mod tests {
             chat: None,
             notice: None,
             run_as: None,
+            browser: None,
         }
     }
 

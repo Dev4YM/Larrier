@@ -50,6 +50,8 @@ pub struct TurnRequest {
     /// One of the agent's own named agents to run as (Claude Code's
     /// `--agent`).
     pub run_as: Option<String>,
+    /// Larrier's browser, for agents that take MCP servers per run.
+    pub browser: Option<crate::browser::Server>,
 }
 
 impl TurnRequest {
@@ -577,6 +579,9 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         chat,
         notice,
         run_as: session.run_as.clone().filter(|_| *agent == AgentKind::ClaudeCode),
+        browser: crate::browser::server()
+            .filter(|_| cfg.settings.browser_tools)
+            .filter(|_| matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex) || protocol == Protocol::Acp),
     })
 }
 

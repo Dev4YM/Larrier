@@ -497,6 +497,8 @@ pub fn track_window() {
                     crate::state::flush_saves();
                     if matches!(event, WindowEvent::CloseRequested) {
                         app.install_on_exit();
+                        // The agents' browser goes with Larrier.
+                        larrier_agents::browser::shutdown();
                     }
                 }
                 _ => {}

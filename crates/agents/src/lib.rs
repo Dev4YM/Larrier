@@ -2,6 +2,7 @@
 //! chat), normalizes their output into [`AgentEvent`]s and records them into
 //! LSF sessions.
 
+pub mod browser;
 pub mod detect;
 pub mod drivers;
 pub mod engine;

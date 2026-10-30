@@ -8,12 +8,12 @@ use std::time::{Duration, Instant};
 use dioxus::prelude::*;
 use dioxus::core::spawn_forever;
 use larrier_agents::{
-    engine::TurnRecorder, events::PermissionRequest, git, AgentEvent, Detected, TurnControl, TurnHandle,
+    engine::TurnRecorder, events::PermissionRequest, git, AgentEvent, Detected, Reply, TurnControl, TurnHandle,
 };
 use larrier_core::{
     lsf::{new_id, MediaSource},
     store::{import_key, ImportRecord},
-    AccountAuth, AgentKind, Config, Environment, Message, Part, Role, Session, SessionStatus, SessionSummary, Store,
+    AccountAuth, AgentKind, BusySend, Config, Environment, Message, Part, Role, Session, SessionStatus, SessionSummary, Store,
     Theme, WorkspaceRef,
 };
 use larrier_formats::ExportFormat;
@@ -328,7 +328,8 @@ pub struct App {
     pub open: Signal<HashMap<String, Signal<Session>>>,
     pub view: Signal<View>,
     pub running: Signal<HashMap<String, TurnControl>>,
-    pub permissions: Signal<HashMap<String, PermissionRequest>>,
+    /// What each running agent is waiting for, oldest first.
+    pub permissions: Signal<HashMap<String, Vec<PermissionRequest>>>,
     pub detected: Signal<Vec<Detected>>,
     pub ui: Signal<Ui>,
     pub toasts: Signal<Vec<Toast>>,
@@ -336,6 +337,11 @@ pub struct App {
     pub draft: Signal<Draft>,
     /// Follow-ups queued per session while its agent is working.
     pub queue: Signal<HashMap<String, Vec<Queued>>>,
+    /// Messages sent into a running turn that the agent hasn't taken in yet.
+    pub steering: Signal<HashMap<String, Vec<Queued>>>,
+    /// Sessions the user stopped: their queue waits instead of sending,
+    /// unless the stop was to send a message now.
+    pub stopping: Signal<HashMap<String, bool>>,
     /// Chat tabs in the header.
     pub tabs: Signal<Vec<ChatTab>>,
     /// Session shown side by side with the current one.
@@ -435,6 +441,8 @@ impl App {
             sync_status: root_signal(String::new()),
             draft: root_signal(draft),
             queue: root_signal(HashMap::new()),
+            steering: root_signal(HashMap::new()),
+            stopping: root_signal(HashMap::new()),
             tabs: root_signal(Vec::new()),
             split: root_signal(None),
             editing: root_signal(EditState::default()),
@@ -964,12 +972,8 @@ impl App {
         let id = match session_id {
             Some(id) => {
                 if self.is_running(&id) {
-                    if self.config.read().settings.queue_followups {
-                        self.queue.write().entry(id.clone()).or_default().push(Queued { id: rand_id(), text, attachments });
-                        self.toast("Queued — sends when the agent finishes");
-                    } else {
-                        self.toast("Agent is still working — stop it first or wait.");
-                    }
+                    let how = self.config.read().settings.busy_send;
+                    self.send_while_busy(&id, text, attachments, how);
                     return;
                 }
                 if !self.ensure_loaded(&id) {
@@ -1091,8 +1095,20 @@ impl App {
                         match e {
                             AgentEvent::Permission { request } => {
                                 idle = Some(false);
-                                app.permissions.write().insert(id.clone(), request.clone());
+                                app.permissions.write().entry(id.clone()).or_default().push(request.clone());
                                 crate::notify::agent_event(&s.title, &format!("{} needs your input", s.title), true);
+                            }
+                            AgentEvent::Steered { text, .. } => {
+                                if let Some(v) = app.steering.write().get_mut(&id) {
+                                    if let Some(i) = v.iter().position(|q| &q.text == text) {
+                                        v.remove(i);
+                                    }
+                                }
+                            }
+                            AgentEvent::PermissionClosed { id: rid } => {
+                                if let Some(v) = app.permissions.write().get_mut(&id) {
+                                    v.retain(|r| &r.id != rid);
+                                }
                             }
                             AgentEvent::NativeSession { id: native, .. } => {
                                 // A session imported from this very native
@@ -1168,6 +1184,22 @@ impl App {
                 let what = if ok { "is ready for review" } else { "failed" };
                 crate::notify::agent_event(t, &format!("{t} {what}"), ok);
             }
+            // Messages sent into the turn that it never took in go first in
+            // the queue.
+            let untaken = app.steering.write().remove(&id).unwrap_or_default();
+            if !untaken.is_empty() {
+                let mut q = app.queue.write();
+                let v = q.entry(id.clone()).or_default();
+                for (i, m) in untaken.into_iter().enumerate() {
+                    v.insert(i, m);
+                }
+            }
+            // After the user's own stop the queue waits, unless the stop was
+            // to send the first queued message now.
+            let stopped = app.stopping.write().remove(&id);
+            if stopped == Some(false) {
+                return;
+            }
             // Send the next queued follow-up, if any.
             let next = {
                 let mut q = app.queue.write();
@@ -1192,18 +1224,94 @@ impl App {
         });
     }
 
-    pub fn stop(self, id: &str) {
+    pub fn stop(mut self, id: &str) {
         if let Some(c) = self.running.read().get(id) {
+            self.stopping.write().entry(id.to_string()).or_insert(false);
             c.cancel();
         }
     }
 
-    pub fn respond_permission(mut self, session_id: &str, option_id: Option<String>) {
-        let req = self.permissions.write().remove(session_id);
-        if let (Some(req), Some(ctrl)) = (req, self.running.read().get(session_id)) {
-            ctrl.respond(req.id, option_id);
+    /// A message for a session whose agent is working: into the turn, into
+    /// the queue, or sent now after stopping the agent.
+    pub fn send_while_busy(mut self, id: &str, text: String, attachments: Vec<Part>, how: BusySend) {
+        let agent = self.peek_session(id, |s| s.agent.clone()).unwrap_or(AgentKind::ClaudeCode);
+        let steerable = larrier_agents::can_steer(&agent, &self.config.read());
+        let item = Queued { id: rand_id(), text, attachments };
+        match how {
+            BusySend::Steer | BusySend::Interrupt if steerable => {
+                if let Some(c) = self.running.read().get(id) {
+                    c.steer(item.text.clone(), item.attachments.clone(), how == BusySend::Interrupt);
+                }
+                self.steering.write().entry(id.to_string()).or_default().push(item);
+            }
+            BusySend::Steer => {
+                self.queue.write().entry(id.to_string()).or_default().push(item);
+                self.toast(format!("{} can't take messages while it works, so this is queued for when it finishes", agent.display_name()));
+            }
+            BusySend::Queue => self.queue.write().entry(id.to_string()).or_default().push(item),
+            BusySend::Interrupt => {
+                self.queue.write().entry(id.to_string()).or_default().insert(0, item);
+                self.stopping.write().insert(id.to_string(), true);
+                if let Some(c) = self.running.read().get(id) {
+                    c.cancel();
+                }
+            }
         }
-        self.mutate_session(session_id, |s| s.status = SessionStatus::Running);
+    }
+
+    pub fn queue_move(mut self, id: &str, from: usize, to: usize) {
+        if let Some(v) = self.queue.write().get_mut(id) {
+            if from < v.len() && from != to {
+                let item = v.remove(from);
+                v.insert(to.min(v.len()), item);
+            }
+        }
+    }
+
+    pub fn queue_remove(mut self, id: &str, qid: u64) {
+        let mut q = self.queue.write();
+        if let Some(v) = q.get_mut(id) {
+            v.retain(|x| x.id != qid);
+            if v.is_empty() {
+                q.remove(id);
+            }
+        }
+    }
+
+    pub fn queue_update(mut self, id: &str, qid: u64, text: String, attachments: Vec<Part>) {
+        if let Some(item) = self.queue.write().get_mut(id).and_then(|v| v.iter_mut().find(|x| x.id == qid)) {
+            item.text = text;
+            item.attachments = attachments;
+        }
+    }
+
+    /// Take a queued message out and send it with `how` (or now, when the
+    /// agent has finished meanwhile).
+    pub fn queue_send(self, id: &str, qid: u64, how: BusySend) {
+        let item = self.queue.peek().get(id).and_then(|v| v.iter().find(|x| x.id == qid).cloned());
+        let Some(item) = item else { return };
+        self.queue_remove(id, qid);
+        if self.is_running(id) {
+            self.send_while_busy(id, item.text, item.attachments, how);
+        } else {
+            self.send(Some(id.to_string()), item.text, item.attachments);
+        }
+    }
+
+    /// Answer request `request_id` of a running agent.
+    pub fn respond_permission(mut self, session_id: &str, request_id: &str, reply: Reply) {
+        let left = {
+            let mut p = self.permissions.write();
+            let v = p.entry(session_id.to_string()).or_default();
+            v.retain(|r| r.id != request_id);
+            v.len()
+        };
+        if let Some(ctrl) = self.running.read().get(session_id) {
+            ctrl.respond(request_id, reply);
+        }
+        if left == 0 {
+            self.mutate_session(session_id, |s| s.status = SessionStatus::Running);
+        }
     }
 
     fn create_session_from_draft(mut self) -> anyhow::Result<String> {

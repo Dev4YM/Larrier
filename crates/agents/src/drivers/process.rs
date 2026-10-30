@@ -110,8 +110,111 @@ where
                     let _ = child.start_kill();
                     break;
                 }
-                Some(TurnCommand::Permission { .. }) => {}
+                Some(TurnCommand::Permission { .. } | TurnCommand::Steer { .. }) => {}
             },
+        }
+    }
+    let status = child.wait().await.ok();
+    ProcessOutcome { exit_code: status.and_then(|s| s.code()), cancelled, stderr_tail }
+}
+
+/// An agent that keeps reading stdin while it works: answers to its
+/// requests, messages for the running turn, a graceful stop.
+pub trait Interactive {
+    /// Handle one stdout line.
+    fn handle(&mut self, line: &str, sink: &EventSink);
+    /// Handle a command from the user.
+    fn command(&mut self, cmd: TurnCommand, sink: &EventSink);
+    /// Lines to write to the agent now.
+    fn take_output(&mut self) -> Vec<String>;
+    /// The conversation is over: stdin is closed so the agent exits.
+    fn finished(&self) -> bool;
+    /// A stop was asked for: past this moment the process is killed.
+    fn stop_deadline(&self) -> Option<std::time::Instant>;
+}
+
+/// Spawn `cmd`, write `first` lines, then feed `parser` every stdout line
+/// and user command, writing what it answers, until the process exits.
+pub async fn run_interactive<P: Interactive>(
+    mut cmd: Command,
+    first: Vec<String>,
+    sink: &EventSink,
+    control: &mut UnboundedReceiver<TurnCommand>,
+    parser: &mut P,
+) -> ProcessOutcome {
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            sink.error(format!("Failed to start agent: {e}"));
+            return ProcessOutcome { exit_code: None, cancelled: false, stderr_tail: vec![e.to_string()] };
+        }
+    };
+    let mut stdin = child.stdin.take();
+    let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+    let mut out_lines = BufReader::new(stdout).lines();
+    let mut err_lines = BufReader::new(stderr).lines();
+    let mut stderr_tail: Vec<String> = Vec::new();
+    let mut cancelled = false;
+    let mut killed = false;
+    let (mut out_done, mut err_done) = (false, false);
+    let mut pending = first;
+    loop {
+        pending.extend(parser.take_output());
+        if let Some(w) = stdin.as_mut() {
+            for line in pending.drain(..) {
+                let mut l = line;
+                l.push('\n');
+                if w.write_all(l.as_bytes()).await.is_err() || w.flush().await.is_err() {
+                    break;
+                }
+            }
+        }
+        pending.clear();
+        if parser.finished() {
+            // Dropping stdin ends the conversation; the agent exits.
+            stdin = None;
+        }
+        if out_done && err_done {
+            break;
+        }
+        let deadline = parser.stop_deadline().filter(|_| !killed);
+        tokio::select! {
+            line = out_lines.next_line(), if !out_done => match line {
+                Ok(Some(l)) => {
+                    let l = l.trim_end_matches('\r');
+                    if !l.trim().is_empty() {
+                        parser.handle(l, sink);
+                    }
+                }
+                _ => out_done = true,
+            },
+            line = err_lines.next_line(), if !err_done => match line {
+                Ok(Some(l)) => {
+                    sink.log(l.clone());
+                    stderr_tail.push(strip_ansi(&l));
+                    if stderr_tail.len() > 40 { stderr_tail.remove(0); }
+                }
+                _ => err_done = true,
+            },
+            cmd = control.recv(), if !killed => match cmd {
+                Some(TurnCommand::Cancel) => {
+                    cancelled = true;
+                    parser.command(TurnCommand::Cancel, sink);
+                }
+                Some(c) => parser.command(c, sink),
+                // The app let go of the turn: nobody can answer any more.
+                None => {
+                    cancelled = true;
+                    killed = true;
+                    let _ = child.start_kill();
+                }
+            },
+            _ = tokio::time::sleep_until(deadline.map(tokio::time::Instant::from_std).unwrap_or_else(|| tokio::time::Instant::now() + std::time::Duration::from_secs(3600))), if deadline.is_some() => {
+                killed = true;
+                let _ = child.start_kill();
+            }
         }
     }
     let status = child.wait().await.ok();

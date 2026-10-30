@@ -212,9 +212,52 @@ pub struct Settings {
     pub show_tips: bool,
     #[serde(default = "yes")]
     pub restore_window: bool,
-    /// Queue follow-ups sent while an agent is still working.
-    #[serde(default = "yes")]
-    pub queue_followups: bool,
+    /// What Enter does with a message while the agent is working (Ctrl+Enter
+    /// does the other of steer and queue).
+    #[serde(default)]
+    pub busy_send: BusySend,
+}
+
+/// A message sent while the agent is working.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BusySend {
+    /// Into the running turn, where the agent takes it in.
+    #[default]
+    Steer,
+    /// Waits, and goes when the turn ends.
+    Queue,
+    /// Stops the turn and goes right away.
+    Interrupt,
+}
+
+impl BusySend {
+    pub const ALL: [BusySend; 3] = [BusySend::Steer, BusySend::Queue, BusySend::Interrupt];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BusySend::Steer => "Steer",
+            BusySend::Queue => "Queue",
+            BusySend::Interrupt => "Stop and send",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            BusySend::Steer => "The agent reads it while it works",
+            BusySend::Queue => "Sends when the agent finishes",
+            BusySend::Interrupt => "Stops the agent and sends it now",
+        }
+    }
+
+    /// What the other send key does: steer and queue swap, and the opposite
+    /// of stopping the agent is letting it finish. It never stops the agent.
+    pub fn alternate(self) -> BusySend {
+        match self {
+            BusySend::Steer | BusySend::Interrupt => BusySend::Queue,
+            BusySend::Queue => BusySend::Steer,
+        }
+    }
 }
 
 /// Corners of buttons, pills, pickers and segmented controls.
@@ -345,7 +388,7 @@ impl Default for Settings {
             continue_interrupted: true,
             show_tips: true,
             restore_window: true,
-            queue_followups: true,
+            busy_send: BusySend::Steer,
         }
     }
 }

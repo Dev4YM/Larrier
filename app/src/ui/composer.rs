@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 use larrier_agents::harness::{HarnessItem, ItemKind};
-use larrier_core::{lsf::short_path, AgentKind, Part, Protocol};
+use larrier_core::{lsf::short_path, AgentKind, BusySend, Part, Protocol};
 
 use super::mentions::{MentionChip, MentionChipView};
 use super::{Dropdown, MenuItem};
@@ -193,6 +193,14 @@ pub fn Composer(
     let mut app = use_app();
     let mut text = use_signal(String::new);
     let attachments: Signal<Vec<Part>> = use_signal(Vec::new);
+    // The queue panel: open or folded, the row being dragged and where it
+    // would land, and the queued message being edited with the draft it
+    // set aside.
+    let mut queue_open = use_signal(|| true);
+    let mut q_drag = use_signal(|| None::<usize>);
+    let mut q_over = use_signal(|| None::<usize>);
+    let q_edit = use_signal(|| None::<(u64, String, Vec<Part>)>);
+    let mut send_menu = use_signal(|| false);
     // Files, folders, chats, the diff and skills the prompt refers to, as chips.
     let mut mentions: Signal<Vec<MentionChip>> = use_signal(Vec::new);
     let plus_menu = use_signal(|| false);
@@ -328,7 +336,7 @@ pub fn Composer(
     let plan_id = plan_option(&agent);
     let in_plan = plan_id.is_some() && groups.first().map(|g| Some(g.options[g.chosen].id) == plan_id).unwrap_or(false);
     let ctrl_enter = app.config.read().settings.send_with_ctrl_enter;
-    let queue_ok = app.config.read().settings.queue_followups;
+    let busy = app.config.read().settings.busy_send;
     // Running in the agent's own app: replies go there.
     let elsewhere = session_id.as_ref().map(|id| app.running_elsewhere(id)).unwrap_or(false);
     let placeholder = if home {
@@ -483,8 +491,9 @@ pub fn Composer(
             }
         }
     };
-    let do_send = move |sid: Option<String>| {
+    let do_send = move |sid: Option<String>, how: Option<BusySend>| {
         let mut app = app;
+        let mut q_edit = q_edit;
         let mut text = text;
         let mut mentions = mentions;
         let mut at = attachments;
@@ -505,6 +514,16 @@ pub fn Composer(
         text.set(String::new());
         at.set(Vec::new());
         mentions.set(Vec::new());
+        let editing = q_edit.read().clone();
+        if let Some((qid, draft, draft_atts)) = editing {
+            q_edit.set(None);
+            if let Some(id) = &sid {
+                app.queue_update(id, qid, t, a);
+            }
+            text.set(draft);
+            at.set(draft_atts);
+            return;
+        }
         let agents = multi.read().clone();
         if sid.is_none() && agents.len() > 1 {
             // Multitask: the same prompt on several agents, side by side.
@@ -523,7 +542,30 @@ pub fn Composer(
             app.toast("Started the prompt on every selected agent");
             return;
         }
-        app.send(sid, t, a);
+        match (&sid, how) {
+            (Some(id), Some(h)) if app.is_running(id) => app.send_while_busy(id, t, a, h),
+            _ => app.send(sid, t, a),
+        }
+    };
+    // Put the draft back and stop editing a queued message.
+    let cancel_edit = move || {
+        let mut q_edit = q_edit;
+        let editing = q_edit.read().clone();
+        if let Some((_, draft, draft_atts)) = editing {
+            let (mut text, mut at) = (text, attachments);
+            q_edit.set(None);
+            text.set(draft);
+            at.set(draft_atts);
+        }
+    };
+    // Load a queued message into the box to edit; what was typed waits.
+    let start_edit = move |q: crate::state::Queued| {
+        let (mut text, mut at, mut q_edit) = (text, attachments, q_edit);
+        let kept = q_edit.read().clone().map(|(_, d, da)| (d, da)).unwrap_or_else(|| (text.read().clone(), at.read().clone()));
+        q_edit.set(Some((q.id, kept.0, kept.1)));
+        text.set(q.text.clone());
+        at.set(q.attachments.clone());
+        document::eval(&format!("setTimeout(() => {{ const el = document.getElementById('{input_id}'); if (el) {{ el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }} }}, 30)"));
     };
     let sid_send = session_id.clone();
     let sid_key = session_id.clone();
@@ -637,24 +679,69 @@ pub fn Composer(
                 }
             }
             if !queued.is_empty() {
-                div { class: "queue",
-                    for q in queued.clone() {
-                        div { key: "{q.id}", class: "queue-item",
-                            Icon { i: I::CornerDownLeft, size: 13 }
-                            span { class: "t", "{q.text}" }
-                            span { class: "faint", style: "font-size: 11px;", "Queued" }
-                            button { class: "icon-btn sm", title: "Remove from queue",
-                                onclick: {
-                                    let sid = session_id.clone();
-                                    move |_| {
-                                        if let Some(id) = &sid {
-                                            if let Some(v) = app.queue.write().get_mut(id) { v.retain(|x| x.id != q.id); }
+                if queue_open() {
+                    div { class: "queue-card",
+                        div { class: "queue-head",
+                            span { class: "n", "{queued.len()} Queued" }
+                            span { class: "grow" }
+                            button { class: "icon-btn sm", title: "Fold the queue", onclick: move |_| queue_open.set(false), Icon { i: I::Minus, size: 13 } }
+                        }
+                        for (qi, q) in queued.clone().into_iter().enumerate() {
+                            {
+                                let sid = session_id.clone().unwrap_or_default();
+                                let editing = q_edit.read().as_ref().map(|e| e.0) == Some(q.id);
+                                let over = q_over() == Some(qi) && q_drag().is_some_and(|d| d != qi);
+                                let thumb = q.attachments.iter().find(|a| matches!(a, Part::Image { .. })).and_then(crate::state::image_src);
+                                let files = q.attachments.iter().filter(|a| matches!(a, Part::File { .. })).count();
+                                let (s1, s2, s3, s4) = (sid.clone(), sid.clone(), sid.clone(), sid.clone());
+                                let (q1, q2) = (q.clone(), q.clone());
+                                let mut cls = String::from("queue-row");
+                                if editing { cls.push_str(" editing"); }
+                                if over { cls.push_str(" over"); }
+                                if q_drag() == Some(qi) { cls.push_str(" dragging"); }
+                                rsx! {
+                                    div { key: "{q.id}", class: "{cls}", draggable: "true",
+                                        ondragstart: move |e| { e.stop_propagation(); q_drag.set(Some(qi)); },
+                                        ondragover: move |e| { e.prevent_default(); e.stop_propagation(); if q_over() != Some(qi) { q_over.set(Some(qi)); } },
+                                        ondrop: move |e| {
+                                            e.prevent_default();
+                                            e.stop_propagation();
+                                            if let Some(from) = q_drag() { app.queue_move(&s1, from, qi); }
+                                            q_drag.set(None);
+                                            q_over.set(None);
+                                        },
+                                        ondragend: move |_| { q_drag.set(None); q_over.set(None); },
+                                        span { class: "grip", Icon { i: I::Grip, size: 12 } }
+                                        if let Some(src) = thumb { img { class: "q-thumb", src: "{src}" } }
+                                        else if files > 0 { span { class: "q-file", Icon { i: I::Paperclip, size: 12 } } }
+                                        span { class: "t", dir: "auto", title: "{q.text}", "{q.text}" }
+                                        div { class: "q-acts",
+                                            if running {
+                                                button { class: "q-steer", title: "Send it into the running turn",
+                                                    onclick: move |_| app.queue_send(&s2, q1.id, BusySend::Steer),
+                                                    "Steer" Icon { i: I::CornerDownLeft, size: 12 }
+                                                }
+                                            }
+                                            button { class: "icon-btn sm", title: "Edit", onclick: move |_| start_edit(q2.clone()), Icon { i: I::Pencil, size: 13 } }
+                                            button { class: "icon-btn sm", title: "Remove from queue",
+                                                onclick: move |_| { if editing { cancel_edit(); } app.queue_remove(&s3, q.id); },
+                                                Icon { i: I::Trash, size: 13 }
+                                            }
+                                            if running {
+                                                button { class: "icon-btn sm", title: "Stop the agent and send this now",
+                                                    onclick: move |_| app.queue_send(&s4, q.id, BusySend::Interrupt),
+                                                    Icon { i: I::Send, size: 13 }
+                                                }
+                                            }
                                         }
                                     }
-                                },
-                                Icon { i: I::X, size: 12 }
+                                }
                             }
                         }
+                    }
+                } else {
+                    button { class: "pill-btn queue-pill", title: "Show the queue", onclick: move |_| queue_open.set(true),
+                        "Queued" span { class: "n", "{queued.len()}" }
                     }
                 }
             }
@@ -706,6 +793,12 @@ pub fn Composer(
                     div { class: "c-plus",
                         PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), groups: groups.clone(), text, input_id,
                             onpick: { let sid = session_id.clone(); move |(g, v): (usize, Option<String>)| set_pick(g, v, sid.clone()) } }
+                        if q_edit.read().is_some() {
+                            span { class: "edit-badge", title: "Editing a queued message",
+                                Icon { i: I::Pencil, size: 12 }
+                                button { class: "x", title: "Cancel editing (Esc)", onclick: move |_| cancel_edit(), Icon { i: I::X, size: 11 } }
+                            }
+                        }
                     }
                     textarea {
                         id: "{input_id}",
@@ -770,12 +863,20 @@ pub fn Composer(
                                 set_mode(pick_value(g, (g.chosen + 1) % g.options.len()), sid_key.clone());
                                 return;
                             }
+                            if e.key() == Key::Escape && q_edit.read().is_some() {
+                                e.prevent_default();
+                                cancel_edit();
+                                return;
+                            }
                             if e.key() == Key::Enter {
                                 let m = e.modifiers();
-                                let wants = if ctrl_enter { m.ctrl() || m.meta() } else { !m.shift() };
-                                if wants && (!running || queue_ok) {
+                                let cmd = m.ctrl() || m.meta();
+                                // With Ctrl+Enter to send, Ctrl+Shift+Enter is the other way.
+                                let (primary, other) = if ctrl_enter { (cmd && !m.shift(), cmd && m.shift()) } else { (!m.shift() && !cmd, cmd && !m.shift()) };
+                                if primary || other {
                                     e.prevent_default();
-                                    do_send(sid_key.clone());
+                                    let how = running.then(|| if other { busy.alternate() } else { busy });
+                                    do_send(sid_key.clone(), how);
                                 }
                             }
                         },
@@ -799,14 +900,52 @@ pub fn Composer(
                         }
                         {picker_menu}
                     }
-                    if running {
+                    if q_edit.read().is_some() {
+                        button { class: "send-btn ready c-send", title: "Save the queued message (Enter) · Esc cancels",
+                            onclick: move |_| do_send(sid_send.clone(), None),
+                            Icon { i: I::Check, size: 15, stroke: 2.4 }
+                        }
+                    } else if running && can_send {
+                        div { class: "send-split c-send",
+                            button { class: "send-btn ready", title: "{busy.label()} (Enter)",
+                                onclick: { let sid = sid_send.clone(); move |_| do_send(sid.clone(), Some(busy)) },
+                                Icon { i: I::ArrowUp, size: 15, stroke: 2.2 }
+                            }
+                            div { class: "menu-anchor",
+                                button { class: if send_menu() { "send-more open" } else { "send-more" }, title: "Other ways to send",
+                                    onclick: move |_| send_menu.set(true),
+                                    Icon { i: I::ChevronDown, size: 12 }
+                                }
+                                Dropdown { open: send_menu, up: true, right: true,
+                                    div { class: "menu-label", "The agent is working" }
+                                    for b in BusySend::ALL {
+                                        {
+                                            let sid = sid_send.clone();
+                                            let kb = if b == busy { "Enter" } else if b == busy.alternate() { if ctrl_enter { "Ctrl+Shift+Enter" } else { "Ctrl+Enter" } } else { "" };
+                                            rsx! {
+                                                button { key: "{b:?}", class: "menu-item send-way",
+                                                    onclick: move |e| { e.stop_propagation(); send_menu.set(false); do_send(sid.clone(), Some(b)); },
+                                                    span { class: "muted", Icon { i: match b { BusySend::Steer => I::CornerDownLeft, BusySend::Queue => I::List, BusySend::Interrupt => I::Stop }, size: 13 } }
+                                                    span { class: "sw-t",
+                                                        span { "{b.label()}" }
+                                                        span { class: "sub", "{b.description()}" }
+                                                    }
+                                                    if !kb.is_empty() { span { class: "kb", "{kb}" } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if running {
                         button { class: "send-btn stop c-send", title: "Stop (Ctrl+.)",
                             onclick: move |_| if let Some(id) = &sid_stop { app.stop(id) },
                             Icon { i: I::Stop, size: 10 }
                         }
                     } else {
                         button { class: if can_send { "send-btn ready c-send" } else { "send-btn c-send" }, disabled: !can_send, title: "Send (Enter)",
-                            onclick: move |_| do_send(sid_send.clone()),
+                            onclick: move |_| do_send(sid_send.clone(), None),
                             Icon { i: I::ArrowUp, size: 15, stroke: 2.2 }
                         }
                     }

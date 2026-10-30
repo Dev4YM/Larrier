@@ -13,6 +13,7 @@ mod menubar;
 mod agent_models;
 mod models;
 mod overlays;
+mod request;
 mod right;
 mod settings;
 pub mod setup;

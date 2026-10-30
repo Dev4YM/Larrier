@@ -13,8 +13,8 @@ pub mod request;
 
 pub use detect::{detect_all, Detected};
 pub use engine::TurnRecorder;
-pub use events::{AgentEvent, PermissionOption, PermissionRequest, TurnControl, TurnHandle};
-pub use request::{build_request, TurnRequest};
+pub use events::{AgentEvent, AskOption, AskQuestion, PermissionOption, PermissionRequest, Reply, RequestKind, TurnControl, TurnHandle};
+pub use request::{build_request, can_steer, TurnRequest};
 
 /// Start one turn on the current tokio runtime.
 pub fn start_turn(req: TurnRequest) -> TurnHandle {

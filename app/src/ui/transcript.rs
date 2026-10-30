@@ -172,7 +172,7 @@ pub fn Transcript(id: String) -> Element {
     let running = app.is_active(&id);
     // The agent finished its reply; only background work keeps it running.
     let writing = running && !app.idle.read().contains(&id);
-    let permission = app.permissions.read().get(&id).cloned();
+    let (permission, pending_more) = app.permissions.read().get(&id).map(|v| (v.first().cloned(), v.len().saturating_sub(1))).unwrap_or((None, 0));
     let show_reasoning = app.config.read().settings.show_reasoning;
     let n_rows = rows.len();
 
@@ -344,32 +344,7 @@ pub fn Transcript(id: String) -> Element {
                     }
                 }
                 if let Some(req) = permission {
-                    div { class: "question-card",
-                        div { class: "q-head", "Permission required" }
-                        div { class: "q-title", "{req.title}" }
-                        if let Some(d) = req.detail.clone() {
-                            div { class: "q-detail", "{d}" }
-                        }
-                        for (n, opt) in req.options.clone().into_iter().enumerate() {
-                            button {
-                                key: "{opt.id}",
-                                class: "q-opt",
-                                onclick: {
-                                    let sid = id.clone();
-                                    let oid = opt.id.clone();
-                                    move |_| app.respond_permission(&sid, Some(oid.clone()))
-                                },
-                                span { class: "n", "{n + 1}" }
-                                span { "{opt.label}" }
-                            }
-                        }
-                        div { class: "row", style: "justify-content: flex-end; margin-top: 6px;",
-                            button { class: "ghost-btn", style: "border: none; background: none;",
-                                onclick: { let sid = id.clone(); move |_| app.respond_permission(&sid, None) },
-                                "Skip"
-                            }
-                        }
-                    }
+                    super::request::RequestCard { key: "{req.id}", session_id: id.clone(), request: req, more: pending_more }
                 }
                 if waiting {
                     div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }

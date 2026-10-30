@@ -5,17 +5,63 @@
 
 use std::collections::{HashMap, HashSet};
 
-use larrier_core::{AgentKind, FileDiff, Part, ToolCall, ToolStatus, Usage};
+use larrier_core::{lsf::MediaSource, AgentKind, FileDiff, Part, ToolCall, ToolKind, ToolStatus, Usage};
 use larrier_formats::claude::{fix_tool_kind, loaded_tools, server_tool_result};
 use larrier_formats::util::image_parts;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{content_text, json_line, plan_entries, run_stream, s, tool, u, usage_from, with_file_mentions, LineParser};
-use crate::events::{AgentEvent, EventSink, TurnCommand};
+use crate::events::{AgentEvent, AskOption, AskQuestion, EventSink, PermissionOption, PermissionRequest, Reply, RequestKind, TurnCommand};
 use crate::request::TurnRequest;
 
-pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
+pub async fn run(req: TurnRequest, sink: EventSink, control: UnboundedReceiver<TurnCommand>) {
+    if req.agent == AgentKind::ClaudeCode {
+        return run_live(req, sink, control).await;
+    }
+    run_print(req, sink, control).await
+}
+
+/// Claude Code over its stdio control protocol (what the Agent SDK uses):
+/// the prompt goes in as a stream-json line and stdin stays open, so the
+/// approvals, questions and plans Claude asks for reach the user live,
+/// messages can be added to the running turn, and a stop is a clean
+/// interrupt.
+async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
+    let mut cmd = req.launch.command();
+    cmd.current_dir(&req.cwd);
+    cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
+    cmd.args(["--input-format", "stream-json", "--permission-prompt-tool", "stdio", "--replay-user-messages"]);
+    if let Some(target) = req.resume_path.as_ref().or(req.resume_id.as_ref()) {
+        cmd.args(["--resume", target]);
+        if let Some(at) = &req.resume_at {
+            cmd.args(["--resume-session-at", at, "--fork-session"]);
+        }
+    }
+    if let Some(m) = &req.model {
+        cmd.args(["--model", m]);
+    }
+    cmd.args(&req.modes.args);
+    cmd.env_remove("CLAUDECODE");
+    cmd.env("CLAUDE_CODE_FORWARD_SUBAGENT_TEXT", "1");
+    cmd.args(&req.launch.extra_args);
+    let mut live = ClaudeLive::default();
+    let first = live.user_line(&req.full_prompt(), &req.attachments, false, None);
+    let outcome = super::process::run_interactive(cmd, vec![first], &sink, &mut control, &mut live).await;
+    if live.inner.done {
+        return;
+    }
+    if outcome.cancelled {
+        sink.done(false, Some("cancelled".into()));
+    } else if outcome.success() && !live.inner.failed() {
+        sink.done(true, None);
+    } else {
+        sink.error(outcome.error_message("Claude Code"));
+        sink.done(false, Some("error".into()));
+    }
+}
+
+async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
     let mut cmd = req.launch.command();
     cmd.current_dir(&req.cwd);
     cmd.args(["-p", "--output-format", "stream-json", "--verbose"]);
@@ -80,6 +126,328 @@ pub async fn run_qwen(req: TurnRequest, sink: EventSink, mut control: UnboundedR
     run_stream("Qwen Code", cmd, None, &sink, &mut control, &mut parser).await;
 }
 
+/// A request Claude is waiting on.
+struct Ask {
+    kind: RequestKind,
+    input: Value,
+    suggestions: Value,
+    tool_use_id: Option<String>,
+    questions: Vec<String>,
+}
+
+/// One Claude Code process over the control protocol: the stream parser,
+/// plus the requests, replies and messages that go back over stdin.
+#[derive(Default)]
+pub struct ClaudeLive {
+    pub inner: ClaudeStream,
+    out: Vec<String>,
+    asks: HashMap<String, Ask>,
+    /// Messages sent during the turn, by uuid, until Claude takes them in.
+    steers: HashMap<String, (String, Vec<Part>)>,
+    host_requests: u64,
+    stop_at: Option<std::time::Instant>,
+    finished: bool,
+    /// Cost reported so far: `total_cost_usd` adds up over a process's turns.
+    cost_so_far: f64,
+    /// The permission mode Claude reports it runs in.
+    mode: Option<String>,
+}
+
+/// Images Claude takes inline (the API's limit is 5 MB each).
+const MAX_IMAGE_BYTES: u64 = 5 * 1024 * 1024;
+
+impl ClaudeLive {
+    /// A prompt line: text, attached images as image blocks, other files as
+    /// `@path` mentions.
+    fn user_line(&mut self, text: &str, attachments: &[Part], now: bool, uuid: Option<&str>) -> String {
+        let mut blocks: Vec<Value> = Vec::new();
+        let mut mentions: Vec<String> = Vec::new();
+        for a in attachments {
+            match a {
+                Part::Image { mime, source: MediaSource::Path { path } } => match image_block(path, mime.as_deref()) {
+                    Some(b) => blocks.push(b),
+                    None => mentions.push(path.clone()),
+                },
+                Part::Image { mime, source: MediaSource::Base64 { data } } => {
+                    blocks.push(json!({"type": "image", "source": {"type": "base64", "media_type": mime.clone().unwrap_or_else(|| "image/png".into()), "data": data}}))
+                }
+                Part::File { path, text: None, .. } => mentions.push(path.clone()),
+                _ => {}
+            }
+        }
+        let mut text = text.to_string();
+        if !mentions.is_empty() {
+            text.push_str("\n\nAttached files:\n");
+            for m in mentions {
+                text.push_str(&format!("- @{m}\n"));
+            }
+        }
+        blocks.insert(0, json!({"type": "text", "text": text}));
+        let mut line = json!({"type": "user", "session_id": "", "message": {"role": "user", "content": blocks}, "parent_tool_use_id": null});
+        if let Some(u) = uuid {
+            line["uuid"] = json!(u);
+        }
+        if now {
+            line["priority"] = json!("now");
+        }
+        line.to_string()
+    }
+
+    fn reply(&mut self, request_id: &str, response: Value) {
+        self.out.push(json!({"type": "control_response", "response": {"subtype": "success", "request_id": request_id, "response": response}}).to_string());
+    }
+
+    fn on_request(&mut self, v: &Value, sink: &EventSink) {
+        let Some(rid) = s(v, "request_id").map(String::from) else { return };
+        let r = &v["request"];
+        match s(r, "subtype").unwrap_or("") {
+            "can_use_tool" => self.can_use_tool(rid, r, sink),
+            // Only sent for hooks a host registers; Larrier registers none.
+            "hook_callback" => self.reply(&rid, json!({"continue": true})),
+            other => self.out.push(json!({"type": "control_response", "response": {"subtype": "error", "request_id": rid, "error": format!("Larrier doesn't handle {other}")}}).to_string()),
+        }
+    }
+
+    fn can_use_tool(&mut self, rid: String, r: &Value, sink: &EventSink) {
+        let name = s(r, "tool_name").unwrap_or("tool").to_string();
+        let input = r.get("input").cloned().unwrap_or(json!({}));
+        let tool_use_id = s(r, "tool_use_id").map(String::from);
+        let suggestions = r.get("permission_suggestions").cloned().unwrap_or(Value::Null);
+        let mut req = PermissionRequest { id: rid.clone(), tool_call_id: tool_use_id.clone(), ..Default::default() };
+        let mut questions = Vec::new();
+        match name.as_str() {
+            "AskUserQuestion" => {
+                req.kind = RequestKind::Question;
+                req.title = "Claude has a question".into();
+                for q in input["questions"].as_array().into_iter().flatten() {
+                    let text = s(q, "question").unwrap_or("").to_string();
+                    questions.push(text.clone());
+                    req.questions.push(AskQuestion {
+                        id: None,
+                        header: s(q, "header").map(String::from),
+                        question: text,
+                        multi: q["multiSelect"].as_bool().unwrap_or(false),
+                        options: q["options"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|o| Some(AskOption { label: s(o, "label")?.to_string(), description: s(o, "description").map(String::from) }))
+                            .collect(),
+                    });
+                }
+            }
+            "ExitPlanMode" => {
+                req.kind = RequestKind::Plan;
+                req.title = "Claude's plan is ready".into();
+                req.plan = s(&input, "plan").map(String::from);
+                req.options = vec![
+                    PermissionOption { id: "approve_edits".into(), label: "Approve and auto-accept edits".into(), kind: "allow_always".into() },
+                    PermissionOption { id: "approve".into(), label: "Approve, ask before edits".into(), kind: "allow_once".into() },
+                    PermissionOption { id: "keep".into(), label: "Keep planning".into(), kind: "reject_once".into() },
+                ];
+            }
+            _ => {
+                let call = claude_tool(tool_use_id.clone().unwrap_or_default(), &name, input.clone());
+                // What it is about to do, not a log line ("Ran …").
+                req.title = match call.kind {
+                    ToolKind::Shell => s(&input, "command").map(String::from),
+                    ToolKind::Write => call.locations.first().map(|p| format!("Write {p}")),
+                    ToolKind::Edit => call.locations.first().map(|p| format!("Edit {p}")),
+                    _ => None,
+                }
+                .or_else(|| call.title.clone())
+                .unwrap_or_else(|| name.clone());
+                let reason = s(r, "decision_reason").map(super::process::strip_ansi);
+                req.detail = [s(r, "description").map(String::from), reason, s(r, "blocked_path").map(|p| format!("Path: {p}"))]
+                    .into_iter()
+                    .flatten()
+                    .filter(|d| !d.trim().is_empty() && Some(d.as_str()) != call.title.as_deref())
+                    .reduce(|a, b| format!("{a}\n{b}"));
+                req.options.push(PermissionOption { id: "allow_once".into(), label: "Allow".into(), kind: "allow_once".into() });
+                let always = suggestions.as_array().is_some_and(|a| !a.is_empty()) && r["suppress_always_allow_rule"].as_bool() != Some(true);
+                if always {
+                    req.options.push(PermissionOption { id: "allow_always".into(), label: always_label(&suggestions), kind: "allow_always".into() });
+                }
+                req.options.push(PermissionOption { id: "reject".into(), label: "Deny".into(), kind: "reject_once".into() });
+                if let Some(id) = &tool_use_id {
+                    sink.send(AgentEvent::ToolUpdate { id: id.clone(), status: Some(ToolStatus::Approval), output: None, diffs: Vec::new(), is_error: false, title: None });
+                }
+            }
+        }
+        self.asks.insert(rid, Ask { kind: req.kind, input, suggestions, tool_use_id, questions });
+        sink.send(AgentEvent::Permission { request: req });
+    }
+
+    fn answer(&mut self, request_id: &str, reply: Reply, sink: &EventSink) {
+        let Some(ask) = self.asks.remove(request_id) else { return };
+        let deny = |message: String| json!({"behavior": "deny", "message": message});
+        let response = match ask.kind {
+            RequestKind::Question if reply.answers.iter().all(|a| a.is_empty()) => deny(reply.message.unwrap_or_else(|| "The user dismissed the question.".into())),
+            RequestKind::Question => {
+                let mut input = ask.input.clone();
+                let answers: serde_json::Map<String, Value> = ask.questions.iter().zip(&reply.answers).map(|(q, a)| (q.clone(), json!(a.join(", ")))).collect();
+                input["answers"] = Value::Object(answers);
+                json!({"behavior": "allow", "updatedInput": input})
+            }
+            RequestKind::Plan => match reply.option_id.as_deref() {
+                Some("approve_edits") => {
+                    json!({"behavior": "allow", "updatedInput": ask.input, "updatedPermissions": [{"type": "setMode", "mode": "acceptEdits", "destination": "session"}]})
+                }
+                Some("approve") => json!({"behavior": "allow", "updatedInput": ask.input}),
+                _ => deny(reply.message.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| "Keep planning: the user isn't ready for you to start yet.".into())),
+            },
+            RequestKind::Tool => match reply.option_id.as_deref() {
+                Some("allow_once") => json!({"behavior": "allow", "updatedInput": ask.input}),
+                Some("allow_always") => json!({"behavior": "allow", "updatedInput": ask.input, "updatedPermissions": ask.suggestions}),
+                _ => deny(reply.message.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| "The user denied this.".into())),
+            },
+        };
+        let allowed = response["behavior"] == "allow";
+        if let Some(id) = &ask.tool_use_id {
+            if allowed && ask.kind == RequestKind::Tool {
+                sink.send(AgentEvent::ToolUpdate { id: id.clone(), status: Some(ToolStatus::Running), output: None, diffs: Vec::new(), is_error: false, title: None });
+            }
+            if !allowed {
+                self.inner.user_denied.insert(id.clone());
+            }
+        }
+        self.reply(request_id, response);
+    }
+
+    fn on_result(&mut self, v: &Value, sink: &EventSink) {
+        let total = v["total_cost_usd"].as_f64();
+        let cost = total.map(|t| (t - self.cost_so_far).max(0.0));
+        if let Some(t) = total {
+            self.cost_so_far = t;
+        }
+        let stopped = self.stop_at.is_some();
+        if stopped {
+            for (id, ask) in self.asks.drain() {
+                if let Some(t) = ask.tool_use_id {
+                    self.inner.user_denied.insert(t);
+                }
+                sink.send(AgentEvent::PermissionClosed { id });
+            }
+        }
+        let (ok, subtype) = self.inner.turn_end(v, sink, cost, stopped);
+        // A message sent during the turn that Claude has not taken in yet
+        // starts another turn in this process.
+        if !stopped && !self.steers.is_empty() {
+            return;
+        }
+        self.inner.done = true;
+        self.finished = true;
+        sink.done(ok, Some(subtype));
+    }
+}
+
+impl super::process::Interactive for ClaudeLive {
+    fn handle(&mut self, line: &str, sink: &EventSink) {
+        let Ok(v) = serde_json::from_str::<Value>(line.trim()) else {
+            self.inner.handle(line, sink);
+            return;
+        };
+        match s(&v, "type").unwrap_or("") {
+            "control_request" => self.on_request(&v, sink),
+            "control_cancel_request" => {
+                if let Some(id) = s(&v, "request_id") {
+                    if self.asks.remove(id).is_some() {
+                        sink.send(AgentEvent::PermissionClosed { id: id.to_string() });
+                    }
+                }
+            }
+            "control_response" | "keep_alive" => {}
+            // A prompt line taken in: messages sent during the turn are
+            // recorded where Claude read them.
+            "user" if v["isReplay"].as_bool() == Some(true) => {
+                if let Some((text, parts)) = s(&v, "uuid").and_then(|u| self.steers.remove(u)) {
+                    sink.send(AgentEvent::Steered { text, attachments: parts });
+                }
+            }
+            // The mode Claude runs in; it changes when a plan is approved.
+            "system" if s(&v, "permissionMode").is_some() => {
+                let mode = s(&v, "permissionMode").unwrap_or("default").to_string();
+                if s(&v, "subtype") == Some("status") && self.mode.as_deref().is_some_and(|m| m != mode) {
+                    sink.send(AgentEvent::Mode { id: mode.clone() });
+                }
+                self.mode = Some(mode);
+                self.inner.handle(line, sink);
+            }
+            "result" => self.on_result(&v, sink),
+            _ => self.inner.handle(line, sink),
+        }
+    }
+
+    fn command(&mut self, cmd: TurnCommand, sink: &EventSink) {
+        match cmd {
+            TurnCommand::Cancel => {
+                if self.stop_at.is_none() && !self.finished {
+                    self.host_requests += 1;
+                    self.out.push(json!({"type": "control_request", "request_id": format!("larrier_{}", self.host_requests), "request": {"subtype": "interrupt"}}).to_string());
+                    self.stop_at = Some(std::time::Instant::now() + std::time::Duration::from_secs(8));
+                }
+            }
+            TurnCommand::Permission { request_id, reply } => self.answer(&request_id, reply, sink),
+            TurnCommand::Steer { text, attachments, now } => {
+                if self.finished {
+                    return;
+                }
+                let id = uuid::Uuid::new_v4().to_string();
+                let line = self.user_line(&text, &attachments, now, Some(&id));
+                self.steers.insert(id, (text, attachments));
+                self.out.push(line);
+            }
+        }
+    }
+
+    fn take_output(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.out)
+    }
+
+    fn finished(&self) -> bool {
+        self.finished
+    }
+
+    fn stop_deadline(&self) -> Option<std::time::Instant> {
+        self.stop_at
+    }
+}
+
+/// An inline image block for an attached image file.
+fn image_block(path: &str, mime: Option<&str>) -> Option<Value> {
+    use base64::Engine;
+    let lower = path.to_ascii_lowercase();
+    let media = mime.map(String::from).or_else(|| {
+        [("png", "image/png"), ("jpg", "image/jpeg"), ("jpeg", "image/jpeg"), ("gif", "image/gif"), ("webp", "image/webp")]
+            .iter()
+            .find(|(e, _)| lower.ends_with(&format!(".{e}")))
+            .map(|(_, m)| m.to_string())
+    })?;
+    if !matches!(media.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp") || std::fs::metadata(path).ok()?.len() > MAX_IMAGE_BYTES {
+        return None;
+    }
+    let data = base64::engine::general_purpose::STANDARD.encode(std::fs::read(path).ok()?);
+    Some(json!({"type": "image", "source": {"type": "base64", "media_type": media, "data": data}}))
+}
+
+/// The "always allow" choice, named by the rule Claude Code would add.
+fn always_label(suggestions: &Value) -> String {
+    let rules: Vec<String> = suggestions
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|u| s(u, "type") == Some("addRules"))
+        .flat_map(|u| u["rules"].as_array().cloned().unwrap_or_default())
+        .filter_map(|r| s(&r, "ruleContent").map(|c| format!("{}({c})", s(&r, "toolName").unwrap_or(""))).or_else(|| s(&r, "toolName").map(String::from)))
+        .collect();
+    let mode = suggestions.as_array().into_iter().flatten().find(|u| s(u, "type") == Some("setMode")).and_then(|u| s(u, "mode"));
+    match (rules.first(), mode) {
+        (Some(r), _) => format!("Always allow {r}"),
+        (None, Some("acceptEdits")) => "Allow all edits this session".into(),
+        _ => "Always allow".into(),
+    }
+}
+
 /// Incremental parser for Claude Code stream-json.
 #[derive(Default)]
 pub struct ClaudeStream {
@@ -104,7 +472,10 @@ pub struct ClaudeStream {
     /// Subagent message ids whose usage was recorded.
     side_usage: HashSet<String>,
     /// Tool calls already marked denied by a `permission_denied` event.
-    denied: HashSet<String>,
+    pub(crate) denied: HashSet<String>,
+    /// Tool calls the user denied (or stopped while they waited): not
+    /// "denied without asking".
+    pub(crate) user_denied: HashSet<String>,
     /// An API retry streak was announced (until the next response starts).
     retrying: bool,
     /// A safeguard refusal was announced (its `fallback` block and the
@@ -577,6 +948,15 @@ impl ClaudeStream {
     }
 
     fn result(&mut self, v: &Value, sink: &EventSink) {
+        let (ok, subtype) = self.turn_end(v, sink, v["total_cost_usd"].as_f64(), false);
+        self.done = true;
+        sink.done(ok, Some(subtype));
+    }
+
+    /// What a `result` reports, short of ending the turn: `cost` is this
+    /// turn's own, and `stopped` marks the user's stop (its error result is
+    /// no failure). Returns whether it succeeded, and its subtype.
+    pub(crate) fn turn_end(&mut self, v: &Value, sink: &EventSink, cost: Option<f64>, stopped: bool) -> (bool, String) {
         let us = &v["usage"];
         if us.is_object() {
             sink.send(AgentEvent::Usage {
@@ -587,7 +967,7 @@ impl ClaudeStream {
                     u(us, "cache_creation_input_tokens"),
                     // Part of output_tokens; shown as a breakdown.
                     u(&us["output_tokens_details"], "thinking_tokens"),
-                    v["total_cost_usd"].as_f64(),
+                    cost,
                 ),
             });
         }
@@ -602,7 +982,8 @@ impl ClaudeStream {
             if let Some(id) = s(d, "tool_use_id").filter(|id| self.denied.insert(id.to_string())) {
                 sink.send(AgentEvent::ToolUpdate { id: id.to_string(), status: Some(ToolStatus::Failed), output: None, diffs: Vec::new(), is_error: true, title: None });
             }
-            if let Some(name) = s(d, "tool_name").filter(|n| !denied_tools.contains(n)) {
+            let by_user = s(d, "tool_use_id").is_some_and(|id| self.user_denied.contains(id));
+            if let Some(name) = s(d, "tool_name").filter(|n| !by_user && !denied_tools.contains(n)) {
                 denied_tools.push(name);
             }
         }
@@ -616,6 +997,9 @@ impl ClaudeStream {
         }
         let is_error = v.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
         let subtype = s(v, "subtype").unwrap_or("success").to_string();
+        if stopped {
+            return (false, "cancelled".to_string());
+        }
         if is_error {
             let errors = v
                 .get("errors")
@@ -633,8 +1017,7 @@ impl ClaudeStream {
             sink.error(msg);
             self.failed = true;
         }
-        self.done = true;
-        sink.done(!is_error, Some(subtype));
+        (!is_error, subtype)
     }
 
     fn mark_streamed(&mut self) {
@@ -883,6 +1266,141 @@ pub fn todo_entries(input: &Value) -> Option<Vec<larrier_core::PlanEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::drivers::process::Interactive;
+
+    /// Feed a recorded control-protocol run to `ClaudeLive`, answering each
+    /// request with `answer`; returns the events and the lines written back.
+    fn live(fixture: &str, mut answer: impl FnMut(&PermissionRequest) -> Option<TurnCommand>) -> (Vec<AgentEvent>, Vec<Value>) {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = EventSink::new(tx);
+        let mut p = ClaudeLive::default();
+        let mut out = Vec::new();
+        for l in fixture.lines().filter(|l| !l.trim().is_empty()) {
+            p.handle(l, &sink);
+            while let Ok(e) = rx.try_recv() {
+                if let AgentEvent::Permission { request } = &e {
+                    if let Some(c) = answer(request) {
+                        p.command(c, &sink);
+                    }
+                }
+                out.push(e);
+            }
+        }
+        while let Ok(e) = rx.try_recv() {
+            out.push(e);
+        }
+        let written = p.take_output().iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+        (out.into_iter().filter(|e| !matches!(e, AgentEvent::Log { .. })).collect(), written)
+    }
+
+    fn reply(id: &str, option: &str) -> Option<TurnCommand> {
+        Some(TurnCommand::Permission { request_id: id.into(), reply: Reply::option(Some(option.into())) })
+    }
+
+    /// Real run (Claude Code 2.1.310): `echo hi > a.txt` in Manual mode,
+    /// approved once in Larrier.
+    #[test]
+    fn live_approval() {
+        let (ev, written) = live(include_str!("../../tests/fixtures/claude_live_approval.jsonl"), |r| reply(&r.id, "allow_once"));
+        let req = ev.iter().find_map(|e| match e { AgentEvent::Permission { request } => Some(request), _ => None }).unwrap();
+        assert_eq!(req.kind, RequestKind::Tool);
+        assert!(req.title.contains("echo hi > a.txt"), "{}", req.title);
+        let ids: Vec<&str> = req.options.iter().map(|o| o.id.as_str()).collect();
+        assert_eq!(ids, ["allow_once", "allow_always", "reject"]);
+        assert_eq!(req.options[1].label, "Always allow Bash(echo hi *)");
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { status: Some(ToolStatus::Approval), .. })));
+        let r = &written[0]["response"];
+        assert_eq!((r["request_id"].as_str(), r["response"]["behavior"].as_str()), (Some(req.id.as_str()), Some("allow")));
+        assert_eq!(r["response"]["updatedInput"]["command"], "echo hi > a.txt");
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Notice { text } if text.contains("without asking"))));
+    }
+
+    /// Real run: AskUserQuestion answered from the question card.
+    #[test]
+    fn live_question() {
+        let (ev, written) = live(include_str!("../../tests/fixtures/claude_live_question.jsonl"), |r| {
+            Some(TurnCommand::Permission { request_id: r.id.clone(), reply: Reply { answers: vec![vec!["Blue".into()]], ..Default::default() } })
+        });
+        let req = ev.iter().find_map(|e| match e { AgentEvent::Permission { request } => Some(request), _ => None }).unwrap();
+        assert_eq!((req.kind, req.questions.len()), (RequestKind::Question, 1));
+        let q = &req.questions[0];
+        assert_eq!((q.question.as_str(), q.header.as_deref(), q.options.len(), q.multi), ("Which color do you prefer?", Some("Color"), 2, false));
+        let resp = &written[0]["response"]["response"];
+        assert_eq!(resp["behavior"], "allow");
+        assert_eq!(resp["updatedInput"]["answers"]["Which color do you prefer?"], "Blue");
+        assert_eq!(resp["updatedInput"]["questions"][0]["question"], "Which color do you prefer?", "the input goes back whole");
+    }
+
+    /// Real run: plan mode, the plan approved with edits auto-accepted;
+    /// Claude reports the mode it moved to.
+    #[test]
+    fn live_plan() {
+        let (ev, written) = live(include_str!("../../tests/fixtures/claude_live_plan.jsonl"), |r| reply(&r.id, "approve_edits"));
+        let req = ev.iter().find_map(|e| match e { AgentEvent::Permission { request } => Some(request), _ => None }).unwrap();
+        assert_eq!(req.kind, RequestKind::Plan);
+        assert!(req.plan.as_deref().unwrap_or("").starts_with("# Plan: create plan.txt"));
+        let resp = &written[0]["response"]["response"];
+        assert_eq!(resp["updatedPermissions"][0]["mode"], "acceptEdits");
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Mode { id } if id == "acceptEdits")), "later turns start in the new mode");
+    }
+
+    #[test]
+    fn live_denial_steer_and_stop() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = EventSink::new(tx);
+        let mut p = ClaudeLive::default();
+        p.handle(r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"rm -rf build"},"tool_use_id":"t1"}}"#, &sink);
+        p.command(TurnCommand::Permission { request_id: "r1".into(), reply: Reply { option_id: Some("reject".into()), message: Some("Use git clean instead".into()), ..Default::default() } }, &sink);
+        let r: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
+        assert_eq!(r["response"]["response"], json!({"behavior": "deny", "message": "Use git clean instead"}));
+        // A message for the running turn is recorded once Claude takes it in.
+        p.command(TurnCommand::Steer { text: "also update the docs".into(), attachments: Vec::new(), now: false }, &sink);
+        let line: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
+        let uuid = line["uuid"].as_str().unwrap().to_string();
+        assert!(line.get("priority").is_none());
+        // Its turn isn't over while the message waits.
+        p.handle(r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s1","total_cost_usd":0.5,"usage":{"input_tokens":1,"output_tokens":1}}"#, &sink);
+        assert!(!p.finished());
+        p.handle(&json!({"type": "user", "isReplay": true, "uuid": uuid, "message": {"role": "user", "content": "also update the docs"}}).to_string(), &sink);
+        p.handle(r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s1","total_cost_usd":0.8,"usage":{"input_tokens":1,"output_tokens":1}}"#, &sink);
+        assert!(p.finished());
+        let ev: Vec<AgentEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Steered { text, .. } if text == "also update the docs")));
+        let costs: Vec<f64> = ev.iter().filter_map(|e| match e { AgentEvent::Usage { usage } => usage.cost_usd, _ => None }).collect();
+        assert_eq!(costs.len(), 2);
+        assert!((costs[1] - 0.3).abs() < 1e-9, "each turn's own cost: {costs:?}");
+        assert_eq!(ev.iter().filter(|e| matches!(e, AgentEvent::Done { .. })).count(), 1);
+
+        // Stop: an interrupt, and the error result that follows is no failure.
+        let mut p = ClaudeLive::default();
+        p.handle(r#"{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"a.txt","content":"x"},"tool_use_id":"t2"}}"#, &sink);
+        p.command(TurnCommand::Cancel, &sink);
+        let i: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
+        assert_eq!(i["request"]["subtype"], "interrupt");
+        assert!(p.stop_deadline().is_some());
+        p.handle(r#"{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"s1","permission_denials":[{"tool_name":"Write","tool_use_id":"t2"}]}"#, &sink);
+        let ev: Vec<AgentEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::PermissionClosed { id } if id == "r2")));
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Error { .. } | AgentEvent::Notice { .. })), "{ev:?}");
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, stop_reason: Some(r) }) if r == "cancelled"));
+    }
+
+    #[test]
+    fn images_go_inline() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = dir.path().join("a.png");
+        std::fs::write(&png, [0x89, b'P', b'N', b'G']).unwrap();
+        let mut p = ClaudeLive::default();
+        let atts = vec![
+            Part::Image { mime: None, source: MediaSource::Path { path: png.to_string_lossy().to_string() } },
+            Part::File { path: "notes.md".into(), mime: None, text: None },
+        ];
+        let line: Value = serde_json::from_str(&p.user_line("look", &atts, false, None)).unwrap();
+        let blocks = line["message"]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["text"], "look\n\nAttached files:\n- @notes.md\n");
+        assert_eq!((blocks[1]["type"].as_str(), blocks[1]["source"]["media_type"].as_str()), (Some("image"), Some("image/png")));
+    }
 
     #[test]
     fn closes_partial_json() {

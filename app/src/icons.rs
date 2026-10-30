@@ -165,6 +165,8 @@ icons! {
     Gauge => "gauge",
     Timer => "timer",
     CheckCheck => "check-check",
+    Grip => "grip-vertical",
+    Send => "send",
 }
 
 /// Hand-drawn Windows caption glyphs.

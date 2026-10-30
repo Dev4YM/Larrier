@@ -16,6 +16,9 @@ pub enum AgentEvent {
     /// The model by its display name only (Cursor's "Composer 2"): shown on
     /// the reply, never passed back to the agent.
     ModelName { name: String },
+    /// The agent changed its own mode during the turn (Claude Code leaves
+    /// plan mode once its plan is approved): later turns start in it.
+    Mode { id: String },
     /// Streamed assistant text.
     TextDelta { text: String },
     /// A complete assistant text block (non-streaming agents). Starts a new
@@ -51,6 +54,16 @@ pub enum AgentEvent {
     /// `parent_tool_id` (recorded into that tool's nested transcript).
     Subagent { parent_tool_id: String, inner: Box<AgentEvent> },
     Permission { request: PermissionRequest },
+    /// The agent withdrew a request it made (the turn was interrupted or
+    /// it no longer needs the answer).
+    PermissionClosed { id: String },
+    /// The agent took in a message sent while it was working: recorded as
+    /// a prompt at this point of the turn.
+    Steered {
+        text: String,
+        #[serde(default)]
+        attachments: Vec<Part>,
+    },
     Usage { usage: Usage },
     Notice { text: String },
     Error { message: String },
@@ -68,7 +81,7 @@ pub enum AgentEvent {
     Done { ok: bool, stop_reason: Option<String> },
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PermissionRequest {
     pub id: String,
     pub title: String,
@@ -77,6 +90,47 @@ pub struct PermissionRequest {
     #[serde(default)]
     pub detail: Option<String>,
     pub options: Vec<PermissionOption>,
+    #[serde(default)]
+    pub kind: RequestKind,
+    /// The questions of a `Question` request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<AskQuestion>,
+    /// The plan of a `Plan` request (Markdown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+/// What an agent is waiting for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestKind {
+    /// Approval to run a tool.
+    #[default]
+    Tool,
+    /// Answers to questions.
+    Question,
+    /// Approval of a plan before the agent starts changing things.
+    Plan,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AskQuestion {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub header: Option<String>,
+    pub question: String,
+    #[serde(default)]
+    pub multi: bool,
+    #[serde(default)]
+    pub options: Vec<AskOption>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AskOption {
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -91,7 +145,27 @@ pub struct PermissionOption {
 #[derive(Clone, Debug)]
 pub enum TurnCommand {
     Cancel,
-    Permission { request_id: String, option_id: Option<String> },
+    Permission { request_id: String, reply: Reply },
+    /// A message for the running turn: folded in where the agent can take
+    /// it (`now`: the agent stops what it is doing and answers it first).
+    Steer { text: String, attachments: Vec<Part>, now: bool },
+}
+
+/// The user's answer to a request.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reply {
+    /// The option picked; `None` dismisses the request.
+    pub option_id: Option<String>,
+    /// Answers to a `Question` request, one list per question.
+    pub answers: Vec<Vec<String>>,
+    /// Words for the agent with the choice (why not, what to change).
+    pub message: Option<String>,
+}
+
+impl Reply {
+    pub fn option(id: Option<String>) -> Reply {
+        Reply { option_id: id, ..Default::default() }
+    }
 }
 
 /// Handle to a running turn: a stream of events plus a control channel.
@@ -112,8 +186,11 @@ impl TurnControl {
     pub fn cancel(&self) {
         let _ = self.tx.send(TurnCommand::Cancel);
     }
-    pub fn respond(&self, request_id: impl Into<String>, option_id: Option<String>) {
-        let _ = self.tx.send(TurnCommand::Permission { request_id: request_id.into(), option_id });
+    pub fn respond(&self, request_id: impl Into<String>, reply: Reply) {
+        let _ = self.tx.send(TurnCommand::Permission { request_id: request_id.into(), reply });
+    }
+    pub fn steer(&self, text: String, attachments: Vec<Part>, now: bool) {
+        let _ = self.tx.send(TurnCommand::Steer { text, attachments, now });
     }
 }
 

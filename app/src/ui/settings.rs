@@ -181,8 +181,17 @@ fn General() -> Element {
                     }
                 }
             }
-            Row { title: "Queue Follow-ups".to_string(), desc: Some("Messages sent while an agent is working are queued and sent when it finishes.".to_string()),
-                Toggle { on: s.queue_followups, onchange: move |v| app.update_config(|c| c.settings.queue_followups = v) }
+            Row { title: "While an Agent Works, Enter".to_string(),
+                desc: Some(format!("{}. Ctrl+Enter does the other of steer and queue (it never stops the agent). Agents that can't read messages mid-turn get them queued.", s.busy_send.description())),
+                super::Select {
+                    value: format!("{:?}", s.busy_send),
+                    options: larrier_core::BusySend::ALL.iter().map(|b| (format!("{b:?}"), b.label().to_string())).collect(),
+                    onchange: move |v: String| {
+                        if let Some(b) = larrier_core::BusySend::ALL.into_iter().find(|b| format!("{b:?}") == v) {
+                            app.update_config(move |c| c.settings.busy_send = b);
+                        }
+                    },
+                }
             }
             Row { title: "Send with Ctrl+Enter".to_string(), desc: Some("Otherwise Enter sends and Shift+Enter adds a line.".to_string()),
                 Toggle { on: s.send_with_ctrl_enter, onchange: move |v| app.update_config(|c| c.settings.send_with_ctrl_enter = v) }

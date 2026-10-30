@@ -153,19 +153,21 @@ pub fn reply(qs: &[Question], picks: &[Vec<String>]) -> String {
 }
 
 /// A question card. Answered questions show what was chosen; unanswered
-/// ones can be answered here.
+/// ones can be answered here: live when the agent is waiting for the
+/// answer, else as the next message.
 #[component]
 pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
     let app = use_app();
-    let qs = parse(&tool);
-    let n = qs.len();
-    let mut picks = use_signal(|| vec![Vec::<String>::new(); n]);
-    let mut other = use_signal(|| vec![String::new(); n]);
     let mut sent = use_signal(|| false);
+    let qs = parse(&tool);
     if qs.is_empty() {
         return rsx! {};
     }
+    let n = qs.len();
     let answered = qs.iter().any(|q| !q.answers.is_empty());
+    // The agent is waiting on this very question: it is answered in the
+    // request card above the composer.
+    let live = app.permissions.read().get(&session_id).is_some_and(|v| v.iter().any(|r| r.tool_call_id.as_deref() == Some(tool.id.as_str())));
     // A later prompt answered it in the chat already.
     let replied_later = app
         .peek_session(&session_id, |s| {
@@ -174,13 +176,72 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
         })
         .flatten()
         .unwrap_or(true);
-    let open = !answered && !replied_later && !sent();
+    let open = !answered && !replied_later && !sent() && !live;
     let title = tool.input.get("title").and_then(|t| t.as_str()).map(String::from);
+    let hint = if app.running_elsewhere(&session_id) {
+        format!("Running in {}: answer it there", app.peek_session(&session_id, |s| s.agent.display_name()).unwrap_or_default())
+    } else if app.is_active(&session_id) {
+        "Sends when the agent finishes this turn".to_string()
+    } else {
+        "Sends your answers to the agent".to_string()
+    };
+    let sid = session_id.clone();
+    let qs_send = qs.clone();
+    rsx! {
+        div { class: if open || live { "ask-card open" } else { "ask-card" },
+            div { class: "ask-head",
+                span { class: "ic", Icon { i: if open || live { I::Message } else { I::CircleCheck }, size: 13 } }
+                span { class: "grow", if let Some(t) = &title { "{t}" } else if open || live { "The agent has a question" } else { "Answered" } }
+                if n > 1 { span { class: "ask-count", "{n} questions" } }
+            }
+            QuestionList {
+                questions: qs.clone(),
+                editable: open,
+                hint,
+                submit: "Send answers".to_string(),
+                disabled: app.running_elsewhere(&session_id),
+                onsubmit: move |picks: Vec<Vec<String>>| {
+                    sent.set(true);
+                    app.send(Some(sid.clone()), reply(&qs_send, &picks), Vec::new());
+                },
+            }
+            if live {
+                div { class: "ask-actions", span { class: "grow hint", "Waiting for your answer below" } }
+            } else if sent() {
+                div { class: "ask-actions", span { class: "grow hint", "Answers sent" } }
+            } else if !open && !answered {
+                // The agent did not record the answer (Cursor): it was given
+                // in the next message.
+                div { class: "ask-actions", span { class: "grow hint", "Answered in the chat" } }
+            }
+        }
+    }
+}
+
+/// Questions with their options. `editable`: the user picks answers (or
+/// types their own) and submits them; otherwise what was answered shows.
+#[component]
+pub fn QuestionList(
+    questions: Vec<Question>,
+    editable: bool,
+    hint: String,
+    submit: String,
+    disabled: bool,
+    onsubmit: EventHandler<Vec<Vec<String>>>,
+    ondismiss: Option<EventHandler<()>>,
+) -> Element {
+    let n = questions.len();
+    let mut picks = use_signal(|| vec![Vec::<String>::new(); n]);
+    let mut other = use_signal(|| vec![String::new(); n]);
+    if picks.peek().len() != n {
+        picks.set(vec![Vec::new(); n]);
+        other.set(vec![String::new(); n]);
+    }
     // What counts as each question's answer: picks, else the typed text.
     let chosen: Vec<Vec<String>> = (0..n)
         .map(|i| {
-            let typed = other.read()[i].trim().to_string();
-            let mut p = picks.read()[i].clone();
+            let typed = other.read().get(i).map(|t| t.trim().to_string()).unwrap_or_default();
+            let mut p = picks.read().get(i).cloned().unwrap_or_default();
             if !typed.is_empty() {
                 p.push(typed);
             }
@@ -188,104 +249,80 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
         })
         .collect();
     let ready = chosen.iter().all(|c| !c.is_empty());
-    let qs_send = qs.clone();
-    let chosen_send = chosen.clone();
-    let sid = session_id.clone();
+    let open = editable;
     rsx! {
-        div { class: if open { "ask-card open" } else { "ask-card" },
-            div { class: "ask-head",
-                span { class: "ic", Icon { i: if open { I::Message } else { I::CircleCheck }, size: 13 } }
-                span { class: "grow", if let Some(t) = &title { "{t}" } else if open { "The agent has a question" } else { "Answered" } }
-                if n > 1 { span { class: "ask-count", "{n} questions" } }
-            }
-            for (qi, q) in qs.iter().cloned().enumerate() {
-                div { key: "{qi}", class: "ask-q",
-                    if let Some(h) = &q.header { span { class: "ask-hdr", "{h}" } }
-                    div { class: "ask-text", "{q.text}" }
-                    div { class: "ask-opts",
-                        for (oi, o) in q.options.iter().cloned().enumerate() {
-                            {
-                                let on = if open { picks.read()[qi].contains(&o.label) } else { q.answers.iter().any(|a| a == &o.label) };
-                                let dim = !open && !q.answers.is_empty() && !on;
-                                let label = o.label.clone();
-                                let multi = q.multi;
-                                let mut cls = String::from("ask-opt");
-                                if on { cls.push_str(" on"); }
-                                if dim { cls.push_str(" dim"); }
-                                if multi { cls.push_str(" multi"); }
-                                rsx! {
-                                    button { key: "{oi}", class: "{cls}", disabled: !open,
-                                        onclick: move |_| {
-                                            let mut p = picks.write();
-                                            let cur = &mut p[qi];
-                                            if multi {
-                                                if let Some(i) = cur.iter().position(|x| x == &label) { cur.remove(i); } else { cur.push(label.clone()); }
-                                            } else {
-                                                *cur = vec![label.clone()];
-                                                other.write()[qi].clear();
-                                            }
-                                        },
-                                        span { class: "ask-box", if on { Icon { i: I::Check, size: 10, stroke: 3.0 } } }
-                                        span { class: "ask-lbl",
-                                            span { class: "l", "{o.label}" }
-                                            if let Some(d) = &o.description { span { class: "d", "{d}" } }
+        for (qi, q) in questions.iter().cloned().enumerate() {
+            div { key: "{qi}", class: "ask-q",
+                if let Some(h) = &q.header { span { class: "ask-hdr", "{h}" } }
+                div { class: "ask-text", "{q.text}" }
+                div { class: "ask-opts",
+                    for (oi, o) in q.options.iter().cloned().enumerate() {
+                        {
+                            let on = if open { picks.read().get(qi).is_some_and(|p| p.contains(&o.label)) } else { q.answers.iter().any(|a| a == &o.label) };
+                            let dim = !open && !q.answers.is_empty() && !on;
+                            let label = o.label.clone();
+                            let multi = q.multi;
+                            let mut cls = String::from("ask-opt");
+                            if on { cls.push_str(" on"); }
+                            if dim { cls.push_str(" dim"); }
+                            if multi { cls.push_str(" multi"); }
+                            rsx! {
+                                button { key: "{oi}", class: "{cls}", disabled: !open,
+                                    onclick: move |_| {
+                                        let mut p = picks.write();
+                                        let cur = &mut p[qi];
+                                        if multi {
+                                            if let Some(i) = cur.iter().position(|x| x == &label) { cur.remove(i); } else { cur.push(label.clone()); }
+                                        } else {
+                                            *cur = vec![label.clone()];
+                                            other.write()[qi].clear();
                                         }
+                                    },
+                                    span { class: "ask-box", if on { Icon { i: I::Check, size: 10, stroke: 3.0 } } }
+                                    span { class: "ask-lbl",
+                                        span { class: "l", "{o.label}" }
+                                        if let Some(d) = &o.description { span { class: "d", "{d}" } }
                                     }
                                 }
-                            }
-                        }
-                        // Free-text answers recorded without a matching option.
-                        if !open {
-                            for (ai, a) in q.answers.iter().filter(|a| !q.options.iter().any(|o| &o.label == *a)).cloned().enumerate() {
-                                div { key: "x{ai}", class: "ask-opt on", span { class: "ask-box", Icon { i: I::Check, size: 10, stroke: 3.0 } } span { class: "ask-lbl", span { class: "l", "{a}" } } }
                             }
                         }
                     }
-                    if open {
-                        input { class: "ask-other",
-                            placeholder: if q.options.is_empty() { "Your answer" } else { "Other…" },
-                            value: "{other.read()[qi]}",
-                            oninput: {
-                                let multi = q.multi;
-                                move |e: FormEvent| {
-                                    let v = e.value();
-                                    // A typed answer replaces a single choice.
-                                    if !multi && !v.trim().is_empty() {
-                                        picks.write()[qi].clear();
-                                    }
-                                    other.write()[qi] = v;
-                                }
-                            },
+                    // Free-text answers recorded without a matching option.
+                    if !open {
+                        for (ai, a) in q.answers.iter().filter(|a| !q.options.iter().any(|o| &o.label == *a)).cloned().enumerate() {
+                            div { key: "x{ai}", class: "ask-opt on", span { class: "ask-box", Icon { i: I::Check, size: 10, stroke: 3.0 } } span { class: "ask-lbl", span { class: "l", "{a}" } } }
                         }
+                    }
+                }
+                if open {
+                    input { class: "ask-other",
+                        placeholder: if q.options.is_empty() { "Your answer" } else { "Other…" },
+                        value: "{other.read().get(qi).cloned().unwrap_or_default()}",
+                        oninput: {
+                            let multi = q.multi;
+                            move |e: FormEvent| {
+                                let v = e.value();
+                                // A typed answer replaces a single choice.
+                                if !multi && !v.trim().is_empty() {
+                                    picks.write()[qi].clear();
+                                }
+                                other.write()[qi] = v;
+                            }
+                        },
                     }
                 }
             }
-            if open {
-                div { class: "ask-actions",
-                    span { class: "grow hint",
-                        if app.running_elsewhere(&session_id) {
-                            {format!("Running in {}: answer it there", app.peek_session(&session_id, |s| s.agent.display_name()).unwrap_or_default())}
-                        } else if app.is_active(&session_id) {
-                            "Sends when the agent finishes this turn"
-                        } else {
-                            "Sends your answers to the agent"
-                        }
-                    }
-                    button { class: "primary-btn", disabled: !ready || app.running_elsewhere(&session_id),
-                        onclick: move |_| {
-                            let text = reply(&qs_send, &chosen_send);
-                            sent.set(true);
-                            app.send(Some(sid.clone()), text, Vec::new());
-                        },
-                        "Send answers"
-                    }
+        }
+        if open {
+            div { class: "ask-actions",
+                span { class: "grow hint", "{hint}" }
+                if let Some(d) = ondismiss {
+                    button { class: "ghost-btn", onclick: move |_| d.call(()), "Skip" }
                 }
-            } else if sent() {
-                div { class: "ask-actions", span { class: "grow hint", "Answers sent" } }
-            } else if !answered {
-                // The agent did not record the answer (Cursor): it was given
-                // in the next message.
-                div { class: "ask-actions", span { class: "grow hint", "Answered in the chat" } }
+                button { class: "primary-btn", disabled: !ready || disabled,
+                    onclick: move |_| onsubmit.call(chosen.clone()),
+                    "{submit}"
+                }
             }
         }
     }

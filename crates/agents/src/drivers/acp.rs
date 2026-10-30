@@ -299,16 +299,18 @@ impl Acp {
                 }
                 self.cancel_deadline = Some(Instant::now() + Duration::from_secs(5));
             }
-            Some(TurnCommand::Permission { request_id, option_id }) => {
+            Some(TurnCommand::Permission { request_id, reply }) => {
                 if self.permission.as_ref().map(|p| p.request_id == request_id).unwrap_or(false) {
                     let p = self.permission.take().unwrap();
-                    let outcome = match option_id {
+                    let outcome = match reply.option_id {
                         Some(o) => json!({ "outcome": { "outcome": "selected", "optionId": o } }),
                         None => json!({ "outcome": { "outcome": "cancelled" } }),
                     };
                     self.respond(p.rpc_id, outcome);
                 }
             }
+            // ACP has no way to add to a running prompt.
+            Some(TurnCommand::Steer { .. }) => {}
         }
     }
 
@@ -458,7 +460,7 @@ impl Acp {
         let title = s(tc, "title").filter(|t| !t.is_empty()).map(|t| format!("Allow: {}", t.trim_matches('`'))).unwrap_or_else(|| "The agent is asking for permission".into());
         let request_id = format!("acp-{}", id);
         self.permission = Some(PendingPermission { rpc_id: id, request_id: request_id.clone() });
-        self.sink.send(AgentEvent::Permission { request: PermissionRequest { id: request_id, title, tool_call_id, detail, options } });
+        self.sink.send(AgentEvent::Permission { request: PermissionRequest { id: request_id, title, tool_call_id, detail, options, ..Default::default() } });
     }
 
     fn terminal_create(&mut self, params: &Value) -> Result<String, String> {
@@ -1057,7 +1059,7 @@ mod tests {
             loop {
                 tokio::time::sleep(Duration::from_millis(5)).await;
                 if let Some(a) = &answer {
-                    let _ = ctl_tx.send(TurnCommand::Permission { request_id: "acp-101".into(), option_id: Some(a.clone()) });
+                    let _ = ctl_tx.send(TurnCommand::Permission { request_id: "acp-101".into(), reply: crate::events::Reply::option(Some(a.clone())) });
                 }
                 if ctl_tx.is_closed() {
                     break;

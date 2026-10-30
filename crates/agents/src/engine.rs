@@ -186,6 +186,25 @@ impl TurnRecorder {
                 session.status = SessionStatus::NeedsInput;
                 true
             }
+            AgentEvent::Mode { id } => {
+                session.mode = Some(id.clone());
+                true
+            }
+            AgentEvent::PermissionClosed { .. } => {
+                session.status = SessionStatus::Running;
+                true
+            }
+            AgentEvent::Steered { text, attachments } => {
+                // The prompt goes where the agent took it in; what follows
+                // is a new reply.
+                self.close_reasoning(session);
+                let mut m = Message::user_text(text.clone());
+                m.parts.extend(attachments.iter().cloned());
+                session.push(m);
+                self.msg_index = None;
+                session.touch();
+                true
+            }
             AgentEvent::Usage { usage } => {
                 let m = self.msg(session);
                 let mut u = m.usage.clone().unwrap_or_default();
@@ -380,7 +399,7 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
             }
             return;
         }
-        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Idle | AgentEvent::Done { .. } => return,
+        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::PermissionClosed { .. } | AgentEvent::Steered { .. } | AgentEvent::Mode { .. } | AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Idle | AgentEvent::Done { .. } => return,
         _ => {}
     }
     let parts: usize = msgs.iter().map(|m| m.parts.len()).sum();

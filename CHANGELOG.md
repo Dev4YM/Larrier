@@ -5,6 +5,28 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.2 — 2026-10-30
+
+### New
+
+- Answer a running agent live, steer it, and queue messages like Cursor
+- Say what an agent refused because it couldn't ask
+- Pane toggles that stay put, and panes that move smoothly
+- Larrier's own tooltips instead of the system's
+- Chats with new activity come first
+- The mark's stem becomes a dry brush stroke
+
+### Look and feel
+
+- Drop the focus ring and glow
+
+### Fixed
+
+- Release script pushes with the GitHub CLI's login
+- Give imported chats their folder and resume them where they live
+- Claude Code's own model menu, and the pick stays checked
+- Edit a sent prompt in place, keeping its images and files
+- Rows of a turn line up, terminals are background commands, previews hold
 ## 0.1.1 — 2026-10-30
 
 ### New

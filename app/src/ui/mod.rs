@@ -309,6 +309,11 @@ pub fn Root() -> Element {
     if st.reduce_motion {
         class.push_str(" no-motion");
     }
+    match st.button_corners {
+        larrier_core::ButtonCorners::Solid => class.push_str(" corners-solid"),
+        larrier_core::ButtonCorners::Rounded => class.push_str(" corners-rounded"),
+        larrier_core::ButtonCorners::Balanced => {}
+    }
     if narrow {
         class.push_str(" narrow");
     }

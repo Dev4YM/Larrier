@@ -167,6 +167,8 @@ pub struct Settings {
     pub mono_font: Option<String>,
     #[serde(default)]
     pub density: Density,
+    #[serde(default)]
+    pub button_corners: ButtonCorners,
     /// Put the agents sidebar on the right.
     #[serde(default)]
     pub sidebar_right: bool,
@@ -200,6 +202,18 @@ pub struct Settings {
     /// Queue follow-ups sent while an agent is still working.
     #[serde(default = "yes")]
     pub queue_followups: bool,
+}
+
+/// Corners of buttons, pills, pickers and segmented controls.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ButtonCorners {
+    /// Nearly square.
+    Solid,
+    #[default]
+    Balanced,
+    /// Fully round (pills and circles).
+    Rounded,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -301,6 +315,7 @@ impl Default for Settings {
             ui_font: None,
             mono_font: None,
             density: Density::default(),
+            button_corners: ButtonCorners::default(),
             sidebar_right: false,
             transcript_width: default_transcript_width(),
             reduce_motion: false,

@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use dioxus::prelude::*;
-use larrier_core::{config::SidebarGroup, Density, Settings, TextSizes, Theme};
+use larrier_core::{config::SidebarGroup, ButtonCorners, Density, Settings, TextSizes, Theme};
 
 use super::{Dropdown, Toggle};
 use crate::icons::{Icon, Lucide, I};
@@ -711,6 +711,18 @@ pub fn AppearancePage() -> Element {
                                 for (g, l) in [(SidebarGroup::Status, "Repositories"), (SidebarGroup::Agent, "Agent")] {
                                     button { key: "{l}", class: seg(s.sidebar_group == g || (l == "Repositories" && s.sidebar_group == SidebarGroup::Workspace)),
                                         onclick: move |_| app.update_config(|c| c.settings.sidebar_group = g), "{l}" }
+                                }
+                            }
+                        }
+                        div { class: "set-row",
+                            div { class: "lbl", div { class: "t", "Button Corners" } div { class: "d", "Buttons, pills, pickers and switches." } }
+                            div { class: "seg ap-corners",
+                                for (c, l) in [(ButtonCorners::Solid, "Solid"), (ButtonCorners::Balanced, "Balanced"), (ButtonCorners::Rounded, "Rounded")] {
+                                    button { key: "{l}", class: seg(s.button_corners == c),
+                                        onclick: move |_| app.update_config(|cf| cf.settings.button_corners = c),
+                                        span { class: "ap-corner {l.to_lowercase()}" }
+                                        "{l}"
+                                    }
                                 }
                             }
                         }

@@ -5,6 +5,17 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.10 — 2026-10-30
+
+### New
+
+- Codex runs through its app server, asking live
+
+### Fixed
+
+- A request card says what's being asked
+- A Codex plan is built with the permissions picked
+- Mode and permission chips sit side by side
 ## 0.1.9 — 2026-10-30
 
 ### New

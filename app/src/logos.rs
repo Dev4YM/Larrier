@@ -16,7 +16,7 @@ macro_rules! logos {
 }
 
 logos!(
-    "claude-code", "claude-code-mono", "codex", "codex-mono", "cursor", "opencode", "gemini-cli",
+    "claude-code", "claude-code-mono", "cursor", "opencode", "gemini-cli",
     "gemini-cli-mono", "pi", "hermes", "goose", "amp", "amp-mono", "githubcopilot", "copilot", "kiro",
     "cline", "roocode", "kilocode", "windsurf", "trae", "junie", "claude", "claude-mono", "anthropic",
     "openai", "google", "google-mono", "gemini", "gemini-mono", "xai", "grok", "deepseek",
@@ -36,7 +36,9 @@ pub fn logo(id: &str) -> Option<&'static str> {
 fn agent_logo_id(kind: &AgentKind) -> Option<&'static str> {
     Some(match kind {
         AgentKind::ClaudeCode => "claude-code",
-        AgentKind::Codex => "codex",
+        // Codex is part of the ChatGPT app now: the OpenAI mark, drawn in the
+        // text color (no badge behind it).
+        AgentKind::Codex => "openai",
         AgentKind::Cursor => "cursor",
         AgentKind::OpenCode => "opencode",
         AgentKind::Gemini => "gemini-cli",

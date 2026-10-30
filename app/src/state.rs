@@ -1677,16 +1677,22 @@ pub fn flush_saves() {
 pub const HOME_KEY: &str = "~home";
 
 /// Sidebar key of a session's project: its folder, or [`HOME_KEY`] for
-/// chats without a folder, in the home folder itself, or in Codex's
-/// project-less thread folders (`~/Documents/Codex/<date>/<name>`).
+/// chats without a project — no folder, the home folder itself, Codex's
+/// project-less thread folders (`~/Documents/Codex/<date>/<name>`) and the
+/// scratch folders of Claude's "This computer" sessions
+/// (`<app data>/Claude/scratch-workspaces/…`).
 pub fn project_key(path: Option<&str>) -> String {
     let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
     let Some(p) = path.map(norm).filter(|p| !p.is_empty()) else { return HOME_KEY.into() };
-    static HOME: OnceLock<Option<String>> = OnceLock::new();
-    if let Some(h) = HOME.get_or_init(|| dirs::home_dir().map(|h| norm(&h.to_string_lossy()))) {
-        if p == *h || p.starts_with(&format!("{h}/documents/codex/")) {
-            return HOME_KEY.into();
-        }
+    static HOMES: OnceLock<(Option<String>, Vec<String>)> = OnceLock::new();
+    let (home, roots) = HOMES.get_or_init(|| {
+        let home = dirs::home_dir().map(|h| norm(&h.to_string_lossy()));
+        let mut roots: Vec<String> = home.iter().map(|h| format!("{h}/documents/codex/")).collect();
+        roots.extend(dirs::config_dir().map(|c| format!("{}/claude/scratch-workspaces/", norm(&c.to_string_lossy()))));
+        (home, roots)
+    });
+    if home.as_deref() == Some(p.as_str()) || roots.iter().any(|r| p.starts_with(r.as_str())) {
+        return HOME_KEY.into();
     }
     p
 }
@@ -1900,6 +1906,8 @@ mod tests {
         assert_eq!(project_key(Some(&home)), HOME_KEY);
         assert_eq!(project_key(Some(&format!("{home}/Documents/Codex/2026-10-30/fix-login"))), HOME_KEY);
         assert_ne!(project_key(Some(&format!("{home}/projects/app"))), HOME_KEY);
+        let app_data = dirs::config_dir().unwrap().to_string_lossy().to_string();
+        assert_eq!(project_key(Some(&format!("{app_data}/Claude/scratch-workspaces/a/b/scratch-2026-10-29-4d46fd"))), HOME_KEY);
     }
 
     #[test]

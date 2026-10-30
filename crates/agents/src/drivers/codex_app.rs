@@ -21,12 +21,21 @@ use crate::request::TurnRequest;
 pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
     let mut cmd = req.launch.command();
     cmd.current_dir(&req.cwd);
+    let mut live = CodexLive::new(&req);
     // Config overrides (sandbox, effort, providers) apply to the server;
-    // the user's other extra arguments are `codex exec`'s own.
-    cmd.args(config_args(&req.modes.args));
+    // the user's other extra arguments are `codex exec`'s own. Codex's own
+    // plan mode changes nothing by itself, so the sandbox comes from the
+    // permissions picked (exec's Plan forces read-only), ready for when
+    // the plan is built.
+    let modes: Vec<String> = if live.plan_mode {
+        let spec = req.agent.spec();
+        req.modes.ids.iter().enumerate().skip(1).filter_map(|(i, id)| spec.mode_groups.get(i)?.find(id)).flat_map(|o| o.args.iter().map(|a| a.to_string())).collect()
+    } else {
+        req.modes.args.clone()
+    };
+    cmd.args(config_args(&modes));
     cmd.args(config_args(&req.launch.extra_args));
     cmd.arg("app-server");
-    let mut live = CodexLive::new(&req);
     let outcome = run_interactive(cmd, Vec::new(), &sink, &mut control, &mut live).await;
     if !live.initialized && !outcome.cancelled {
         // A Codex without the app server: run the turn the old way.
@@ -103,7 +112,7 @@ pub struct CodexLive {
     model: Option<String>,
     resume: Option<String>,
     /// Codex's own plan mode (questions, then a plan to approve).
-    plan_mode: bool,
+    pub plan_mode: bool,
     /// A collaboration mode was set on the thread: every turn names one.
     collab: bool,
     first: Vec<Value>,

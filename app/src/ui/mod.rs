@@ -152,7 +152,11 @@ pub fn Root() -> Element {
                 const key = el.selectionStart + ':' + el.value.length + ':' + el.scrollTop + ':' + el.scrollLeft;
                 // Following a layout change frame by frame: nothing to redo
                 // while the field stays put.
-                if (last && last.el === el && last.box === box && last.key === key && !snapNext) return;
+                if (last && last.el === el && last.box === box && last.key === key && !snapNext) {
+                  // Unmoved, but a dialog or menu may have opened over it.
+                  caret.style.visibility = covered(last.x, last.y) ? 'hidden' : 'visible';
+                  return;
+                }
                 const cs = getComputedStyle(el);
                 for (const p of PROPS) mirror.style[p] = cs[p];
                 const area = el.tagName === 'TEXTAREA';
@@ -177,13 +181,21 @@ pub fn Root() -> Element {
                 caret.style.height = h + 'px';
                 caret.style.background = cs.caretColor && cs.caretColor !== 'transparent' && !el.classList.contains('l-caret-on') ? cs.caretColor : cs.color;
                 caret.style.transform = 'translate(' + x + 'px,' + y + 'px)';
-                caret.style.visibility = 'visible';
+                caret.style.visibility = covered(x, y) ? 'hidden' : 'visible';
                 // Solid while it moves; blinks once still.
                 caret.classList.remove('blink');
                 clearTimeout(moved);
                 moved = setTimeout(() => caret.classList.add('blink'), 530);
               };
               const queue = () => { if (!raf) raf = requestAnimationFrame(place); };
+              // Something drawn over the field at the cursor's spot (a dialog,
+              // a menu, a popover) hides it; it isn't drawn above them.
+              const covered = (x, y) => {
+                const hit = document.elementFromPoint(x + 1, y + 2);
+                return !!hit && hit !== el && !el.contains(hit) && !hit.contains(el);
+              };
+              // Dialogs can open without the field noticing: look again now and then.
+              setInterval(() => { if (el && document.activeElement === el) queue(); }, 250);
               const snap = () => { snapNext = true; queue(); };
               // While the layout animates (a pane sliding, the composer
               // growing) the field moves without telling: follow it each

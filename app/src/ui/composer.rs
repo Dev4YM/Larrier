@@ -398,6 +398,11 @@ pub fn Composer(
             "/worktree" => app.draft.write().worktree = true,
             "/local" => app.draft.write().worktree = false,
             "/settings" => app.open_settings(SettingsTab::General),
+            "/usage" => app.open_settings(SettingsTab::Usage),
+            "/mcp" => {
+                app.ui.write().customize_focus = Some((Some(larrier_agents::harness::ItemKind::Mcp), Some(agent_k.kind.clone())));
+                app.navigate(crate::state::View::Customize);
+            }
             _ => {}
         }
     };
@@ -416,6 +421,11 @@ pub fn Composer(
                 }
             }
             SuggAct::Larrier(cmd) => run_slash(cmd, sid),
+            SuggAct::Text(s) => {
+                let t = text.read().clone();
+                let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
+                text.set(format!("{}{s} ", &t[..cut]));
+            }
         }
         document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
     };
@@ -1484,6 +1494,9 @@ enum SuggAct {
     Chip(MentionChip),
     /// Run a Larrier command.
     Larrier(&'static str),
+    /// Replace the token being typed with this text (an agent's own
+    /// syntax, like Claude Code's `@agent-Explore`).
+    Text(String),
 }
 
 #[derive(Clone, PartialEq)]
@@ -1554,6 +1567,19 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
                 act: SuggAct::Chip(MentionChip::agent(s)),
             });
         }
+        // The agent's own subagents, mentioned its own way.
+        if *agent == AgentKind::ClaudeCode {
+            let logo = crate::logos::agent_logo(agent);
+            let mut subs: Vec<(String, String)> = app.agent_models(agent).map(|m| m.subagents.iter().map(|s| (s.name.clone(), s.description.clone().unwrap_or_default())).collect()).unwrap_or_default();
+            for it in harness_items(app).into_iter().filter(|it| it.kind == ItemKind::Subagent && it.agents.contains(agent)) {
+                if !subs.iter().any(|(n, _)| *n == it.name) {
+                    subs.push((it.name.clone(), it.description.clone().unwrap_or_default()));
+                }
+            }
+            for (name, desc) in subs.into_iter().filter(|(n, _)| ql.is_empty() || n.to_lowercase().contains(&ql) || "agent".starts_with(&ql)).take(6) {
+                out.push(Sugg { group: "Subagents", icon: I::Orbit, logo, label: format!("@agent-{name}"), sub: desc.chars().take(80).collect(), act: SuggAct::Text(format!("@agent-{name}")) });
+            }
+        }
         if "git".starts_with(&ql) || ql.starts_with("git") || "diff".starts_with(&ql) {
             out.push(Sugg { group: "Context", icon: I::Diff, logo: None, label: "Git diff".into(), sub: "uncommitted changes".into(), act: SuggAct::Chip(MentionChip::git_diff()) });
         }
@@ -1568,6 +1594,25 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
         }
         let logo = crate::logos::agent_logo(agent);
         let mut seen = std::collections::BTreeSet::new();
+        for c in app.agent_models(agent).map(|m| m.commands).unwrap_or_default() {
+            if !c.name.to_lowercase().contains(&ql) || !seen.insert(c.name.clone()) {
+                continue;
+            }
+            let mcp = c.name.starts_with("mcp__");
+            let desc: String = c.hint.clone().map(|h| format!("{h} · ")).unwrap_or_default() + &c.description.clone().unwrap_or_default();
+            let desc: String = desc.chars().take(80).collect();
+            out.push(Sugg {
+                group: if mcp { "MCP prompts" } else { "Commands" },
+                icon: if mcp { I::Plug } else { I::Slash },
+                logo: if mcp { None } else { logo },
+                label: format!("/{}", c.name),
+                sub: desc.clone(),
+                act: SuggAct::Chip(MentionChip::skill(&c.name, false, &desc)),
+            });
+            if out.len() > 60 {
+                break;
+            }
+        }
         for it in harness_items(app).into_iter().filter(|it| matches!(it.kind, ItemKind::Command | ItemKind::Skill) && it.agents.contains(agent)) {
             let name = it.name.trim_start_matches('/').to_string();
             if !name.to_lowercase().contains(&ql) || !seen.insert(name.clone()) {
@@ -1587,7 +1632,7 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
                 break;
             }
         }
-        out.sort_by_key(|s| match s.group { "Larrier" => 0, "Commands" => 1, _ => 2 });
+        out.sort_by_key(|s| match s.group { "Larrier" => 0, "Commands" => 1, "Skills" => 2, _ => 3 });
     }
     out
 }
@@ -1630,6 +1675,8 @@ const SLASH: &[(&str, &str)] = &[
     ("/worktree", "Run in an isolated worktree"),
     ("/local", "Run in the folder itself"),
     ("/new", "Start a new agent"),
+    ("/mcp", "This agent's MCP servers"),
+    ("/usage", "Plan and token usage"),
     ("/settings", "Open settings"),
 ];
 

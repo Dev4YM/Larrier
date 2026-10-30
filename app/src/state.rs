@@ -612,10 +612,24 @@ impl App {
     }
 
     pub fn go(mut self, delta: isize) {
+        // Sessions deleted since (here or by their agent) drop out of the
+        // history instead of blocking the way back.
+        let gone: Vec<String> = {
+            let ui = self.ui.peek();
+            ui.history.iter().filter_map(|v| v.session_id()).filter(|id| !self.is_loaded(id) && !store().exists(id)).map(String::from).collect()
+        };
+        for id in &gone {
+            self.forget_session(id);
+        }
         let target = {
             let ui = self.ui.read();
             let t = ui.hist_pos as isize + delta;
             if t < 0 || t as usize >= ui.history.len() {
+                drop(ui);
+                // Nothing left behind: back lands on a new agent.
+                if delta < 0 && !matches!(*self.view.peek(), View::Home) {
+                    self.navigate(View::Home);
+                }
                 return;
             }
             (t as usize, ui.history[t as usize].clone())
@@ -758,6 +772,18 @@ impl App {
         }
     }
 
+    /// A session that no longer exists: out of the sidebar, the tabs and
+    /// the back / forward history.
+    fn forget_session(mut self, id: &str) {
+        self.open.write().remove(id);
+        self.forget_tabs(id);
+        self.sessions.write().retain(|s| s.id != id);
+        let mut ui = self.ui.write();
+        let (history, pos) = without_session(std::mem::take(&mut ui.history), ui.hist_pos, id);
+        ui.history = history;
+        ui.hist_pos = pos;
+    }
+
     /// Drop tabs (and the split) of a session that was deleted or archived.
     fn forget_tabs(mut self, id: &str) {
         self.tabs.write().retain(|t| t.view.session_id() != Some(id));
@@ -812,6 +838,11 @@ impl App {
                 self.put_session(s);
                 true
             }
+            Err(_) if !store().exists(id) => {
+                self.forget_session(id);
+                self.toast("That session no longer exists");
+                false
+            }
             Err(e) => {
                 self.toast_err(format!("Could not open session: {e}"));
                 false
@@ -834,6 +865,10 @@ impl App {
                         self.put_session(s);
                     }
                     self.show_session(&id);
+                }
+                Ok(Err(_)) if !store().exists(&id) => {
+                    self.forget_session(&id);
+                    self.toast("That session no longer exists");
                 }
                 Ok(Err(e)) => self.toast_err(format!("Could not open session: {e}")),
                 Err(e) => self.toast_err(format!("Could not open session: {e}")),
@@ -1212,13 +1247,11 @@ impl App {
         if let Err(e) = store().delete(id) {
             self.toast_err(format!("Delete failed: {e}"));
         }
-        self.open.write().remove(id);
-        let cur = self.current_id().as_deref() == Some(id);
-        self.forget_tabs(id);
+        let cur = self.view.peek().session_id() == Some(id);
+        self.forget_session(id);
         if cur {
-            self.view.set(View::Home);
+            self.navigate(View::Home);
         }
-        self.sessions.write().retain(|s| s.id != id);
     }
 
     pub fn fork(self, id: &str, message_id: Option<String>) {
@@ -1607,6 +1640,23 @@ pub fn flush_saves() {
 /// and Codex mark turn ends in the transcript (`external_turn`); a turn left
 /// open by a crashed CLI stops counting after a while. Agents without turn
 /// markers count while their files are being written (`live_recent`).
+/// Back / forward history without the views of session `id`: where `pos`
+/// lands (the nearest view before it), and no view twice in a row.
+fn without_session(history: Vec<View>, pos: usize, id: &str) -> (Vec<View>, usize) {
+    let mut kept: Vec<View> = Vec::with_capacity(history.len());
+    let mut at = 0;
+    for (i, v) in history.into_iter().enumerate() {
+        if v.session_id() == Some(id) || kept.last() == Some(&v) {
+            continue;
+        }
+        kept.push(v);
+        if i <= pos {
+            at = kept.len() - 1;
+        }
+    }
+    (kept, at)
+}
+
 pub fn external_active(s: &SessionSummary, live_recent: bool) -> bool {
     if s.external_turn {
         return chrono::Utc::now() - s.updated_at < chrono::Duration::minutes(45);
@@ -1783,5 +1833,25 @@ pub fn rel_time(t: chrono::DateTime<chrono::Utc>) -> String {
         t.format("%b %-d").to_string()
     } else {
         t.format("%b %Y").to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_deleted_session_leaves_the_history() {
+        let a = || View::Agent("a".into());
+        let b = || View::Agent("b".into());
+        let set = || View::Settings(SettingsTab::General);
+        let (h, pos) = without_session(vec![View::Home, a(), set(), b(), a(), set()], 5, "a");
+        assert_eq!((h, pos), (vec![View::Home, set(), b(), set()], 3));
+        // Back from settings lands before the deleted session.
+        let (h, pos) = without_session(vec![View::Home, a(), set()], 2, "a");
+        assert_eq!((h, pos), (vec![View::Home, set()], 1));
+        // No view twice in a row once it's gone.
+        let (h, pos) = without_session(vec![set(), View::Subagent { session: "a".into(), tool: "t".into() }, set()], 2, "a");
+        assert_eq!((h, pos), (vec![set()], 0));
     }
 }

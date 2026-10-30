@@ -121,6 +121,63 @@ pub fn Root() -> Element {
             const mq = window.matchMedia('(prefers-color-scheme: dark)');
             dioxus.send({ t: 'theme', dark: mq.matches });
             mq.addEventListener('change', (e) => dioxus.send({ t: 'theme', dark: e.matches }));
+            // A typing cursor that glides (motion on): text fields hide their
+            // own and this one is drawn where theirs would be, easing to
+            // each new spot as text is typed or the cursor moves.
+            if (!window.__larrierCaret) {
+              window.__larrierCaret = true;
+              const caret = document.createElement('div');
+              caret.className = 'l-caret';
+              document.body.appendChild(caret);
+              const mirror = document.createElement('div');
+              mirror.setAttribute('aria-hidden', 'true');
+              mirror.style.cssText = 'position:absolute;visibility:hidden;top:0;left:-99999px;overflow:hidden;';
+              document.body.appendChild(mirror);
+              const PROPS = ['boxSizing','width','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','paddingTop','paddingRight','paddingBottom','paddingLeft',
+                'fontStyle','fontVariant','fontWeight','fontStretch','fontSize','lineHeight','fontFamily','textAlign','textTransform','textIndent','letterSpacing','wordSpacing','tabSize','direction'];
+              let el = null, raf = 0, moved = 0;
+              const motion = () => { const r = document.querySelector('.larrier-root'); return !!r && !r.classList.contains('no-motion'); };
+              const eligible = (t) => !!t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|url|email|)$/i.test(t.getAttribute('type') || ''))) && !t.closest('.xterm');
+              const hide = () => { caret.style.visibility = 'hidden'; };
+              const place = () => {
+                raf = 0;
+                if (!el || document.activeElement !== el || !motion()) { if (el) el.classList.remove('l-caret-on'); hide(); return; }
+                el.classList.add('l-caret-on');
+                if (el.selectionStart !== el.selectionEnd) { hide(); return; }
+                const cs = getComputedStyle(el);
+                for (const p of PROPS) mirror.style[p] = cs[p];
+                const area = el.tagName === 'TEXTAREA';
+                mirror.style.whiteSpace = area ? 'pre-wrap' : 'pre';
+                mirror.style.overflowWrap = area ? 'break-word' : 'normal';
+                mirror.style.height = 'auto';
+                const i = el.selectionStart || 0;
+                mirror.textContent = el.value.slice(0, i);
+                const mark = document.createElement('span');
+                mark.textContent = el.value.slice(i, i + 1) || '​';
+                mirror.appendChild(mark);
+                const r = el.getBoundingClientRect();
+                const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.35;
+                const h = Math.round(Math.min(lh, parseFloat(cs.fontSize) * 1.45));
+                const x = r.left + mark.offsetLeft - el.scrollLeft;
+                const y = r.top + mark.offsetTop - el.scrollTop + Math.max(0, (lh - h) / 2);
+                if (x < r.left - 1 || x > r.right + 1 || y < r.top - 1 || y + h > r.bottom + 2) { hide(); return; }
+                caret.style.height = h + 'px';
+                caret.style.background = cs.caretColor && cs.caretColor !== 'transparent' && !el.classList.contains('l-caret-on') ? cs.caretColor : cs.color;
+                caret.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px)';
+                caret.style.visibility = 'visible';
+                // Solid while it moves; blinks once still.
+                caret.classList.remove('blink');
+                clearTimeout(moved);
+                moved = setTimeout(() => caret.classList.add('blink'), 530);
+              };
+              const queue = () => { if (!raf) raf = requestAnimationFrame(place); };
+              document.addEventListener('focusin', (e) => { if (eligible(e.target)) { el = e.target; caret.style.transition = 'none'; queue(); requestAnimationFrame(() => requestAnimationFrame(() => { caret.style.transition = ''; })); } });
+              document.addEventListener('focusout', (e) => { if (e.target === el) { el.classList.remove('l-caret-on'); el = null; hide(); } });
+              document.addEventListener('selectionchange', queue);
+              document.addEventListener('input', queue, true);
+              document.addEventListener('scroll', queue, true);
+              window.addEventListener('resize', queue);
+            }
             // Copy buttons of code blocks (in rendered Markdown): the text
             // goes to the system clipboard through the app.
             if (!window.__larrierCopy) {

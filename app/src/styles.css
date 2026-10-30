@@ -1604,3 +1604,10 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
   transition: max-width .22s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, margin-left .22s ease; }
 .update-btn:hover .lbl, .update-btn.busy .lbl, .update-btn.ready .lbl { max-width: 90px; opacity: 1; margin-left: 6px; }
 .update-btn.busy { cursor: default; font-variant-numeric: tabular-nums; }
+
+/* The gliding typing cursor (drawn over text fields while motion is on). */
+.l-caret { position: fixed; left: 0; top: 0; width: 2px; border-radius: 1px; pointer-events: none; z-index: 2500; visibility: hidden;
+  transition: transform .1s cubic-bezier(.2, .8, .2, 1); will-change: transform; }
+.l-caret.blink { animation: caret-blink 1.06s steps(1) infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+.l-caret-on { caret-color: transparent !important; }

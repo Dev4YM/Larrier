@@ -19,6 +19,9 @@ pub struct TurnRecorder {
     pub base_len: usize,
     pub finished: bool,
     pub ok: bool,
+    /// The agent finished a reply and later spoke again (after background
+    /// work): its next words start a paragraph of their own.
+    text_break: bool,
 }
 
 impl TurnRecorder {
@@ -39,6 +42,7 @@ impl TurnRecorder {
             base_len: session.messages.len(),
             finished: false,
             ok: false,
+            text_break: false,
         }
     }
 
@@ -110,11 +114,18 @@ impl TurnRecorder {
             }
             AgentEvent::TextDelta { text } => {
                 self.close_reasoning(session);
-                self.msg(session).push_text(text);
+                let fresh = std::mem::take(&mut self.text_break);
+                let m = self.msg(session);
+                if fresh {
+                    m.parts.push(Part::Text { text: text.clone() });
+                } else {
+                    m.push_text(text);
+                }
                 session.touch();
                 true
             }
             AgentEvent::Text { text } => {
+                self.text_break = false;
                 self.close_reasoning(session);
                 let m = self.msg(session);
                 m.parts.push(Part::Text { text: text.clone() });
@@ -233,7 +244,11 @@ impl TurnRecorder {
                 }
                 true
             }
-            AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Idle => false,
+            AgentEvent::Idle => {
+                self.text_break = true;
+                false
+            }
+            AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } => false,
             AgentEvent::Done { ok, .. } => {
                 self.close_reasoning(session);
                 self.finish(session, *ok);

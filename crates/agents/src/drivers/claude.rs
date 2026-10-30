@@ -52,9 +52,16 @@ async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedRecei
     cmd.env("CLAUDE_CODE_FORWARD_SUBAGENT_TEXT", "1");
     cmd.args(&req.launch.extra_args);
     let mut live = ClaudeLive::default();
-    let first = live.user_line(&req.full_prompt(), &req.attachments, false, None);
+    let id = uuid::Uuid::new_v4().to_string();
+    let first = live.user_line(&req.full_prompt(), &req.attachments, false, Some(&id));
+    live.prompt = Some(id);
     let outcome = super::process::run_interactive(cmd, vec![first], &sink, &mut control, &mut live).await;
     if live.inner.done {
+        return;
+    }
+    // The reply was done; only background work kept Claude running.
+    if live.waiting {
+        sink.done(true, Some("end_turn".into()));
         return;
     }
     if outcome.cancelled {
@@ -169,6 +176,18 @@ pub struct ClaudeLive {
     cost_so_far: f64,
     /// The permission mode Claude reports it runs in.
     mode: Option<String>,
+    /// The prompt this run started with, until Claude takes it in: a
+    /// resumed session may first finish something queued before it (the
+    /// notice about a background command the last run left behind).
+    prompt: Option<String>,
+    /// Background tasks running, as Claude counts them.
+    background: usize,
+    /// The reply is done and background tasks still run: the turn goes on
+    /// until they end (Claude reports back on them), or the user stops it.
+    waiting: bool,
+    /// Background work ended while waiting and Claude hasn't reported back:
+    /// past this, the turn ends anyway.
+    linger: Option<std::time::Instant>,
 }
 
 /// Images Claude takes inline (the API's limit is 5 MB each).
@@ -339,6 +358,12 @@ impl ClaudeLive {
             self.cost_so_far = t;
         }
         let stopped = self.stop_at.is_some();
+        // Not our turn: Claude finished something queued before our prompt,
+        // which it hasn't taken in yet. Its turn comes next.
+        if self.prompt.is_some() && !stopped && v["is_error"].as_bool() != Some(true) {
+            sink.log(format!("claude: a turn ended before the prompt was taken in ({} turns)", v["num_turns"]));
+            return;
+        }
         if stopped {
             for (id, ask) in self.asks.drain() {
                 if let Some(t) = ask.tool_use_id {
@@ -351,6 +376,14 @@ impl ClaudeLive {
         // A message sent during the turn that Claude has not taken in yet
         // starts another turn in this process.
         if !stopped && !self.steers.is_empty() {
+            return;
+        }
+        // Background commands still run: keep Claude going so they finish
+        // (closing it would kill them) and it hears when they do.
+        if !stopped && ok && self.background > 0 {
+            self.waiting = true;
+            self.linger = None;
+            sink.send(AgentEvent::Idle);
             return;
         }
         self.inner.done = true;
@@ -378,9 +411,20 @@ impl super::process::Interactive for ClaudeLive {
             // A prompt line taken in: messages sent during the turn are
             // recorded where Claude read them.
             "user" if v["isReplay"].as_bool() == Some(true) => {
-                if let Some((text, parts)) = s(&v, "uuid").and_then(|u| self.steers.remove(u)) {
+                let uuid = s(&v, "uuid");
+                if uuid.is_some() && uuid == self.prompt.as_deref() {
+                    self.prompt = None;
+                } else if let Some((text, parts)) = uuid.and_then(|u| self.steers.remove(u)) {
                     sink.send(AgentEvent::Steered { text, attachments: parts });
                 }
+            }
+            "system" if s(&v, "subtype") == Some("background_tasks_changed") => {
+                self.background = v["tasks"].as_array().map(|a| a.len()).unwrap_or(0);
+                // Claude reports back on finished work in a turn of its own.
+                if self.waiting && self.background == 0 {
+                    self.linger = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+                }
+                self.inner.handle(line, sink);
             }
             // The mode Claude runs in; it changes when a plan is approved.
             "system" if s(&v, "permissionMode").is_some() => {
@@ -399,6 +443,13 @@ impl super::process::Interactive for ClaudeLive {
     fn command(&mut self, cmd: TurnCommand, sink: &EventSink) {
         match cmd {
             TurnCommand::Cancel => {
+                // Only background work was left: stopping ends it with Claude.
+                if self.waiting && !self.finished {
+                    self.inner.done = true;
+                    self.finished = true;
+                    sink.done(false, Some("cancelled".into()));
+                    return;
+                }
                 if self.stop_at.is_none() && !self.finished {
                     self.host_requests += 1;
                     self.out.push(json!({"type": "control_request", "request_id": format!("larrier_{}", self.host_requests), "request": {"subtype": "interrupt"}}).to_string());
@@ -427,7 +478,7 @@ impl super::process::Interactive for ClaudeLive {
     }
 
     fn stop_deadline(&self) -> Option<std::time::Instant> {
-        self.stop_at
+        self.stop_at.or(self.linger)
     }
 }
 
@@ -1313,6 +1364,81 @@ mod tests {
 
     fn reply(id: &str, option: &str) -> Option<TurnCommand> {
         Some(TurnCommand::Permission { request_id: id.into(), reply: Reply::option(Some(option.into())) })
+    }
+
+    /// Feed lines to a live run started with prompt `p1`; its events, and
+    /// whether it closed (finished).
+    fn feed(p: &mut ClaudeLive, lines: &[&str]) -> Vec<AgentEvent> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = EventSink::new(tx);
+        for l in lines {
+            p.handle(l, &sink);
+        }
+        let mut out = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            out.push(e);
+        }
+        out.into_iter().filter(|e| !matches!(e, AgentEvent::Log { .. })).collect()
+    }
+
+    /// Real sequence (Claude Code 2.1.310, resumed after a run that left a
+    /// background command): Claude first ends a turn of its own about that
+    /// command, then takes in the prompt. The first end isn't ours.
+    #[test]
+    fn a_turn_before_the_prompt_is_not_ours() {
+        let mut p = ClaudeLive { prompt: Some("p1".into()), ..Default::default() };
+        let ev = feed(&mut p, &[
+            r#"{"type":"system","subtype":"task_notification","task_id":"b1","tool_use_id":"toolu_old","status":"stopped","summary":"Background shell command didn't finish before the previous session ended"}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":0,"result":"","session_id":"s1","total_cost_usd":0}"#,
+        ]);
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Done { .. })), "{ev:?}");
+        assert!(!p.finished());
+        let ev = feed(&mut p, &[
+            r#"{"type":"user","isReplay":true,"uuid":"p1","message":{"role":"user","content":[{"type":"text","text":"see this"}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"SECOND"}],"stop_reason":"end_turn"}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"SECOND","session_id":"s1","total_cost_usd":0.01}"#,
+        ]);
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Text { text } if text == "SECOND")));
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
+        assert!(p.finished());
+        // An error before the prompt is taken in is still the run's.
+        let mut q = ClaudeLive { prompt: Some("p1".into()), ..Default::default() };
+        let ev = feed(&mut q, &[r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"s1"}"#]);
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })), "{ev:?}");
+    }
+
+    /// Real sequence: a background command outlives the reply. Claude keeps
+    /// running until it ends, then reports back in a turn of its own.
+    #[test]
+    fn waits_for_background_work() {
+        let mut p = ClaudeLive::default();
+        let ev = feed(&mut p, &[
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b9","task_type":"local_bash","description":"ping"}]}"#,
+            r#"{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"STARTED"}],"stop_reason":"end_turn"}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"STARTED","session_id":"s1","total_cost_usd":0.01}"#,
+        ]);
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Done { .. })), "{ev:?}");
+        assert!(matches!(ev.last(), Some(AgentEvent::Idle)));
+        assert!(!p.finished() && p.waiting);
+        let ev = feed(&mut p, &[
+            r#"{"type":"system","subtype":"task_notification","task_id":"b9","status":"completed"}"#,
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#,
+            r#"{"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"FINISHED"}],"stop_reason":"end_turn"}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"FINISHED","session_id":"s1","total_cost_usd":0.02}"#,
+        ]);
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Text { text } if text == "FINISHED")));
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
+        assert!(p.finished());
+        // Stop while only background work is left ends the turn at once.
+        let mut q = ClaudeLive::default();
+        feed(&mut q, &[
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b9"}]}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"s1"}"#,
+        ]);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        q.command(TurnCommand::Cancel, &EventSink::new(tx));
+        assert!(matches!(rx.try_recv(), Ok(AgentEvent::Done { ok: false, .. })));
+        assert!(q.finished());
     }
 
     /// Real run (Claude Code 2.1.310): `echo hi > a.txt` in Manual mode,

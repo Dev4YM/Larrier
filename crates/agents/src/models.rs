@@ -64,6 +64,51 @@ pub struct AgentModels {
     pub listed_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub error: Option<String>,
+    /// The agent's own / commands (built-in, custom, skills, plugins, MCP
+    /// prompts), as the agent lists them.
+    #[serde(default)]
+    pub commands: Vec<AgentCommand>,
+    /// Subagents it can be asked to hand work to (`@agent-<name>`).
+    #[serde(default)]
+    pub subagents: Vec<AgentCommand>,
+    /// MCP servers as the agent itself reports them (with the ones its
+    /// account or plugins add, which no config file names).
+    #[serde(default)]
+    pub mcp: Vec<McpServer>,
+}
+
+/// An MCP server as an agent reports it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct McpServer {
+    pub name: String,
+    /// connected, failed, needs-auth, pending or disabled.
+    pub status: String,
+    /// Where it comes from: user, project, local, plugin, claudeai, …
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub tools: usize,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// One of an agent's own commands or subagents.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct AgentCommand {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// What to type after it ("consent | revoke").
+    #[serde(default)]
+    pub hint: Option<String>,
+}
+
+/// What an agent's CLI lists besides its models.
+#[derive(Clone, Debug, Default)]
+pub struct Menu {
+    pub commands: Vec<AgentCommand>,
+    pub subagents: Vec<AgentCommand>,
+    pub mcp: Vec<McpServer>,
 }
 
 impl AgentModels {
@@ -181,15 +226,23 @@ pub async fn read(agent: &AgentKind, program: Option<&Path>, deep: bool, prev: O
         (true, Some(p)) if has_cli_listing(agent) => cli_listing(agent, p).await,
         _ => None,
     };
-    let (listed, listed_at, listing_error) = match listing {
-        Some(Ok(v)) => (v, Some(Utc::now()), None),
-        Some(Err(e)) => (prev.map(|p| keep_listed(p)).unwrap_or_default(), prev.and_then(|p| p.listed_at), Some(e)),
-        None => (prev.map(|p| keep_listed(p)).unwrap_or_default(), prev.and_then(|p| p.listed_at), None),
+    let kept = || Menu {
+        commands: prev.map(|p| p.commands.clone()).unwrap_or_default(),
+        subagents: prev.map(|p| p.subagents.clone()).unwrap_or_default(),
+        mcp: prev.map(|p| p.mcp.clone()).unwrap_or_default(),
+    };
+    let (listed, menu, listed_at, listing_error) = match listing {
+        Some(Ok((v, menu))) => (v, menu, Some(Utc::now()), None),
+        Some(Err(e)) => (prev.map(|p| keep_listed(p)).unwrap_or_default(), kept(), prev.and_then(|p| p.listed_at), Some(e)),
+        None => (prev.map(|p| keep_listed(p)).unwrap_or_default(), kept(), prev.and_then(|p| p.listed_at), None),
     };
     let agent2 = agent.clone();
     let mut m = tokio::task::spawn_blocking(move || read_files(&agent2, listed)).await.unwrap_or_default();
     m.fetched_at = Some(Utc::now());
     m.listed_at = listed_at;
+    m.commands = menu.commands;
+    m.subagents = menu.subagents;
+    m.mcp = menu.mcp;
     if m.error.is_none() {
         m.error = listing_error;
     }
@@ -313,7 +366,7 @@ async fn run_cli(program: &Path, args: &[&str], timeout: Duration) -> Result<Str
     }
 }
 
-async fn cli_listing(agent: &AgentKind, program: &Path) -> Option<Result<Vec<AgentModel>, String>> {
+async fn cli_listing(agent: &AgentKind, program: &Path) -> Option<Result<(Vec<AgentModel>, Menu), String>> {
     if *agent == AgentKind::ClaudeCode {
         return Some(claude_listing(program).await);
     }
@@ -333,7 +386,7 @@ async fn cli_listing(agent: &AgentKind, program: &Path) -> Option<Result<Vec<Age
         AgentKind::Droid => parse_droid_help(&text).models,
         _ => Vec::new(),
     };
-    Some(if models.is_empty() { Err(first_line(&text)) } else { Ok(models) })
+    Some(if models.is_empty() { Err(first_line(&text)) } else { Ok((models, Menu::default())) })
 }
 
 fn first_line(text: &str) -> String {
@@ -350,7 +403,7 @@ fn clean(s: &str) -> String {
 
 /// Claude Code's own model menu: what `initialize` answers over its control
 /// protocol (no prompt is sent, so nothing is spent).
-async fn claude_listing(program: &Path) -> Result<Vec<AgentModel>, String> {
+async fn claude_listing(program: &Path) -> Result<(Vec<AgentModel>, Menu), String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let (prog, prefix) = crate::request::unwrap_shim(program);
     let mut cmd = tokio::process::Command::new(prog);
@@ -375,14 +428,74 @@ async fn claude_listing(program: &Path) -> Result<Vec<AgentModel>, String> {
         None
     };
     let reply = tokio::time::timeout(Duration::from_secs(30), read).await.ok().flatten();
+    // Then its MCP servers, as it connects to them (account connectors
+    // and plugins included).
+    let mut mcp = None;
+    if reply.is_some() {
+        let line = "{\"type\":\"control_request\",\"request_id\":\"larrier_mcp\",\"request\":{\"subtype\":\"mcp_status\"}}\n";
+        if stdin.write_all(line.as_bytes()).await.is_ok() {
+            let read = async {
+                while let Ok(Some(l)) = lines.next_line().await {
+                    let Ok(v) = serde_json::from_str::<Value>(&l) else { continue };
+                    if v["type"] == "control_response" && v["response"]["request_id"] == "larrier_mcp" {
+                        return Some(v);
+                    }
+                }
+                None
+            };
+            mcp = tokio::time::timeout(Duration::from_secs(30), read).await.ok().flatten();
+        }
+    }
     drop(stdin);
     let _ = child.kill().await;
     let v = reply.ok_or("Couldn't list models: Claude Code didn't answer")?;
-    let models = parse_claude_models(&v["response"]["response"]);
+    let init = &v["response"]["response"];
+    let models = parse_claude_models(init);
     if models.is_empty() {
         return Err(v["response"]["error"].as_str().map(|e| format!("Couldn't list models: {e}")).unwrap_or_else(|| "Couldn't list models: none reported".into()));
     }
-    Ok(models)
+    let mut menu = parse_claude_menu(init);
+    menu.mcp = mcp.map(|m| parse_mcp_status(&m["response"]["response"])).unwrap_or_default();
+    Ok((models, menu))
+}
+
+/// Claude Code's `mcp_status` reply: each server with its state.
+pub fn parse_mcp_status(v: &Value) -> Vec<McpServer> {
+    v["mcpServers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| {
+            Some(McpServer {
+                name: str_of(s, &["name"])?.to_string(),
+                status: str_of(s, &["status"]).unwrap_or("pending").to_string(),
+                source: str_of(s, &["source"]).or_else(|| str_of(s, &["scope"])).map(str::to_string),
+                tools: s["tools"].as_array().map(|t| t.len()).unwrap_or(0),
+                error: str_of(s, &["error"]).map(str::to_string),
+            })
+        })
+        .collect()
+}
+
+/// Claude Code's own / commands and subagents (its `initialize` reply).
+/// Internal entries (`__…`) are left out.
+pub fn parse_claude_menu(init: &Value) -> Menu {
+    let list = |key: &str| -> Vec<AgentCommand> {
+        init[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| {
+                let name = str_of(c, &["name"])?.to_string();
+                (!name.starts_with("__")).then(|| AgentCommand {
+                    name,
+                    description: str_of(c, &["description"]).map(str::to_string).filter(|d| !d.trim().is_empty()),
+                    hint: str_of(c, &["argumentHint"]).map(str::to_string).filter(|h| !h.trim().is_empty()),
+                })
+            })
+            .collect()
+    };
+    Menu { commands: list("commands"), subagents: list("agents"), mcp: Vec::new() }
 }
 
 /// Models from Claude Code's `initialize` reply: the latest of each family
@@ -1127,6 +1240,46 @@ mod tests {
         assert_eq!(codex_name("GPT-6.1 Terra"), "GPT-6.1 Terra");
     }
 
+    /// Claude Code's `mcp_status` reply (shape from the Agent SDK's
+    /// McpServerStatus; this machine has no servers to report).
+    #[test]
+    fn claude_mcp_status() {
+        let v = serde_json::json!({"mcpServers": [
+            {"name": "github", "status": "connected", "scope": "user", "source": "plugin", "tools": [{"name": "search"}, {"name": "pr"}]},
+            {"name": "Gmail", "status": "needs-auth", "scope": "claudeai"},
+            {"name": "broken", "status": "failed", "error": "spawn ENOENT"}
+        ]});
+        let s = parse_mcp_status(&v);
+        assert_eq!((s[0].name.as_str(), s[0].status.as_str(), s[0].source.as_deref(), s[0].tools), ("github", "connected", Some("plugin"), 2));
+        assert_eq!(s[1].source.as_deref(), Some("claudeai"), "scope when there is no source");
+        assert_eq!(s[2].error.as_deref(), Some("spawn ENOENT"));
+        assert!(parse_mcp_status(&serde_json::json!({"mcpServers": []})).is_empty());
+    }
+
+    /// Claude Code's / commands and subagents, as its `initialize` reply
+    /// lists them (shapes from 2.1.310).
+    #[test]
+    fn claude_commands_and_subagents() {
+        let init = serde_json::json!({
+            "commands": [
+                {"name": "compact", "description": "Clear conversation history but keep a summary in context", "argumentHint": "<optional custom summarization instructions>", "builtin": true},
+                {"name": "design", "description": "Grant or revoke Claude agent access to your Design projects", "argumentHint": "consent | revoke", "builtin": true},
+                {"name": "__remote-workflow", "description": "", "builtin": true},
+                {"name": "mcp__github__review", "description": "Review a pull request", "argumentHint": ""}
+            ],
+            "agents": [
+                {"name": "Explore", "description": "Fast read-only search agent for locating code."},
+                {"name": "Plan", "description": "Software architect agent for designing implementation plans."}
+            ]
+        });
+        let menu = parse_claude_menu(&init);
+        let names: Vec<&str> = menu.commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["compact", "design", "mcp__github__review"], "internal commands are left out");
+        assert_eq!(menu.commands[1].hint.as_deref(), Some("consent | revoke"));
+        assert_eq!(menu.commands[2].hint, None, "an empty hint is none");
+        assert_eq!(menu.subagents.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), ["Explore", "Plan"]);
+    }
+
     /// Claude Code 2.1.310's own menu (its `initialize` reply): the latest
     /// models by alias under their real names, older ones to add.
     #[test]
@@ -1177,6 +1330,12 @@ mod real {
                 featured.join(" · "),
                 m.providers.iter().map(|p| format!("{} key={} active={:?} url={:?}", p.name, p.has_key, p.active, p.base_url)).collect::<Vec<_>>(),
                 m.notes
+            );
+            println!(
+                "   commands {} · subagents {} · mcp {:?}",
+                m.commands.len(),
+                m.subagents.len(),
+                m.mcp.iter().map(|s| format!("{} {} {:?} tools={}", s.name, s.status, s.source, s.tools)).collect::<Vec<_>>()
             );
         }
     }

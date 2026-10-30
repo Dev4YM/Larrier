@@ -78,7 +78,9 @@ impl App {
         spawn_forever(async move {
             for (kind, path) in targets {
                 let prev = self.native_models.peek().get(&kind.id()).cloned();
-                let stale = prev.as_ref().and_then(|p| p.listed_at).map(|t| chrono::Utc::now() - t > chrono::Duration::hours(LISTING_TTL_HOURS)).unwrap_or(true);
+                let stale = prev.as_ref().and_then(|p| p.listed_at).map(|t| chrono::Utc::now() - t > chrono::Duration::hours(LISTING_TTL_HOURS)).unwrap_or(true)
+                    // Listed before Larrier read Claude Code's commands.
+                    || (kind == AgentKind::ClaudeCode && prev.as_ref().is_some_and(|p| p.commands.is_empty()));
                 let m = models::read(&kind, path.as_deref(), deep || stale, prev.as_ref()).await;
                 self.native_models.write().insert(kind.id().to_string(), m);
                 self.models_refreshing.write().remove(&kind.id());

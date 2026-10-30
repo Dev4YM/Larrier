@@ -181,7 +181,7 @@ pub fn tidy() {
     if let Ok(dirs) = std::fs::read_dir(l.shared_dir.join("updates")) {
         for d in dirs.flatten() {
             let v = d.file_name().to_string_lossy().to_string();
-            if !crate::update::newer(&v, larrier_core::APP_VERSION) {
+            if !crate::version::newer(&v, crate::version::VERSION) {
                 let _ = std::fs::remove_dir_all(d.path());
             }
         }

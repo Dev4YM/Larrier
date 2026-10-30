@@ -16,6 +16,7 @@ mod quota;
 mod state;
 mod ui;
 mod update;
+mod version;
 
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 
@@ -57,6 +58,10 @@ pub fn setup_log() -> std::path::PathBuf {
 fn headless(args: &[String]) -> Option<i32> {
     let has = |f: &str| args.iter().any(|a| a == f);
     let val = |f: &str| args.iter().position(|a| a == f).and_then(|i| args.get(i + 1)).cloned();
+    if has("--version") || has("-V") {
+        println!("Larrier {}", version::long());
+        return Some(0);
+    }
     let result: anyhow::Result<()> = if let Some(scope) = val("--install") {
         let scope = if scope == "machine" { install::Scope::Machine } else { install::Scope::User };
         install::install(scope, has("--desktop")).and_then(|exe| if has("--launch") { install::launch(&exe, &[]) } else { Ok(()) })

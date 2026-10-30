@@ -405,6 +405,7 @@ pub fn ModalHost() -> Element {
                     Modal::Export(id) => rsx! { DeleteModal { id } },
                     Modal::AddAccount(kind) => rsx! { AddAccountModal { kind } },
                     Modal::AddWorkspace => rsx! { div {} },
+                    Modal::WhatsNew(version, updated) => rsx! { WhatsNewModal { version, updated } },
                 }
             }
         }
@@ -447,6 +448,25 @@ fn DeleteModal(id: String) -> Element {
                 onclick: move |_| { app.ui.write().modal = None; app.delete(&id); },
                 "Delete"
             }
+        }
+    }
+}
+
+/// A release's notes from the built-in changelog.
+#[component]
+fn WhatsNewModal(version: String, updated: bool) -> Element {
+    let mut app = use_app();
+    let notes = crate::version::notes(&version).unwrap_or_else(|| "No notes for this version.".into());
+    let html = crate::markdown::to_html(&notes);
+    let date = crate::version::released_on(&version).unwrap_or_default();
+    rsx! {
+        div { class: "modal-head",
+            if updated { "Larrier is now {version}" } else { "What's new in Larrier {version}" }
+            if !date.is_empty() { span { class: "faint", style: "font-weight: 400; margin-left: 8px; font-size: 12px;", "{date}" } }
+        }
+        div { class: "modal-body whats-new md", dangerous_inner_html: "{html}" }
+        div { class: "modal-foot",
+            button { class: "primary-btn", onclick: move |_| app.ui.write().modal = None, "Got it" }
         }
     }
 }

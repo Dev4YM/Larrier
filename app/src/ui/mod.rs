@@ -52,6 +52,18 @@ pub fn Root() -> Element {
         crate::automations::start(app);
         app.detect_agents();
         crate::agent_models::start(app);
+        // After an update, say once what's new.
+        {
+            let last = app.config.peek().settings.last_version.clone();
+            let now = crate::version::VERSION;
+            if last.as_deref() != Some(now) {
+                if last.as_deref().map(|prev| crate::version::newer(now, prev)).unwrap_or(false) && crate::version::notes(now).is_some() {
+                    let mut a = app;
+                    a.ui.write().modal = Some(crate::state::Modal::WhatsNew(now.to_string(), true));
+                }
+                app.update_config(|c| c.settings.last_version = Some(now.to_string()));
+            }
+        }
         if app.config.read().settings.auto_import {
             app.sync_imports(true);
         }

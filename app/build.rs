@@ -9,6 +9,9 @@ mod mark {
 
 fn main() {
     println!("cargo:rerun-if-changed=src/mark_raster.rs");
+    let (commit, date) = build_info();
+    println!("cargo:rustc-env=LARRIER_COMMIT={commit}");
+    println!("cargo:rustc-env=LARRIER_COMMIT_DATE={date}");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
@@ -22,10 +25,34 @@ fn main() {
     res.set("CompanyName", "Dev4YM");
     res.set("LegalCopyright", "© Dev4YM");
     res.set("OriginalFilename", "Larrier.exe");
+    res.set("ProductVersion", &format!("{} ({commit})", env!("CARGO_PKG_VERSION")));
     // Without the Windows SDK's resource compiler the exe just has no icon.
     if let Err(e) = res.compile() {
         println!("cargo:warning=no exe icon: {e}");
     }
+}
+
+/// The commit being built and its date (`LARRIER_COMMIT` /
+/// `LARRIER_COMMIT_DATE` override them, e.g. for builds outside a checkout).
+/// A checkout with uncommitted changes marks the commit `+dirty`.
+fn build_info() -> (String, String) {
+    for p in ["../.git/HEAD", "../.git/index", "../.git/refs/heads", "../.git/packed-refs"] {
+        println!("cargo:rerun-if-changed={p}");
+    }
+    println!("cargo:rerun-if-env-changed=LARRIER_COMMIT");
+    println!("cargo:rerun-if-env-changed=LARRIER_COMMIT_DATE");
+    let git = |args: &[&str]| -> Option<String> {
+        let out = std::process::Command::new("git").args(args).output().ok()?;
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success() && !s.is_empty()).then_some(s)
+    };
+    let commit = std::env::var("LARRIER_COMMIT").ok().filter(|c| !c.is_empty()).unwrap_or_else(|| {
+        let hash = git(&["rev-parse", "--short=9", "HEAD"]).unwrap_or_else(|| "unknown".into());
+        let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some();
+        if dirty { format!("{hash}+dirty") } else { hash }
+    });
+    let date = std::env::var("LARRIER_COMMIT_DATE").ok().filter(|c| !c.is_empty()).or_else(|| git(&["log", "-1", "--format=%cs"])).unwrap_or_default();
+    (commit, date)
 }
 
 /// An .ico holding the mark at each size, as 32-bit bitmaps.

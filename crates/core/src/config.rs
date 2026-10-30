@@ -161,6 +161,12 @@ pub struct Settings {
     /// Look for a newer release on GitHub (installed copies of Larrier).
     #[serde(default = "yes")]
     pub auto_update: bool,
+    /// Which releases to update to.
+    #[serde(default)]
+    pub update_channel: UpdateChannel,
+    /// The version that last ran, to say what's new after an update.
+    #[serde(default)]
+    pub last_version: Option<String>,
 
     // ---- appearance
     /// Accent color (`#rrggbb`); empty = theme default.
@@ -320,6 +326,8 @@ impl Default for Settings {
             project_order: Vec::new(),
             notify_on_finish: true,
             auto_update: true,
+            update_channel: UpdateChannel::Stable,
+            last_version: None,
             accent: String::new(),
             ui_font: None,
             mono_font: None,
@@ -349,6 +357,17 @@ pub enum Theme {
     System,
     Light,
     Dark,
+}
+
+/// Which releases Larrier updates to.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateChannel {
+    /// Releases only.
+    #[default]
+    Stable,
+    /// Previews (`-beta.N`, `-rc.N`) too, as soon as they're out.
+    Preview,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]

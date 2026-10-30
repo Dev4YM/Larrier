@@ -793,9 +793,15 @@ fn Shortcuts() -> Element {
 
 #[component]
 fn About() -> Element {
-    let app = use_app();
+    let mut app = use_app();
     let kind = crate::install::current();
     let auto = app.config.read().settings.auto_update;
+    let channel = app.config.read().settings.update_channel;
+    let built = match (crate::version::COMMIT, crate::version::COMMIT_DATE) {
+        ("" | "unknown", _) => None,
+        (c, "") => Some(format!("Commit {c}")),
+        (c, d) => Some(format!("Commit {c} · {d}")),
+    };
     let upd = app.update.read().clone();
     let (where_t, where_d) = match kind {
         crate::install::Kind::Installed(crate::install::Scope::Machine) => ("Installed for everyone", crate::install::layout(crate::install::Scope::Machine).bin_dir.display().to_string()),
@@ -808,7 +814,7 @@ fn About() -> Element {
     let status = match &upd {
         crate::state::UpdateState::Idle => "Updates come from Larrier's releases on GitHub.".to_string(),
         crate::state::UpdateState::Checking => "Checking…".to_string(),
-        crate::state::UpdateState::UpToDate => format!("Larrier {} is the newest release.", larrier_core::APP_VERSION),
+        crate::state::UpdateState::UpToDate => format!("Larrier {} is the newest {}.", crate::version::VERSION, if channel == larrier_core::UpdateChannel::Preview { "release or preview" } else { "release" }),
         crate::state::UpdateState::Available(r) => format!("Larrier {} is available.", r.version),
         crate::state::UpdateState::Downloading { version, got, total } => {
             let pct = if *total > 0 { got * 100 / total } else { 0 };
@@ -821,7 +827,15 @@ fn About() -> Element {
         h1 { "Larrier" }
         div { class: "sub", "One window for every coding agent and AI chat." }
         div { class: "set-card",
-            Row { title: "Version".to_string(), span { class: "code-inline", "{larrier_core::APP_VERSION}" } }
+            Row { title: "Version".to_string(), desc: built,
+                div { class: "row", style: "gap: 8px;",
+                    span { class: "code-inline", "{crate::version::VERSION}" }
+                    if crate::version::is_prerelease() { span { class: "status-pill", "Preview" } }
+                    if crate::version::notes(crate::version::VERSION).is_some() {
+                        button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = Some(crate::state::Modal::WhatsNew(crate::version::VERSION.to_string(), false)), "Release notes" }
+                    }
+                }
+            }
             Row { title: where_t.to_string(), desc: Some(where_d) }
             Row { title: "Updates".to_string(), desc: Some(status),
                 match &upd {
@@ -845,6 +859,16 @@ fn About() -> Element {
                 }
             }
             if can_update {
+                Row { title: "Update channel".to_string(), desc: Some("Stable gets releases. Preview also gets previews of the next release as soon as they're out.".to_string()),
+                    super::Select { value: if channel == larrier_core::UpdateChannel::Preview { "preview".to_string() } else { "stable".to_string() },
+                        options: vec![("stable".to_string(), "Stable".to_string()), ("preview".to_string(), "Preview".to_string())],
+                        onchange: move |v: String| {
+                            let c = if v == "preview" { larrier_core::UpdateChannel::Preview } else { larrier_core::UpdateChannel::Stable };
+                            app.update_config(|cfg| cfg.settings.update_channel = c);
+                            app.check_updates(false);
+                        },
+                    }
+                }
                 Row { title: "Check automatically".to_string(), desc: Some("Look for a new release when Larrier starts, then twice a day.".to_string()),
                     super::Toggle { on: auto, onchange: move |v: bool| app.update_config(|c| c.settings.auto_update = v) }
                 }

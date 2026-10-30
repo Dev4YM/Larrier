@@ -4,6 +4,10 @@
 //! and on restart the new program takes the old one's place. No source
 //! code is involved.
 //!
+//! The Stable channel follows the latest release; Preview also takes
+//! pre-releases (`0.3.0-beta.2`). Versions compare as Semantic Versions
+//! (see `crate::version`).
+//!
 //! The repository is `Dev4YM/Larrier` (`LARRIER_UPDATE_REPO` overrides it,
 //! `LARRIER_UPDATE_API` points at another API root, e.g. for tests). A
 //! private repository needs a token: `LARRIER_GITHUB_TOKEN`, `GITHUB_TOKEN`
@@ -15,6 +19,8 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+use larrier_core::UpdateChannel;
 
 use crate::install::{self, Kind, Scope};
 
@@ -74,21 +80,7 @@ fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder().user_agent(concat!("Larrier/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(15)).build()?)
 }
 
-/// `a` is a newer version than `b` (numeric dot parts, `v` prefix and
-/// pre-release suffixes ignored).
-pub fn newer(a: &str, b: &str) -> bool {
-    let parts = |v: &str| -> Vec<u64> {
-        v.trim().trim_start_matches(['v', 'V']).split(['-', '+']).next().unwrap_or("").split('.').map(|p| p.parse().unwrap_or(0)).collect()
-    };
-    let (a, b) = (parts(a), parts(b));
-    for i in 0..a.len().max(b.len()) {
-        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
-        if x != y {
-            return x > y;
-        }
-    }
-    false
-}
+pub use crate::version::newer;
 
 /// Pick this platform's program (and its checksum) out of a release.
 pub fn parse_release(v: &Value) -> Option<Release> {
@@ -111,10 +103,8 @@ pub fn parse_release(v: &Value) -> Option<Release> {
     })
 }
 
-/// The newest release, when it is newer than this Larrier and has a program
-/// for this platform.
-pub async fn check() -> Result<Option<Release>> {
-    let url = format!("{}/repos/{}/releases/latest", api_root().trim_end_matches('/'), repo());
+async fn get_json(path: &str) -> Result<Value> {
+    let url = format!("{}/repos/{}/{path}", api_root().trim_end_matches('/'), repo());
     let mut req = client()?.get(&url).header("Accept", "application/vnd.github+json");
     if let Some(t) = token() {
         req = req.bearer_auth(t);
@@ -125,9 +115,34 @@ pub async fn check() -> Result<Option<Release>> {
         404 => bail!("No releases found for {} (a private repository needs a GitHub token)", repo()),
         s => bail!("GitHub answered {s}"),
     }
-    let v: Value = resp.json().await.context("reading the release")?;
-    let rel = parse_release(&v).ok_or_else(|| anyhow!("The latest release has no program for this computer"))?;
-    Ok(newer(&rel.version, larrier_core::APP_VERSION).then_some(rel))
+    resp.json().await.context("reading the releases")
+}
+
+/// The newest release on `channel`, when it is newer than this Larrier and
+/// has a program for this platform.
+pub async fn check(channel: UpdateChannel) -> Result<Option<Release>> {
+    let rel = match channel {
+        UpdateChannel::Stable => {
+            let v = get_json("releases/latest").await?;
+            parse_release(&v).ok_or_else(|| anyhow!("The latest release has no program for this computer"))?
+        }
+        UpdateChannel::Preview => {
+            let list = get_json("releases?per_page=30").await?;
+            newest(list.as_array().map(|a| a.as_slice()).unwrap_or(&[])).ok_or_else(|| anyhow!("No release has a program for this computer"))?
+        }
+    };
+    Ok(newer(&rel.version, crate::version::VERSION).then_some(rel))
+}
+
+/// The newest published release (previews included) with a program for
+/// this platform.
+pub fn newest(list: &[Value]) -> Option<Release> {
+    list.iter()
+        .filter(|r| !r["draft"].as_bool().unwrap_or(false))
+        .filter_map(parse_release)
+        .filter_map(|r| crate::version::Version::parse(&r.version).map(|v| (v, r)))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, r)| r)
 }
 
 /// Where downloaded updates wait.
@@ -258,13 +273,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compares_versions() {
-        assert!(newer("0.2.0", "0.1.0"));
-        assert!(newer("v1.0.0", "0.9.9"));
-        assert!(newer("0.10.0", "0.9.0"));
-        assert!(!newer("0.1.0", "0.1.0"));
-        assert!(!newer("0.1.0-beta", "0.1.0"));
-        assert!(!newer("0.0.9", "0.1.0"));
+    fn preview_channel_takes_the_newest_release() {
+        let rel = |tag: &str, draft: bool| {
+            let v = tag.trim_start_matches('v');
+            serde_json::json!({ "tag_name": tag, "draft": draft, "html_url": "", "body": "",
+                "assets": [{ "name": format!("Larrier-{v}-windows-x64.exe"), "url": "a", "browser_download_url": "b", "size": 1 }] })
+        };
+        let list = vec![rel("v0.2.0", false), rel("v0.3.0-beta.2", false), rel("v0.3.0-beta.10", false), rel("v0.4.0", true), rel("v0.2.1", false)];
+        if asset_suffix() == Some("-windows-x64.exe") {
+            assert_eq!(newest(&list).unwrap().version, "0.3.0-beta.10");
+        }
     }
 
     #[test]

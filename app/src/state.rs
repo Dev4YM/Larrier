@@ -135,6 +135,8 @@ pub enum Modal {
     Export(String),
     AddAccount(AgentKind),
     AddWorkspace,
+    /// A release's notes; `true` when Larrier was just updated to it.
+    WhatsNew(String, bool),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -1291,8 +1293,9 @@ impl App {
         if !quiet {
             self.update.set(UpdateState::Checking);
         }
+        let channel = self.config.peek().settings.update_channel;
         spawn_forever(async move {
-            let next = match crate::update::check().await {
+            let next = match crate::update::check(channel).await {
                 Ok(Some(rel)) => UpdateState::Available(rel),
                 Ok(None) => UpdateState::UpToDate,
                 Err(_) if quiet => UpdateState::Idle,

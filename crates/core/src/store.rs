@@ -111,14 +111,16 @@ impl Store {
 
     pub fn load_config(&self) -> Config {
         let p = self.root.join("config.json");
-        match std::fs::read_to_string(&p) {
+        let mut cfg = match std::fs::read_to_string(&p) {
             Ok(t) => serde_json::from_str(&t).unwrap_or_else(|e| {
                 tracing::error!("config.json is invalid ({e}); using defaults");
                 let _ = std::fs::copy(&p, self.root.join("config.invalid.json"));
                 Config::default()
             }),
             Err(_) => Config::default(),
-        }
+        };
+        cfg.migrate();
+        cfg
     }
 
     pub fn save_config(&self, cfg: &Config) -> Result<()> {

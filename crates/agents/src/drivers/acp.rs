@@ -28,6 +28,14 @@ use crate::request::TurnRequest;
 
 pub const PROTOCOL_VERSION: u64 = 1;
 
+/// The chat picked the agent's "approve everything" option (OpenCode's
+/// Auto-approve, Hermes's YOLO, Claude Code's Bypass permissions), which
+/// over ACP means answering each ask with yes.
+fn approves_all(req: &TurnRequest) -> bool {
+    let spec = req.agent.spec();
+    req.modes.ids.iter().enumerate().any(|(i, id)| spec.mode_groups.get(i).and_then(|g| g.find(id)).is_some_and(|o| o.autonomy == [RunMode::FullAuto]))
+}
+
 pub async fn run(req: TurnRequest, sink: EventSink, control: mpsc::UnboundedReceiver<TurnCommand>) {
     if req.launch.is_empty() {
         sink.error(format!("No ACP command is configured for {}", req.agent.display_name()));
@@ -425,7 +433,7 @@ impl Acp {
             self.respond(id, json!({ "outcome": { "outcome": "cancelled" } }));
             return;
         }
-        if self.req.run_mode == RunMode::FullAuto {
+        if self.req.run_mode == RunMode::FullAuto || approves_all(&self.req) {
             let pick = options
                 .iter()
                 .find(|o| o.kind == "allow_once")
@@ -457,7 +465,14 @@ impl Acp {
             .or_else(|| {
                 tc["locations"].as_array().and_then(|l| l.first()).and_then(|l| s(l, "path")).map(|p| p.to_string())
             });
-        let title = s(tc, "title").filter(|t| !t.is_empty()).map(|t| format!("Allow: {}", t.trim_matches('`'))).unwrap_or_else(|| "The agent is asking for permission".into());
+        // What it wants to do, as the card's header asks it ("Hermes wants
+        // to change files" / "Edit a.txt"); Hermes words edits "Approve edit: a.txt".
+        let title = s(tc, "title")
+            .map(|t| t.trim().trim_matches('`').trim().to_string())
+            .filter(|t| !t.is_empty())
+            .map(|t| t.strip_prefix("Approve edit: ").map(|p| format!("Edit {p}")).unwrap_or(t))
+            .unwrap_or_else(|| "The agent is asking for permission".into());
+        let detail = detail.filter(|d| d.trim() != title && !title.ends_with(d.trim()));
         let request_id = format!("acp-{}", id);
         self.permission = Some(PendingPermission { rpc_id: id, request_id: request_id.clone() });
         self.sink.send(AgentEvent::Permission { request: PermissionRequest { id: request_id, title, tool_call_id, detail, options, ..Default::default() } });

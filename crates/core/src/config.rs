@@ -30,10 +30,20 @@ fn config_version() -> u32 {
     1
 }
 
+/// The config format this build writes (see `Config::migrate`).
+pub const CONFIG_VERSION: u32 = 2;
+
+/// Agents whose own headless runners refuse whatever needs asking, while
+/// over the Agent Client Protocol the asks reach the user: they connect
+/// over ACP unless the user picks Native.
+pub fn acp_by_default(kind: &AgentKind) -> bool {
+    matches!(kind, AgentKind::OpenCode | AgentKind::Hermes)
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
-            version: 1,
+            version: CONFIG_VERSION,
             settings: Settings::default(),
             agents: Vec::new(),
             accounts: Vec::new(),
@@ -46,6 +56,17 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Bring a config written by an older Larrier up to date.
+    pub fn migrate(&mut self) {
+        if self.version < 2 {
+            // 2: OpenCode and Hermes connect over ACP, where they can ask.
+            for a in self.agents.iter_mut().filter(|a| acp_by_default(&a.kind)) {
+                a.prefer_acp = true;
+            }
+        }
+        self.version = self.version.max(CONFIG_VERSION);
+    }
+
     pub fn agent(&self, kind: &AgentKind) -> AgentConfig {
         self.agents.iter().find(|a| &a.kind == kind).cloned().unwrap_or_else(|| AgentConfig::new(kind.clone()))
     }
@@ -558,6 +579,7 @@ pub struct AgentConfig {
 
 impl AgentConfig {
     pub fn new(kind: AgentKind) -> Self {
+        let acp = acp_by_default(&kind);
         AgentConfig {
             kind,
             enabled: true,
@@ -567,7 +589,7 @@ impl AgentConfig {
             default_model: None,
             default_mode: None,
             default_permission: None,
-            prefer_acp: false,
+            prefer_acp: acp,
             extra_models: Vec::new(),
             import: true,
             default_effort: None,
@@ -830,4 +852,22 @@ pub struct CustomAgent {
     pub protocol: Protocol,
     #[serde(default)]
     pub models: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// OpenCode and Hermes move to ACP once; a Native picked later stays.
+    #[test]
+    fn migrates_to_acp_once() {
+        let mut old: Config = serde_json::from_str(r#"{"version": 1, "agents": [{"kind": "opencode", "prefer_acp": false}, {"kind": "claude-code", "prefer_acp": false}]}"#).unwrap();
+        old.migrate();
+        assert_eq!((old.version, old.agent(&AgentKind::OpenCode).prefer_acp, old.agent(&AgentKind::ClaudeCode).prefer_acp), (CONFIG_VERSION, true, false));
+        old.agent_mut(&AgentKind::OpenCode).prefer_acp = false;
+        let mut again: Config = serde_json::from_str(&serde_json::to_string(&old).unwrap()).unwrap();
+        again.migrate();
+        assert!(!again.agent(&AgentKind::OpenCode).prefer_acp, "the user's Native is kept");
+        assert!(Config::default().agent(&AgentKind::Hermes).prefer_acp, "new configs start on ACP");
+    }
 }

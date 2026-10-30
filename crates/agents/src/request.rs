@@ -537,8 +537,17 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         _ => (resolve_launch(cfg, agent, session.account_id.as_deref())?, None),
     };
     // Effort and the user's own endpoint ride in front of their extra
-    // arguments; the endpoint's key goes in the environment.
+    // arguments; the endpoint's key goes in the environment (which also
+    // reaches an agent over ACP, as OpenCode's endpoint config does).
     let mut model = model;
+    if protocol == Protocol::Acp && !matches!(agent, AgentKind::Custom(_)) {
+        if let Ok(ml) = model_launch(agent, &ac, model.as_deref(), None) {
+            if ml.model.is_some() {
+                model = ml.model;
+            }
+            launch.env.extend(ml.env);
+        }
+    }
     if !matches!(protocol, Protocol::HttpChat | Protocol::Acp) {
         let ml = model_launch(agent, &ac, model.as_deref(), effort.as_deref())?;
         if ml.model.is_some() {

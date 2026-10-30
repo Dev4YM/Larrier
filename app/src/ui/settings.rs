@@ -295,6 +295,7 @@ fn Agents() -> Element {
                     let model_now = crate::agent_models::short_name(&app, &k2, ac.default_model.as_deref().unwrap_or(app.agent_models(&k2).and_then(|n| n.default_model).as_deref().unwrap_or("auto")));
                     let live_note = match spec.kind {
                         AgentKind::ClaudeCode => "Its own protocol: live approvals, questions, plans and steering.",
+                        AgentKind::Codex => "Its app server: live approvals, questions, plans and steering.",
                         _ => "Its own headless mode: what it would ask about is refused, and Larrier says so.",
                     };
                     rsx! {

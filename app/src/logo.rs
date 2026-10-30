@@ -1,5 +1,5 @@
-//! The Larrier mark: a stencil "L", one letter split by a 45° cut at its
-//! corner. It comes in two tiles: ink (dark theme, app icon) and paper
+//! The Larrier mark: an "L" whose stem is a dry brush stroke and whose
+//! foot is a crisp slab, split by a 45° cut at the corner. It comes in two tiles: ink (dark theme, app icon) and paper
 //! (light theme).
 //!
 //! The SVGs in `assets/brand/` are the source of truth; [`mark_rgba`] draws

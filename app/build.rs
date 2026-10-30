@@ -9,6 +9,7 @@ mod mark {
 
 fn main() {
     println!("cargo:rerun-if-changed=src/mark_raster.rs");
+    println!("cargo:rerun-if-changed=src/mark_geometry.rs");
     let (commit, date) = build_info();
     println!("cargo:rustc-env=LARRIER_COMMIT={commit}");
     println!("cargo:rustc-env=LARRIER_COMMIT_DATE={date}");

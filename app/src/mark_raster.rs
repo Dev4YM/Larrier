@@ -42,11 +42,12 @@ fn rounded_off(x: f32, y: f32, c: (f32, f32), sx: f32, sy: f32) -> bool {
     (x - c.0) * sx > 0.0 && (y - c.1) * sy > 0.0 && (x - c.0).powi(2) + (y - c.1).powi(2) > 9.0
 }
 
-/// The two pieces of the stencil L (see the SVG paths).
+include!("mark_geometry.rs");
+
+/// The two pieces of the L: a brush stroke cut at 45° and a crisp foot (see
+/// the SVG paths).
 fn letter(x: f32, y: f32) -> bool {
-    let stem = in_polygon(x, y, &[(18.0, 13.0), (32.0, 13.0), (32.0, 35.2), (22.6, 44.6), (18.0, 40.0)])
-        && !rounded_off(x, y, (21.0, 16.0), -1.0, -1.0)
-        && !rounded_off(x, y, (29.0, 16.0), 1.0, -1.0);
+    let stem = (in_polygon(x, y, STEM) || HAIRS.iter().any(|h| in_polygon(x, y, h))) && !GAPS.iter().any(|g| in_polygon(x, y, g));
     let foot = in_polygon(x, y, &[(26.8, 48.8), (36.2, 39.4), (50.0, 39.4), (50.0, 51.0), (25.0, 51.0)])
         && !rounded_off(x, y, (47.0, 42.4), 1.0, -1.0)
         && !rounded_off(x, y, (47.0, 48.0), 1.0, 1.0);

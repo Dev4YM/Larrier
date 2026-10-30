@@ -1527,3 +1527,21 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .menu-item.send-way { height: auto; min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
 .send-way .sw-t { display: flex; flex-direction: column; min-width: 0; }
 .send-way .sw-t .sub { font-size: 11px; color: var(--fg-3); }
+
+/* A sent prompt edited in place: the same card, now editable. */
+.user-card.editing { max-height: none; cursor: text; border-color: color-mix(in srgb, var(--accent-c, var(--blue)) 45%, var(--border)); background: var(--card-2); }
+.user-card.editing::after { display: none; }
+.user-card.editing .edit-input { display: block; padding: 0 !important; min-height: 22px; max-height: min(40vh, 320px); font: inherit; color: var(--fg); }
+.user-card.editing .msg-images { margin: 0 0 8px; }
+.edit-thumb { position: relative; display: inline-flex; }
+.edit-thumb .x, .user-card.editing .attach-chip .x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 9px; background: var(--fg); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .12s; }
+.edit-thumb:hover .x { opacity: 1; }
+.user-card.editing .attach-chip { position: relative; }
+.user-card.editing .attach-chip .x { position: static; width: 16px; height: 16px; margin-left: 2px; background: none; color: var(--fg-3); opacity: 1; }
+.user-card.editing .attach-chip .x:hover { color: var(--fg); background: var(--hover); }
+.edit-foot { display: flex; align-items: center; gap: 6px; margin: 8px -6px -4px 0; }
+.edit-foot .grow { flex: 1; }
+.edit-foot .edit-hint { padding-left: 0; }
+
+/* Prompt thumbnails show the whole image, not a cropped square. */
+.user-card .msg-images img { width: auto; max-width: 168px; height: 56px; object-fit: contain; background: var(--card); }

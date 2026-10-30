@@ -579,14 +579,29 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
             format!("{} · {}", s.agent.display_name(), m)
         });
         let resend = move |sid: &str, mid: &str| {
-            let t = app.editing.peek().draft.clone();
+            let (t, a) = {
+                let e = app.editing.peek();
+                (e.draft.clone(), e.attachments.clone())
+            };
             app.set_edit(None);
-            app.edit_and_resend(sid, mid, t);
+            app.edit_and_resend(sid, mid, t, a);
         };
+        // The card itself turns editable: its images and files stay in it
+        // (removable), the text becomes a text box in place.
         return rsx! {
             div { class: if confirm { "user-msg editing confirming" } else { "user-msg editing" }, id: "m-{msg.id}",
                 onclick: move |e| e.stop_propagation(),
-                div { class: "composer tall edit-box",
+                div { class: "user-card editing", dir: "auto",
+                    if st.attachments.iter().any(|a| matches!(a, Part::Image { .. })) {
+                        div { class: "msg-images",
+                            for (i, a) in st.attachments.iter().enumerate().filter(|(_, a)| matches!(a, Part::Image { .. })) {
+                                div { key: "{i}", class: "edit-thumb",
+                                    if let Some(src) = crate::state::image_src(a) { img { src: "{src}" } } else { Icon { i: I::Image, size: 18 } }
+                                    button { class: "x", title: "Remove", onclick: move |_| { app.editing.write().attachments.remove(i); }, Icon { i: I::X, size: 11 } }
+                                }
+                            }
+                        }
+                    }
                     textarea {
                         id: "edit-{msg.id}",
                         class: "edit-input",
@@ -608,6 +623,19 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                             }
                         },
                     }
+                    if st.attachments.iter().any(|a| matches!(a, Part::File { .. })) {
+                        div { class: "attach-row",
+                            for (i, a) in st.attachments.iter().enumerate() {
+                                if let Part::File { path, text, .. } = a {
+                                    span { key: "{i}", class: "attach-chip", title: "{path}",
+                                        Icon { i: if text.is_some() { I::Lines } else { I::Paperclip }, size: 11 }
+                                        span { class: "ellipsis", if text.is_some() { "{path}" } else { "{short_path(path)}" } }
+                                        button { class: "x", title: "Remove", onclick: move |_| { app.editing.write().attachments.remove(i); }, Icon { i: I::X, size: 10 } }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if confirm {
                         div { class: "edit-confirm",
                             Icon { i: I::Alert, size: 14 }
@@ -628,8 +656,8 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                             }
                         }
                     } else {
-                        div { class: "composer-row", style: "padding-top: 0;",
-                            span { class: "faint edit-hint", "Resend from here — the replies after it are replaced · Esc to cancel" }
+                        div { class: "edit-foot",
+                            span { class: "faint edit-hint", "Resend from here: the replies after it are replaced · Esc cancels" }
                             div { class: "grow" }
                             if let Some(l) = agent_label { span { class: "picker", style: "cursor: default;", span { class: "lb sub", "{l}" } } }
                             button { class: "ghost-btn", style: "border: none;", onclick: move |_| app.request_edit(None), "Cancel" }
@@ -647,6 +675,8 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
         };
     }
     let mid_c = msg.id.clone();
+    // The prompt's images and files, edited with it.
+    let atts_e: Vec<Part> = msg.parts.iter().filter(|p| matches!(p, Part::Image { .. } | Part::File { .. })).cloned().collect();
     // At most a few lines tall until double-clicked; longer prompts fade out.
     let mut card_class = String::from("user-card");
     if expanded() {
@@ -665,7 +695,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                 title: "Click to edit · double-click to expand",
                 onclick: move |e| {
                     e.stop_propagation();
-                    app.request_edit(Some((mid_c.clone(), text2.clone())));
+                    app.request_edit(Some((mid_c.clone(), text2.clone(), atts_e.clone())));
                 },
                 ondoubleclick: move |e| { e.stop_propagation(); expanded.toggle(); },
                 // Images first, as small thumbnails (click to view), like Cursor.

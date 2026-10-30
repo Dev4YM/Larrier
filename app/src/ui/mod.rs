@@ -140,7 +140,10 @@ pub fn Root() -> Element {
             // Paste images / files / long text into the composer.
             document.addEventListener('paste', (e) => {
               const t = e.target;
-              if (!t || !t.closest || !t.closest('.composer')) return;
+              if (!t || !t.closest) return;
+              // Into the composer, or into a sent prompt being edited.
+              const edit = !!t.closest('.user-msg.editing');
+              if (!edit && !t.closest('.composer')) return;
               const cd = e.clipboardData; if (!cd) return;
               const files = [...cd.items].filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
               if (files.length) {
@@ -148,7 +151,7 @@ pub fn Root() -> Element {
                 for (const f of files) {
                   if (f.size > 25 * 1024 * 1024) continue;
                   const r = new FileReader();
-                  r.onload = () => dioxus.send({ t: 'paste-file', name: f.name || 'pasted', data: r.result });
+                  r.onload = () => dioxus.send({ t: 'paste-file', name: f.name || 'pasted', data: r.result, edit });
                   r.readAsDataURL(f);
                 }
                 return;
@@ -597,6 +600,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
             let data = v["data"].as_str().unwrap_or("");
             let name = v["name"].as_str().unwrap_or("pasted");
             match crate::state::save_data_url(data, name) {
+                Ok(part) if v["edit"].as_bool() == Some(true) && app.editing.peek().msg.is_some() => app.editing.write().attachments.push(part),
                 Ok(part) => app.ui.write().attach_inbox.push(part),
                 Err(e) => app.toast_err(format!("Could not attach: {e}")),
             }

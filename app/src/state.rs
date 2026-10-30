@@ -243,14 +243,20 @@ pub struct EditState {
     pub msg: Option<String>,
     pub original: String,
     pub draft: String,
-    /// A switch waiting for "Discard": the prompt to edit next (id, text),
-    /// or `None` to just stop editing.
-    pub confirm: Option<Option<(String, String)>>,
+    /// The prompt's images and files, as they will be resent.
+    pub attachments: Vec<Part>,
+    pub original_attachments: Vec<Part>,
+    /// A switch waiting for "Discard": the prompt to edit next, or `None`
+    /// to just stop editing.
+    pub confirm: Option<Option<EditTarget>>,
 }
+
+/// A prompt to edit: its id, text and attachments.
+pub type EditTarget = (String, String, Vec<Part>);
 
 impl EditState {
     pub fn dirty(&self) -> bool {
-        self.msg.is_some() && self.draft.trim() != self.original.trim()
+        self.msg.is_some() && (self.draft.trim() != self.original.trim() || self.attachments != self.original_attachments)
     }
 }
 
@@ -696,10 +702,10 @@ impl App {
 
     /// Edit a prompt (`Some((id, text))`) or stop editing (`None`). When the
     /// open edit has unsaved changes this asks first instead.
-    pub fn request_edit(mut self, target: Option<(String, String)>) {
+    pub fn request_edit(mut self, target: Option<EditTarget>) {
         let st = self.editing.peek().clone();
         let same = match (&st.msg, &target) {
-            (Some(a), Some((b, _))) => a == b,
+            (Some(a), Some((b, _, _))) => a == b,
             (None, None) => true,
             _ => false,
         };
@@ -715,9 +721,9 @@ impl App {
     }
 
     /// Switch editing without asking.
-    pub fn set_edit(mut self, target: Option<(String, String)>) {
+    pub fn set_edit(mut self, target: Option<EditTarget>) {
         self.editing.set(match target {
-            Some((id, text)) => EditState { msg: Some(id), original: text.clone(), draft: text, confirm: None },
+            Some((id, text, atts)) => EditState { msg: Some(id), original: text.clone(), draft: text, attachments: atts.clone(), original_attachments: atts, confirm: None },
             None => EditState::default(),
         });
     }
@@ -1734,8 +1740,8 @@ impl App {
     /// replaced by the new one, and the agent's own session follows as far
     /// as the agent allows ([`larrier_formats::Rewind`]). Where it can't, the
     /// reply says so.
-    pub fn edit_and_resend(self, session_id: &str, message_id: &str, text: String) {
-        if text.trim().is_empty() || !self.ensure_loaded(session_id) {
+    pub fn edit_and_resend(self, session_id: &str, message_id: &str, text: String, attachments: Vec<Part>) {
+        if (text.trim().is_empty() && attachments.is_empty()) || !self.ensure_loaded(session_id) {
             return;
         }
         if self.is_running(session_id) {
@@ -1744,13 +1750,11 @@ impl App {
         let cfg = self.config.read().clone();
         let found = self.peek_session(session_id, |s| {
             let idx = s.messages.iter().position(|m| m.id == message_id)?;
-            // The prompt's images and files go with the new text.
-            let attachments: Vec<Part> = s.messages[idx].parts.iter().filter(|p| matches!(p, Part::Image { .. } | Part::File { .. })).cloned().collect();
             let home = account_home(&cfg, &s.agent, s.account_id.as_deref());
             let old_link = s.native_link(&s.agent).map(|l| l.id.clone());
-            Some((idx, attachments, larrier_formats::rewind(s, idx, home.as_deref()), s.agent.clone(), old_link))
+            Some((idx, larrier_formats::rewind(s, idx, home.as_deref()), s.agent.clone(), old_link))
         });
-        let Some(Some((idx, attachments, rewind, agent, old_link))) = found else { return };
+        let Some(Some((idx, rewind, agent, old_link))) = found else { return };
         let name = agent.display_name();
         let notice = match &rewind {
             larrier_formats::Rewind::ResumeAt(_) | larrier_formats::Rewind::Fresh => None,

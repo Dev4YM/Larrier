@@ -1172,12 +1172,30 @@ fn ExploreGroup(tools: Vec<ToolCall>) -> Element {
 fn skipped_label(tool: &ToolCall) -> Option<&'static str> {
     (tool.status == ToolStatus::Cancelled).then(|| {
         let out = tool.output.as_deref().unwrap_or("").to_ascii_lowercase();
-        if out.contains("reject") || out.contains("denied") || out.contains("declined") {
+        if out.contains("block") {
+            "Blocked"
+        } else if out.contains("reject") || out.contains("denied") || out.contains("declined") {
             "Rejected"
         } else {
             "Stopped"
         }
     })
+}
+
+/// What a call meant to do, for one that never ran ("Blocked edit a.rs").
+fn intent(t: &ToolCall) -> &'static str {
+    match t.kind {
+        ToolKind::Read => "read",
+        ToolKind::Edit => "edit",
+        ToolKind::Write => "write",
+        ToolKind::Delete => "delete",
+        ToolKind::Move => "move",
+        ToolKind::Search => "search",
+        ToolKind::Shell => "run",
+        ToolKind::Fetch => "fetch",
+        ToolKind::WebSearch => "search the web for",
+        _ => "use",
+    }
 }
 
 #[component]
@@ -1193,13 +1211,17 @@ fn Step(tool: ToolCall) -> Element {
     let input = if show_input { clip(serde_json::to_string_pretty(&tool.input).unwrap_or_default(), 6_000) } else { String::new() };
     let dur = tool.duration_ms.filter(|d| *d >= 1000).map(|d| format!("{}s", (d + 500) / 1000));
     let skipped = skipped_label(&tool);
+    // A call that never ran says so first ("Blocked edit a.rs"), not "Edited".
+    let (verb, target) = match skipped {
+        Some(label) => (label, format!("{} {target}", intent(&tool)).trim().to_string()),
+        None => (verb, target),
+    };
     rsx! {
         div {
             class: if is_running(&tool) { "step running" } else if failed { "step failed" } else if skipped.is_some() { "step skipped" } else { "step" },
             onclick: move |_| if expandable { open.toggle() },
             span { class: "verb", "{verb}" }
             span { class: "target", "{target}" }
-            if let Some(label) = skipped { span { class: "skip-tag", "{label}" } }
             if let Some(d) = dur { span { class: "dur", "{d}" } }
             if expandable {
                 span { class: "chev", if open() { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }

@@ -702,7 +702,8 @@ select.input { cursor: pointer; padding-right: 4px; }
 .home .composer-wrap { padding: 0; }
 
 /* global context menu */
-.ctx-menu { position: fixed; z-index: 400; min-width: 220px; }
+/* Right-click menus open over everything: dialogs, the image viewer. */
+.ctx-menu { position: fixed; z-index: 1500; min-width: 220px; }
 
 /* home centering */
 .home { justify-content: stretch; }
@@ -1014,7 +1015,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .side-top:has(.back-row) { padding: 0 8px; }
 
 /* Menus opened at the pointer start hidden until placed inside the window. */
-.menu.ctx-menu, #ctx-menu { position: fixed; z-index: 400; }
+.menu.ctx-menu, #ctx-menu { position: fixed; z-index: 1500; }
 
 /* Model picker rows: name, note, then context and price on the right. */
 .mp-row { gap: 8px; }

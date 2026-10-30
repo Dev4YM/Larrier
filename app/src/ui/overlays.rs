@@ -234,7 +234,7 @@ pub fn TabMenu() -> Element {
     let (v1, v2, v3, v4, v5) = (c.view.clone(), c.view.clone(), c.view.clone(), c.view.clone(), c.view.clone());
     let (s1, s2, s3) = (session.clone().unwrap_or_default(), session.clone().unwrap_or_default(), session.clone().unwrap_or_default());
     rsx! {
-        div { class: "menu-backdrop", style: "z-index: 399;",
+        div { class: "menu-backdrop", style: "z-index: 1499;",
             onclick: move |_| app.ui.write().tab_ctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().tab_ctx = None; },
         }
@@ -641,7 +641,7 @@ pub fn GlobalMenu() -> Element {
     let dark = app.ui.read().dark;
 
     rsx! {
-        div { class: "menu-backdrop", style: "z-index: 399;",
+        div { class: "menu-backdrop", style: "z-index: 1499;",
             onclick: move |_| app.ui.write().gctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().gctx = None; },
         }

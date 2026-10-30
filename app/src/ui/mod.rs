@@ -205,6 +205,34 @@ pub fn Root() -> Element {
               document.addEventListener('transitionrun', () => { if (el) follow(500); }, true);
               document.addEventListener('animationstart', () => { if (el) follow(500); }, true);
             }
+            // The agents' browser in the Browser tab: clicks, scrolls and
+            // keys on its picture go to the page (scaled to its size).
+            if (!window.__larrierBrowser) {
+              window.__larrierBrowser = true;
+              const W = 1280, H = 800;
+              const at = (e) => { const el = document.getElementById('lb-screen'); const r = el.getBoundingClientRect(); return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height }; };
+              const mods = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+              const btn = (e) => ['left', 'middle', 'right'][e.button] || 'left';
+              const on = (e) => e.target && e.target.id === 'lb-screen';
+              let moved = 0;
+              document.addEventListener('mousedown', (e) => { if (!on(e)) return; e.preventDefault(); e.target.focus(); const p = at(e); dioxus.send({ t: 'browser', k: 'mouse', type: 'mousePressed', x: p.x, y: p.y, button: btn(e), clicks: e.detail || 1, mods: mods(e) }); }, true);
+              document.addEventListener('mouseup', (e) => { if (!on(e)) return; const p = at(e); dioxus.send({ t: 'browser', k: 'mouse', type: 'mouseReleased', x: p.x, y: p.y, button: btn(e), clicks: e.detail || 1, mods: mods(e) }); }, true);
+              document.addEventListener('mousemove', (e) => { if (!on(e)) return; const now = performance.now(); if (now - moved < 40) return; moved = now; const p = at(e); dioxus.send({ t: 'browser', k: 'mouse', type: 'mouseMoved', x: p.x, y: p.y, button: e.buttons & 1 ? 'left' : 'none', mods: mods(e) }); }, true);
+              document.addEventListener('wheel', (e) => { if (!on(e)) return; e.preventDefault(); const p = at(e); dioxus.send({ t: 'browser', k: 'wheel', x: p.x, y: p.y, dx: e.deltaX, dy: e.deltaY, mods: mods(e) }); }, { capture: true, passive: false });
+              document.addEventListener('contextmenu', (e) => { if (on(e)) e.preventDefault(); }, true);
+              const key = (e, type) => {
+                const text = type === 'keyDown' && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey ? e.key : (type === 'keyDown' && e.key === 'Enter' ? '\r' : '');
+                dioxus.send({ t: 'browser', k: 'key', type: type === 'keyDown' && !text ? 'rawKeyDown' : type, key: e.key, code: e.code, vk: e.keyCode, text, mods: mods(e) });
+              };
+              document.addEventListener('keydown', (e) => {
+                if (!on(e)) return;
+                // Paste goes in as text; everything else as keys.
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
+                e.preventDefault(); e.stopPropagation(); key(e, 'keyDown');
+              }, true);
+              document.addEventListener('keyup', (e) => { if (!on(e)) return; e.preventDefault(); e.stopPropagation(); key(e, 'keyUp'); }, true);
+              document.addEventListener('paste', (e) => { if (!on(e)) return; e.preventDefault(); const t = (e.clipboardData && e.clipboardData.getData('text/plain')) || ''; if (t) dioxus.send({ t: 'browser', k: 'text', text: t }); }, true);
+            }
             // Copy buttons of code blocks (in rendered Markdown): the text
             // goes to the system clipboard through the app.
             if (!window.__larrierCopy) {
@@ -799,6 +827,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
             }
         }
         Some("nav") => app.go(v["d"].as_i64().unwrap_or(0) as isize),
+        Some("browser") => crate::browser_view::send(crate::browser_view::Cmd::Input(v)),
         Some("drag") => app.drag.set(v["id"].as_str().map(|s| s.to_string())),
         // Projects dragged into a new order; ones not shown keep their place
         // after them.

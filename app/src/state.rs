@@ -1098,6 +1098,8 @@ impl App {
             let mut last_save = Instant::now();
             let mut last_row = Instant::now();
             let mut done = false;
+            // The agent used the browser this turn (the tab opened once).
+            let mut browsing = false;
             let Some(mut sig) = app.open.peek().get(&id).copied() else {
                 app.running.write().remove(&id);
                 crate::live::mark_idle(&id);
@@ -1128,6 +1130,12 @@ impl App {
                             _ => {}
                         }
                         match e {
+                            AgentEvent::ToolStart { tool } if !browsing && is_browser_tool(tool) => {
+                                browsing = true;
+                                if app.current_id().as_deref() == Some(id.as_str()) {
+                                    app.ui.write().open_panel(RightTab::Browser, false);
+                                }
+                            }
                             AgentEvent::Permission { request } => {
                                 idle = Some(false);
                                 app.permissions.write().entry(id.clone()).or_default().push(request.clone());
@@ -2144,6 +2152,13 @@ pub fn sanitize_filename(s: &str) -> String {
     } else {
         out.chars().take(80).collect()
     }
+}
+
+/// A call to Larrier's browser tools (`mcp__larrier_browser__navigate`,
+/// or an ACP agent's "larrier_browser: …").
+fn is_browser_tool(t: &larrier_core::ToolCall) -> bool {
+    let n = larrier_agents::browser::SERVER_NAME;
+    t.name.contains(n) || t.title.as_deref().is_some_and(|x| x.contains(n))
 }
 
 pub fn rand_id() -> u64 {

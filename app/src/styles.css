@@ -456,6 +456,13 @@ svg { flex-shrink: 0; display: block; }
 .url-input { flex: 1; height: 26px; border-radius: 6px; border: 1px solid transparent; background: var(--hover); padding: 0 10px; font-size: 12px; outline: none; user-select: text; }
 .url-input:focus { border-color: var(--border-2); background: var(--input); }
 .browser-frame { flex: 1; border: none; width: 100%; background: #fff; }
+/* The agents' browser, streamed: the page scaled to the panel's width. */
+.browser-stage { flex: 1; min-height: 0; overflow: auto; background: var(--bg-2, var(--hover)); }
+.browser-screen { display: block; width: 100%; height: auto; outline: none; cursor: default; user-select: none; -webkit-user-drag: none; background: #fff; }
+.browser-screen:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 45%, transparent); }
+.browser-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; color: var(--fg-3); }
+.browser-empty .t { color: var(--fg-2); font-weight: 500; }
+.browser-empty .d { max-width: 300px; font-size: 12px; line-height: 18px; }
 
 .term { flex: 1; overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 8px 12px; user-select: text; }
 .term .cmd-line { color: var(--fg); }

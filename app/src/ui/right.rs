@@ -569,39 +569,74 @@ pub fn DiffView(unified: String) -> Element {
 
 // ----------------------------------------------------------------- browser
 
+/// The agents' browser, live: what an agent does there shows here, and the
+/// user can click, scroll and type in it too.
 #[component]
 fn BrowserTab() -> Element {
-    let mut app = use_app();
-    let url = app.ui.read().browser_url.clone();
-    let mut input = use_signal(|| url.clone());
-    let mut reload = use_signal(|| 0u32);
-    let src = url.clone();
+    use crate::browser_view::{send, Cmd, FRAME, VIEW};
+    use_hook(|| send(Cmd::Show(true)));
+    use_drop(|| send(Cmd::Show(false)));
+    let view = VIEW();
+    let frame = FRAME();
+    let mut input = use_signal(|| view.url.clone());
+    let mut editing = use_signal(|| false);
+    // The address follows the page unless the user is typing one.
+    let shown_url = view.url.clone();
+    use_effect(use_reactive!(|shown_url| {
+        if !*editing.peek() {
+            input.set(if shown_url == "about:blank" { String::new() } else { shown_url });
+        }
+    }));
+    let has_frame = frame.as_deref().is_some_and(|f| !f.is_empty());
+    let (w, h) = larrier_agents::browser::VIEWPORT;
     rsx! {
         div { class: "browser-bar",
-            button { class: "icon-btn sm", title: "Back", onclick: move |_| { document::eval("history.back()"); }, Icon { i: I::ArrowLeft, size: 13 } }
-            button { class: "icon-btn sm", title: "Reload", onclick: move |_| reload += 1, Icon { i: I::Refresh, size: 13 } }
+            button { class: "icon-btn sm", title: "Back", disabled: !view.live, onclick: move |_| send(Cmd::Back), Icon { i: I::ArrowLeft, size: 13 } }
+            button { class: "icon-btn sm", title: "Forward", disabled: !view.live, onclick: move |_| send(Cmd::Forward), Icon { i: I::ArrowRight, size: 13 } }
+            button { class: "icon-btn sm", title: "Reload", disabled: !view.live, onclick: move |_| send(Cmd::Reload), Icon { i: I::Refresh, size: 13 } }
             input { class: "url-input",
+                placeholder: "Search or enter an address",
                 value: "{input}",
+                onfocus: move |_| {
+                    editing.set(true);
+                    // The whole address, ready to be replaced (as browsers do).
+                    document::eval("setTimeout(() => document.querySelector('.browser-bar .url-input')?.select(), 0)");
+                },
+                onblur: move |_| editing.set(false),
                 oninput: move |e| input.set(e.value()),
                 onkeydown: move |e| {
-                    if e.key() == Key::Enter {
-                        let mut u = input().trim().to_string();
-                        if !u.contains("://") {
-                            u = if u.starts_with("localhost") || u.starts_with("127.") { format!("http://{u}") } else { format!("https://{u}") };
-                        }
-                        input.set(u.clone());
-                        app.ui.write().browser_url = u;
+                    if e.key() == Key::Enter && !input().trim().is_empty() {
+                        send(Cmd::Navigate(input().trim().to_string()));
+                        editing.set(false);
                     }
                 },
             }
-            button { class: "icon-btn sm", title: "Open in your browser",
-                onclick: move |_| { let _ = open::that(app.ui.read().browser_url.clone()); },
+            button { class: "icon-btn sm", title: "Open in your browser", disabled: view.url.is_empty() || view.url == "about:blank",
+                onclick: move |_| { let _ = open::that(VIEW.peek().url.clone()); },
                 Icon { i: I::External, size: 13 }
             }
         }
-        {
-            let k = format!("{src}-{}", reload());
-            rsx! { iframe { key: "{k}", class: "browser-frame", src: "{src}" } }
+        div { class: "browser-stage",
+            if has_frame {
+                img { id: "lb-screen", class: "browser-screen", tabindex: "0", draggable: "false",
+                    style: "aspect-ratio: {w} / {h};",
+                    alt: "{view.title}",
+                    src: "data:image/jpeg;base64,{frame.clone().unwrap_or_default()}",
+                }
+            } else {
+                div { class: "browser-empty",
+                    Icon { i: I::Globe, size: 22 }
+                    if view.starting {
+                        div { class: "t", "Starting the browser…" }
+                    } else if let Some(e) = view.error.clone() {
+                        div { class: "t", "The browser couldn't start" }
+                        div { class: "d", "{e}" }
+                    } else {
+                        div { class: "t", "Larrier's browser" }
+                        div { class: "d", "Agents browse here with their browser tools, and you watch live. Type an address above to open a page; you can click and type in it too." }
+                    }
+                }
+            }
         }
     }
 }

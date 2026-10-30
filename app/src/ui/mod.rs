@@ -136,14 +136,23 @@ pub fn Root() -> Element {
               const PROPS = ['boxSizing','width','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','paddingTop','paddingRight','paddingBottom','paddingLeft',
                 'fontStyle','fontVariant','fontWeight','fontStretch','fontSize','lineHeight','fontFamily','textAlign','textTransform','textIndent','letterSpacing','wordSpacing','tabSize','direction'];
               let el = null, raf = 0, moved = 0;
+              // Where it was last drawn: it glides only along the same line,
+              // a short way, in a field that hasn't moved or changed size.
+              let last = null, snapNext = false, followUntil = 0;
               const motion = () => { const r = document.querySelector('.larrier-root'); return !!r && !r.classList.contains('no-motion'); };
               const eligible = (t) => !!t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && /^(text|search|url|email|)$/i.test(t.getAttribute('type') || ''))) && !t.closest('.xterm');
               const hide = () => { caret.style.visibility = 'hidden'; };
               const place = () => {
                 raf = 0;
-                if (!el || document.activeElement !== el || !motion()) { if (el) el.classList.remove('l-caret-on'); hide(); return; }
+                if (!el || document.activeElement !== el || !motion()) { if (el) el.classList.remove('l-caret-on'); hide(); last = null; return; }
                 el.classList.add('l-caret-on');
-                if (el.selectionStart !== el.selectionEnd) { hide(); return; }
+                if (el.selectionStart !== el.selectionEnd) { hide(); last = null; return; }
+                const r = el.getBoundingClientRect();
+                const box = Math.round(r.left) + ',' + Math.round(r.top) + ',' + Math.round(r.width) + ',' + Math.round(r.height);
+                const key = el.selectionStart + ':' + el.value.length + ':' + el.scrollTop + ':' + el.scrollLeft;
+                // Following a layout change frame by frame: nothing to redo
+                // while the field stays put.
+                if (last && last.el === el && last.box === box && last.key === key && !snapNext) return;
                 const cs = getComputedStyle(el);
                 for (const p of PROPS) mirror.style[p] = cs[p];
                 const area = el.tagName === 'TEXTAREA';
@@ -155,15 +164,19 @@ pub fn Root() -> Element {
                 const mark = document.createElement('span');
                 mark.textContent = el.value.slice(i, i + 1) || '​';
                 mirror.appendChild(mark);
-                const r = el.getBoundingClientRect();
-                const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.35;
-                const h = Math.round(Math.min(lh, parseFloat(cs.fontSize) * 1.45));
-                const x = r.left + mark.offsetLeft - el.scrollLeft;
-                const y = r.top + mark.offsetTop - el.scrollTop + Math.max(0, (lh - h) / 2);
-                if (x < r.left - 1 || x > r.right + 1 || y < r.top - 1 || y + h > r.bottom + 2) { hide(); return; }
+                const fs = parseFloat(cs.fontSize) || 14;
+                const lh = parseFloat(cs.lineHeight) || fs * 1.35;
+                const h = Math.round(Math.min(lh, fs * 1.45));
+                const x = Math.round(r.left + mark.offsetLeft - el.scrollLeft);
+                const y = Math.round(r.top + mark.offsetTop - el.scrollTop + Math.max(0, (lh - h) / 2));
+                if (x < r.left - 1 || x > r.right + 1 || y < r.top - 1 || y + h > r.bottom + 2) { hide(); last = null; return; }
+                const glide = !snapNext && !!last && last.el === el && last.box === box && last.y === y && Math.abs(last.x - x) <= fs * 6;
+                snapNext = false;
+                last = { el, box, key, x, y };
+                caret.classList.toggle('snap', !glide);
                 caret.style.height = h + 'px';
                 caret.style.background = cs.caretColor && cs.caretColor !== 'transparent' && !el.classList.contains('l-caret-on') ? cs.caretColor : cs.color;
-                caret.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px)';
+                caret.style.transform = 'translate(' + x + 'px,' + y + 'px)';
                 caret.style.visibility = 'visible';
                 // Solid while it moves; blinks once still.
                 caret.classList.remove('blink');
@@ -171,12 +184,26 @@ pub fn Root() -> Element {
                 moved = setTimeout(() => caret.classList.add('blink'), 530);
               };
               const queue = () => { if (!raf) raf = requestAnimationFrame(place); };
-              document.addEventListener('focusin', (e) => { if (eligible(e.target)) { el = e.target; caret.style.transition = 'none'; queue(); requestAnimationFrame(() => requestAnimationFrame(() => { caret.style.transition = ''; })); } });
-              document.addEventListener('focusout', (e) => { if (e.target === el) { el.classList.remove('l-caret-on'); el = null; hide(); } });
+              const snap = () => { snapNext = true; queue(); };
+              // While the layout animates (a pane sliding, the composer
+              // growing) the field moves without telling: follow it each
+              // frame for a moment.
+              const follow = (ms) => {
+                const was = followUntil > performance.now();
+                followUntil = Math.max(followUntil, performance.now() + ms);
+                if (was || !el) return;
+                const tick = () => { if (!el || performance.now() > followUntil) return; place(); requestAnimationFrame(tick); };
+                requestAnimationFrame(tick);
+              };
+              const ro = new ResizeObserver(() => { snap(); follow(300); });
+              document.addEventListener('focusin', (e) => { if (eligible(e.target)) { if (el) ro.unobserve(el); el = e.target; ro.observe(el); snap(); } });
+              document.addEventListener('focusout', (e) => { if (e.target === el) { ro.unobserve(el); el.classList.remove('l-caret-on'); el = null; last = null; hide(); } });
               document.addEventListener('selectionchange', queue);
               document.addEventListener('input', queue, true);
-              document.addEventListener('scroll', queue, true);
-              window.addEventListener('resize', queue);
+              document.addEventListener('scroll', snap, true);
+              window.addEventListener('resize', snap);
+              document.addEventListener('transitionrun', () => { if (el) follow(500); }, true);
+              document.addEventListener('animationstart', () => { if (el) follow(500); }, true);
             }
             // Copy buttons of code blocks (in rendered Markdown): the text
             // goes to the system clipboard through the app.

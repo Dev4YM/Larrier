@@ -50,6 +50,10 @@ pub struct Session {
     /// permissions, Droid autonomy).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission: Option<String>,
+    /// Reasoning effort picked for this session (`low` … `max`); `None`
+    /// follows the agent's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -865,6 +869,7 @@ impl Session {
             model: None,
             mode: None,
             permission: None,
+            effort: None,
             account_id: None,
             workspace,
             environment: Environment::Local,

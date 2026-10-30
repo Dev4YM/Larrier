@@ -419,11 +419,29 @@ pub struct AgentConfig {
     /// Prefer ACP even when a native stream protocol is available.
     #[serde(default)]
     pub prefer_acp: bool,
+    /// Model ids added by hand before custom models existed; read as
+    /// [`CustomModel`]s without an endpoint.
     #[serde(default)]
     pub extra_models: Vec<String>,
     /// Import this agent's native sessions automatically.
     #[serde(default = "yes")]
     pub import: bool,
+    /// Reasoning effort for new sessions; `None` follows the agent's own.
+    #[serde(default)]
+    pub default_effort: Option<String>,
+    /// Models the agent features that the user hid from Larrier's picker.
+    #[serde(default)]
+    pub hidden_models: Vec<String>,
+    /// Models the agent offers but doesn't feature, shown in the picker.
+    #[serde(default)]
+    pub shown_models: Vec<String>,
+    /// Models the user added for this agent.
+    #[serde(default)]
+    pub custom_models: Vec<CustomModel>,
+    /// The user's own API endpoints and keys, for agents that can take one
+    /// at launch.
+    #[serde(default)]
+    pub endpoints: Vec<AgentEndpoint>,
 }
 
 impl AgentConfig {
@@ -440,6 +458,106 @@ impl AgentConfig {
             prefer_acp: false,
             extra_models: Vec::new(),
             import: true,
+            default_effort: None,
+            hidden_models: Vec::new(),
+            shown_models: Vec::new(),
+            custom_models: Vec::new(),
+            endpoints: Vec::new(),
+        }
+    }
+
+    /// Every model the user added, the older `extra_models` included.
+    pub fn added_models(&self) -> Vec<CustomModel> {
+        let mut v = self.custom_models.clone();
+        for id in &self.extra_models {
+            if !v.iter().any(|m| &m.id == id) {
+                v.push(CustomModel { id: id.clone(), name: None, endpoint: None });
+            }
+        }
+        v
+    }
+
+    pub fn endpoint(&self, id: &str) -> Option<&AgentEndpoint> {
+        self.endpoints.iter().find(|e| e.id == id)
+    }
+
+    /// The endpoint a model runs through: the one it was added with, else
+    /// an endpoint set to carry every model.
+    pub fn endpoint_for(&self, model: Option<&str>) -> Option<&AgentEndpoint> {
+        let added = model.and_then(|m| self.custom_models.iter().find(|c| c.id == m)).and_then(|c| c.endpoint.as_deref());
+        match added {
+            Some(id) => self.endpoint(id).filter(|e| e.enabled),
+            None => self.endpoints.iter().find(|e| e.enabled && e.use_for_all),
+        }
+    }
+}
+
+/// A model the user added to an agent: an id the agent accepts but doesn't
+/// list, or a model served by one of the agent's [`AgentEndpoint`]s.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CustomModel {
+    /// What the agent is given (`--model <id>`).
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Id of the endpoint that serves it; `None` is the agent's own service.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+}
+
+/// The user's own API endpoint for an agent (an OpenAI or Anthropic key, a
+/// gateway, a local server). Its key lives in the OS keychain.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AgentEndpoint {
+    pub id: String,
+    pub name: String,
+    pub kind: EndpointKind,
+    pub base_url: String,
+    #[serde(default)]
+    pub secret_ref: Option<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Run every model through this endpoint, instead of the agent's own
+    /// service (Claude Code on your own Anthropic key).
+    #[serde(default)]
+    pub use_for_all: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointKind {
+    /// Anthropic Messages API (Anthropic, or a gateway that speaks it).
+    Anthropic,
+    /// OpenAI Responses API.
+    OpenAi,
+    /// Any OpenAI-compatible `/chat/completions` endpoint.
+    OpenAiCompatible,
+}
+
+impl EndpointKind {
+    pub const ALL: [EndpointKind; 3] = [EndpointKind::Anthropic, EndpointKind::OpenAi, EndpointKind::OpenAiCompatible];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            EndpointKind::Anthropic => "Anthropic",
+            EndpointKind::OpenAi => "OpenAI",
+            EndpointKind::OpenAiCompatible => "OpenAI-compatible",
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            EndpointKind::Anthropic => "anthropic",
+            EndpointKind::OpenAi => "openai",
+            EndpointKind::OpenAiCompatible => "openai_compatible",
+        }
+    }
+
+    pub fn default_url(self) -> &'static str {
+        match self {
+            EndpointKind::Anthropic => "https://api.anthropic.com",
+            EndpointKind::OpenAi => "https://api.openai.com/v1",
+            EndpointKind::OpenAiCompatible => "https://openrouter.ai/api/v1",
         }
     }
 }

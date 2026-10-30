@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use larrier_core::{
-    config::CustomAgent, secrets, Account, AccountAuth, AgentKind, Config, Message, Part, Protocol, ProviderKind,
+    config::CustomAgent, secrets, Account, AccountAuth, AgentKind, Config, EndpointKind, Message, Part, Protocol, ProviderKind,
     ModeSelection, RunMode, Session,
 };
 
@@ -501,6 +501,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         None
     };
     let model = session.model.clone().or(ac.default_model.clone()).filter(|m| m != "default" && !m.is_empty());
+    let effort = session.effort.clone().or(ac.default_effort.clone()).filter(|e| !e.is_empty() && e != "default");
     // The agent's own modes (Claude Code permission modes, Codex plan +
     // permissions, …): session pick, else the agent's default, else the
     // global autonomy level.
@@ -511,11 +512,22 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
     );
     let mode = modes.ids.first().cloned().or_else(|| session.mode.clone().or(ac.default_mode.clone()));
 
-    let (launch, chat) = match protocol {
+    let (mut launch, chat) = match protocol {
         Protocol::HttpChat => (Launch::default(), Some(resolve_chat(cfg, session)?)),
         Protocol::Acp => (resolve_acp_launch(cfg, agent, session.account_id.as_deref())?, None),
         _ => (resolve_launch(cfg, agent, session.account_id.as_deref())?, None),
     };
+    // Effort and the user's own endpoint ride in front of their extra
+    // arguments; the endpoint's key goes in the environment.
+    let mut model = model;
+    if !matches!(protocol, Protocol::HttpChat | Protocol::Acp) {
+        let ml = model_launch(agent, &ac, model.as_deref(), effort.as_deref())?;
+        if ml.model.is_some() {
+            model = ml.model;
+        }
+        launch.extra_args.splice(0..0, ml.args);
+        launch.env.extend(ml.env);
+    }
 
     Ok(TurnRequest {
         agent: agent.clone(),
@@ -536,6 +548,138 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         launch,
         chat,
     })
+}
+
+/// How a model choice reaches an agent's CLI: effort and endpoint
+/// arguments, the endpoint's key in the environment, and the model id the
+/// agent needs when it names models its own way.
+#[derive(Debug, Default, PartialEq)]
+pub struct ModelLaunch {
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub model: Option<String>,
+}
+
+/// Whether an agent takes a reasoning effort on its command line (Cursor
+/// names a model per effort instead).
+pub fn takes_effort(agent: &AgentKind) -> bool {
+    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Droid | AgentKind::Hermes | AgentKind::OpenCode)
+}
+
+/// The kinds of endpoint an agent can be pointed at when it starts.
+pub fn endpoint_kinds(agent: &AgentKind) -> &'static [EndpointKind] {
+    match agent {
+        AgentKind::ClaudeCode => &[EndpointKind::Anthropic],
+        AgentKind::Codex => &[EndpointKind::OpenAi, EndpointKind::OpenAiCompatible],
+        AgentKind::OpenCode | AgentKind::Droid | AgentKind::Hermes => &[EndpointKind::Anthropic, EndpointKind::OpenAi, EndpointKind::OpenAiCompatible],
+        _ => &[],
+    }
+}
+
+/// Whether an endpoint can carry every model of the agent (rather than only
+/// the models added for it).
+pub fn endpoint_for_all(agent: &AgentKind) -> bool {
+    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Hermes)
+}
+
+/// A name usable as a provider id and environment variable suffix.
+fn slug(id: &str) -> String {
+    let s: String = id.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    let s = s.trim_matches('-').to_string();
+    if s.is_empty() { "endpoint".into() } else { s }
+}
+
+pub fn model_launch(agent: &AgentKind, ac: &larrier_core::config::AgentConfig, model: Option<&str>, effort: Option<&str>) -> Result<ModelLaunch> {
+    let mut ml = ModelLaunch::default();
+    if let Some(e) = effort.filter(|_| takes_effort(agent)) {
+        match agent {
+            AgentKind::ClaudeCode => ml.args.extend(["--effort".into(), e.into()]),
+            AgentKind::Codex => ml.args.extend(["-c".into(), format!("model_reasoning_effort={}", toml_str(e))]),
+            AgentKind::Droid => ml.args.extend(["-r".into(), e.into()]),
+            AgentKind::Hermes => ml.args.extend(["--reasoning".into(), e.into()]),
+            AgentKind::OpenCode => ml.args.extend(["--variant".into(), e.into()]),
+            _ => {}
+        }
+    }
+    let Some(ep) = ac.endpoint_for(model) else { return Ok(ml) };
+    if !endpoint_kinds(agent).contains(&ep.kind) {
+        return Err(anyhow!("{} can't use a {} endpoint ({}).", agent.spec().name, ep.kind.label(), ep.name));
+    }
+    let key = ep.secret_ref.as_deref().and_then(secrets::get).unwrap_or_default();
+    let url = ep.base_url.trim().trim_end_matches('/').to_string();
+    let pid = format!("larrier-{}", slug(&ep.id));
+    let key_var = format!("LARRIER_KEY_{}", slug(&ep.id).replace('-', "_").to_ascii_uppercase());
+    let wire_npm = match ep.kind {
+        EndpointKind::Anthropic => ("anthropic", "@ai-sdk/anthropic"),
+        EndpointKind::OpenAi => ("openai", "@ai-sdk/openai"),
+        EndpointKind::OpenAiCompatible => ("generic-chat-completion-api", "@ai-sdk/openai-compatible"),
+    };
+    match agent {
+        AgentKind::ClaudeCode => {
+            ml.env.push(("ANTHROPIC_BASE_URL".into(), url.clone()));
+            // Anthropic itself takes `x-api-key`; gateways take a bearer token.
+            let var = if url.contains("api.anthropic.com") { "ANTHROPIC_API_KEY" } else { "ANTHROPIC_AUTH_TOKEN" };
+            if !key.is_empty() {
+                ml.env.push((var.into(), key));
+            }
+        }
+        AgentKind::Codex => {
+            let wire = if ep.kind == EndpointKind::OpenAi { "responses" } else { "chat" };
+            for (k, v) in [("name", ep.name.as_str()), ("base_url", url.as_str()), ("env_key", key_var.as_str()), ("wire_api", wire)] {
+                ml.args.extend(["-c".into(), format!("model_providers.{pid}.{k}={}", toml_str(v))]);
+            }
+            ml.args.extend(["-c".into(), format!("model_provider={}", toml_str(&pid))]);
+            ml.env.push((key_var, key));
+        }
+        AgentKind::OpenCode => {
+            // A provider of its own, added for this run only.
+            let id = model.unwrap_or_default();
+            let mut provider = serde_json::json!({
+                "name": ep.name,
+                "npm": wire_npm.1,
+                "options": { "baseURL": url, "apiKey": format!("{{env:{key_var}}}") },
+                "models": {},
+            });
+            if !id.is_empty() {
+                let name = ac.added_models().into_iter().find(|c| c.id == id).and_then(|c| c.name).unwrap_or_else(|| id.to_string());
+                provider["models"][id] = serde_json::json!({ "name": name });
+                ml.model = Some(format!("{pid}/{id}"));
+            }
+            ml.env.push(("OPENCODE_CONFIG_CONTENT".into(), serde_json::json!({ "provider": { pid.clone(): provider } }).to_string()));
+            ml.env.push((key_var, key));
+        }
+        AgentKind::Droid => {
+            // Droid merges a runtime settings file into its own for this run.
+            let id = model.ok_or_else(|| anyhow!("Pick a model for {} first.", ep.name))?;
+            let name = ac.added_models().into_iter().find(|c| c.id == id).and_then(|c| c.name).unwrap_or_else(|| id.to_string());
+            let custom_id = format!("custom:{pid}-{}", slug(id));
+            let settings = serde_json::json!({ "customModels": [{
+                "model": id, "id": custom_id, "displayName": name, "baseUrl": url, "apiKey": key, "provider": wire_npm.0,
+            }] });
+            let dir = std::env::temp_dir().join("larrier").join("droid");
+            std::fs::create_dir_all(&dir)?;
+            let path = dir.join(format!("{pid}.json"));
+            std::fs::write(&path, serde_json::to_vec_pretty(&settings)?)?;
+            ml.args.extend(["--settings".into(), path.to_string_lossy().to_string()]);
+            ml.model = Some(custom_id);
+        }
+        AgentKind::Hermes => {
+            let (provider, key_env, url_env) = match ep.kind {
+                EndpointKind::Anthropic => ("anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"),
+                _ => ("openai-api", "OPENAI_API_KEY", "OPENAI_BASE_URL"),
+            };
+            ml.args.extend(["--provider".into(), provider.into()]);
+            ml.env.push((url_env.into(), url));
+            ml.env.push((key_env.into(), key));
+        }
+        _ => {}
+    }
+    Ok(ml)
+}
+
+/// A TOML basic string (`-c key="value"` for Codex).
+fn toml_str(v: &str) -> String {
+    serde_json::to_string(v).unwrap_or_else(|_| format!("\"{v}\""))
 }
 
 /// For the built-in Chat agent, `session.model` is `provider_id/model`.
@@ -624,6 +768,59 @@ mod tests {
         let (prog, args) = unwrap_shim(&d.join("cursor-agent.cmd"));
         assert!(prog.to_string_lossy().contains("2026.09.10-fd3934a"), "{prog:?}");
         assert!(args[0].ends_with("index.js"));
+    }
+
+    fn endpoint(kind: EndpointKind, url: &str, all: bool) -> larrier_core::AgentEndpoint {
+        larrier_core::AgentEndpoint { id: "ep1".into(), name: "My gateway".into(), kind, base_url: url.into(), secret_ref: None, enabled: true, use_for_all: all }
+    }
+
+    #[test]
+    fn effort_reaches_each_cli_its_own_way() {
+        let ac = larrier_core::config::AgentConfig::new(AgentKind::ClaudeCode);
+        let args = |a: AgentKind| model_launch(&a, &ac, Some("m"), Some("high")).unwrap().args;
+        assert_eq!(args(AgentKind::ClaudeCode), ["--effort", "high"]);
+        assert_eq!(args(AgentKind::Codex), ["-c", "model_reasoning_effort=\"high\""]);
+        assert_eq!(args(AgentKind::Droid), ["-r", "high"]);
+        assert_eq!(args(AgentKind::Hermes), ["--reasoning", "high"]);
+        assert_eq!(args(AgentKind::OpenCode), ["--variant", "high"]);
+        assert!(args(AgentKind::Cursor).is_empty());
+    }
+
+    #[test]
+    fn endpoints_apply_per_agent() {
+        // Claude Code on a gateway for every model: base URL and a bearer token.
+        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::ClaudeCode);
+        ac.endpoints.push(endpoint(EndpointKind::Anthropic, "https://gw.example.com/", true));
+        let ml = model_launch(&AgentKind::ClaudeCode, &ac, Some("opus"), None).unwrap();
+        assert_eq!(ml.env, vec![("ANTHROPIC_BASE_URL".to_string(), "https://gw.example.com".to_string())]);
+        assert!(ml.model.is_none());
+
+        // Codex: a provider of its own through config overrides.
+        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::Codex);
+        ac.endpoints.push(endpoint(EndpointKind::OpenAiCompatible, "https://openrouter.ai/api/v1", false));
+        ac.custom_models.push(larrier_core::CustomModel { id: "z-ai/glm-5.2".into(), name: None, endpoint: Some("ep1".into()) });
+        assert_eq!(model_launch(&AgentKind::Codex, &ac, Some("gpt-6.1-sol"), None).unwrap(), ModelLaunch::default());
+        let ml = model_launch(&AgentKind::Codex, &ac, Some("z-ai/glm-5.2"), None).unwrap();
+        assert!(ml.args.contains(&"model_providers.larrier-ep1.base_url=\"https://openrouter.ai/api/v1\"".to_string()));
+        assert!(ml.args.contains(&"model_providers.larrier-ep1.wire_api=\"chat\"".to_string()));
+        assert_eq!(ml.args.last().unwrap(), "model_provider=\"larrier-ep1\"");
+        assert_eq!(ml.env[0].0, "LARRIER_KEY_EP1");
+
+        // OpenCode: an inline provider, and the model under it.
+        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::OpenCode);
+        ac.endpoints.push(endpoint(EndpointKind::Anthropic, "https://api.anthropic.com", false));
+        ac.custom_models.push(larrier_core::CustomModel { id: "claude-opus-5-5".into(), name: Some("Opus".into()), endpoint: Some("ep1".into()) });
+        let ml = model_launch(&AgentKind::OpenCode, &ac, Some("claude-opus-5-5"), None).unwrap();
+        assert_eq!(ml.model.as_deref(), Some("larrier-ep1/claude-opus-5-5"));
+        let cfg: serde_json::Value = serde_json::from_str(&ml.env[0].1).unwrap();
+        assert_eq!(cfg["provider"]["larrier-ep1"]["npm"], "@ai-sdk/anthropic");
+        assert_eq!(cfg["provider"]["larrier-ep1"]["options"]["apiKey"], "{env:LARRIER_KEY_EP1}");
+        assert_eq!(cfg["provider"]["larrier-ep1"]["models"]["claude-opus-5-5"]["name"], "Opus");
+
+        // Cursor can't take one.
+        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::Cursor);
+        ac.endpoints.push(endpoint(EndpointKind::OpenAi, "https://api.openai.com/v1", true));
+        assert!(model_launch(&AgentKind::Cursor, &ac, Some("gpt-5.6-sol-high"), None).is_err());
     }
 
     #[test]

@@ -637,7 +637,7 @@ pub fn GlobalMenu() -> Element {
     let path = c.path.clone().unwrap_or_default();
     let (p1, p2, p3) = (path.clone(), path.clone(), path.clone());
     let image = c.image.clone().unwrap_or_default();
-    let (i1, i2) = (image.clone(), image.clone());
+    let (i1, i2, i3, i4) = (image.clone(), image.clone(), image.clone(), image.clone());
     let dark = app.ui.read().dark;
 
     rsx! {
@@ -707,8 +707,13 @@ pub fn GlobalMenu() -> Element {
                     div { class: "menu-sep" }
                 }
                 if c.image.is_some() {
-                    {item("Open Image", I::Image, "", true, Box::new(move || { let _ = open::that(&i1); }))}
-                    {item("Copy Image Address", I::Copy, "", true, Box::new(move || app.copy_text(&i2)))}
+                    {item("Copy Image", I::Copy, "", true, Box::new(move || app.copy_image(i1.clone())))}
+                    {item("Save Image As…", I::Download, "", true, Box::new(move || app.save_image(i3.clone())))}
+                    {item("Open Image", I::Image, "", true, Box::new(move || app.open_image(i4.clone())))}
+                    // An inline image's address is the whole picture, not a link.
+                    if !image.starts_with("data:") {
+                        {item("Copy Image Address", I::Copy, "", true, Box::new(move || app.copy_text(&i2)))}
+                    }
                     div { class: "menu-sep" }
                 }
                 {item("Back", I::ArrowLeft, "Alt+←", app.can_go(-1), Box::new(move || app.go(-1)))}

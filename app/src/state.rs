@@ -1894,6 +1894,102 @@ impl App {
             Err(e) => self.toast_err(format!("Copy failed: {e}")),
         }
     }
+
+    /// Put an image (as shown: a data URL, a file, or a web address) on the
+    /// clipboard as a picture.
+    pub fn copy_image(self, src: String) {
+        spawn(async move {
+            let done = match image_bytes(&src).await {
+                Ok((bytes, _)) => tokio::task::spawn_blocking(move || -> Result<(), String> {
+                    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?.to_rgba8();
+                    let (w, h) = img.dimensions();
+                    let data = arboard::ImageData { width: w as usize, height: h as usize, bytes: std::borrow::Cow::Owned(img.into_raw()) };
+                    arboard::Clipboard::new().and_then(|mut c| c.set_image(data)).map_err(|e| e.to_string())
+                })
+                .await
+                .unwrap_or_else(|e| Err(e.to_string())),
+                Err(e) => Err(e),
+            };
+            match done {
+                Ok(()) => self.toast("Image copied".to_string()),
+                Err(e) => self.toast_err(format!("Couldn't copy the image: {e}")),
+            }
+        });
+    }
+
+    /// Save an image where the user picks.
+    pub fn save_image(self, src: String) {
+        spawn(async move {
+            let (bytes, ext) = match image_bytes(&src).await {
+                Ok(b) => b,
+                Err(e) => return self.toast_err(format!("Couldn't save the image: {e}")),
+            };
+            let pick = rfd::AsyncFileDialog::new().set_file_name(format!("image.{ext}")).add_filter("Image", &[ext.as_str()]).save_file().await;
+            if let Some(f) = pick {
+                if let Err(e) = std::fs::write(f.path(), &bytes) {
+                    self.toast_err(format!("Couldn't save the image: {e}"));
+                }
+            }
+        });
+    }
+
+    /// Open an image in the system's viewer (an inline one goes through a
+    /// temporary file first).
+    pub fn open_image(self, src: String) {
+        if !src.starts_with("data:") {
+            let _ = open::that(&src);
+            return;
+        }
+        spawn(async move {
+            match image_bytes(&src).await {
+                Ok((bytes, ext)) => {
+                    use sha2::Digest;
+                    let name = format!("larrier-image-{}.{ext}", hex_short(&sha2::Sha256::digest(&bytes)));
+                    let path = std::env::temp_dir().join(name);
+                    match std::fs::write(&path, &bytes) {
+                        Ok(()) => {
+                            let _ = open::that(&path);
+                        }
+                        Err(e) => self.toast_err(format!("Couldn't open the image: {e}")),
+                    }
+                }
+                Err(e) => self.toast_err(format!("Couldn't open the image: {e}")),
+            }
+        });
+    }
+}
+
+fn hex_short(d: &[u8]) -> String {
+    d.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// An image's bytes and a file extension for it, from how it's shown (a
+/// data URL, a local path, or a web address).
+async fn image_bytes(src: &str) -> Result<(Vec<u8>, String), String> {
+    use base64::Engine;
+    let ext_of = |mime: &str| match mime {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        _ => "png",
+    };
+    if let Some(rest) = src.strip_prefix("data:") {
+        let (head, data) = rest.split_once(',').ok_or("not an image")?;
+        let mime = head.split(';').next().unwrap_or("image/png");
+        let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|e| e.to_string())?;
+        return Ok((bytes, ext_of(mime).to_string()));
+    }
+    if src.starts_with("http://") || src.starts_with("https://") {
+        let r = reqwest::get(src).await.map_err(|e| e.to_string())?;
+        let mime = r.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("image/png").to_string();
+        let bytes = r.bytes().await.map_err(|e| e.to_string())?.to_vec();
+        return Ok((bytes, ext_of(&mime).to_string()));
+    }
+    let path = src.strip_prefix("file:///").unwrap_or(src);
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| "png".into());
+    Ok((bytes, ext))
 }
 
 enum SaveMsg {

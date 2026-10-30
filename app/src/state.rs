@@ -465,6 +465,13 @@ impl App {
         self.running.read().contains_key(id)
     }
 
+    /// Mid-turn in the agent's own app (a terminal CLI, Claude's or Cursor's
+    /// app), not run by Larrier: Larrier can't reach that process, and
+    /// running the agent here at the same time would fork the conversation.
+    pub fn running_elsewhere(&self, id: &str) -> bool {
+        !self.is_running(id) && self.is_active(id)
+    }
+
     /// Whether an agent is working on this session right now — run by
     /// Larrier, or mid-turn in its own app (a terminal CLI, an IDE) as seen
     /// through live sync. Everything that shows "running" uses this.
@@ -929,6 +936,11 @@ impl App {
                 if !self.ensure_loaded(&id) {
                     return;
                 }
+                if self.running_elsewhere(&id) {
+                    let agent = self.peek_session(&id, |s| s.agent.display_name()).unwrap_or_default();
+                    self.toast(format!("This chat is running in {agent} right now. Reply there, or send once it finishes."));
+                    return;
+                }
                 id
             }
             None => match self.create_session_from_draft() {
@@ -1044,8 +1056,14 @@ impl App {
                                 crate::notify::agent_event(&s.title, &format!("{} needs your input", s.title), true);
                             }
                             AgentEvent::NativeSession { id: native, .. } => {
-                                store().set_import_record(&import_key(&rec.agent, native), ImportRecord::linked(&id));
-                                store().flush_imports();
+                                // A session imported from this very native
+                                // session keeps syncing from it (the agent
+                                // writes Larrier's turn there too); any other
+                                // native session is this one's own.
+                                if s.origin.native_id.as_deref() != Some(native.as_str()) {
+                                    store().set_import_record(&import_key(&rec.agent, native), ImportRecord::linked(&id));
+                                    store().flush_imports();
+                                }
                             }
                             AgentEvent::Log { line } => tracing::debug!("[{}] {line}", rec.agent.id()),
                             AgentEvent::RateLimit { window, used_pct, resets_at } => {

@@ -87,6 +87,20 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
             continue;
         }
         match store.import_record(&key) {
+            // A session imported from this native session and continued in
+            // Larrier was once marked as Larrier's own, which stopped its
+            // syncing for good: it syncs again (and the mark is undone).
+            Some(r) if r.linked && !r.deleted && !skip(&r.session_id) && (r.source_mtime != info.mtime_ms || r.source_len != info.size) => {
+                if continues(store, &r.session_id, &info) {
+                    store.set_import_record(&key, ImportRecord { session_id: r.session_id.clone(), ..Default::default() });
+                    todo.push((info, Plan::Update(r.session_id, true), key));
+                } else {
+                    // Remember the source as seen, so it isn't looked at again
+                    // until it changes.
+                    store.set_import_record(&key, ImportRecord { source_mtime: info.mtime_ms, source_len: info.size, ..r });
+                    report.skipped += 1;
+                }
+            }
             Some(r) if r.linked || r.deleted => report.skipped += 1,
             Some(r) if !r.session_id.is_empty() && skip(&r.session_id) => report.skipped += 1,
             // Known-empty source that hasn't changed.
@@ -156,6 +170,13 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
     }
     store.flush_imports();
     report
+}
+
+/// The session was imported from this native session and still continues
+/// it (an edit or a hand-over to another session would have moved on).
+fn continues(store: &Store, id: &str, info: &NativeSessionInfo) -> bool {
+    let Ok(s) = store.load(id) else { return false };
+    s.origin.agent == info.agent && s.origin.native_id.as_deref() == Some(info.native_id.as_str()) && s.native_link(&info.agent).map(|l| l.id == info.native_id).unwrap_or(false)
 }
 
 /// Messages already imported keep their ids (open transcripts, edits and
@@ -267,6 +288,37 @@ mod tests {
         let mut new = imported("plan");
         merge_user_state(&mut new, &old);
         assert_eq!(new.mode.as_deref(), Some("acceptEdits"));
+    }
+
+    /// An imported session once continued in Larrier (and so marked as
+    /// Larrier's own) syncs from its native session again.
+    #[test]
+    fn continued_imports_sync_again() {
+        let native = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let id = "41111111-2222-3333-4444-555555555555";
+        let write = |prompts: &[&str]| {
+            let mut s = Session::new(AgentKind::ClaudeCode, None);
+            for p in prompts {
+                s.push(larrier_core::Message::user_text(*p));
+                let mut a = larrier_core::Message::assistant(AgentKind::ClaudeCode, None);
+                a.push_text(&format!("Answer to {p}"));
+                s.push(a);
+            }
+            let f = native.path().join(format!("{id}.jsonl"));
+            std::fs::write(&f, crate::claude::export_lines(&s, id)).unwrap();
+            crate::claude::file_info(&f).unwrap()
+        };
+        let r = apply(&store, vec![write(&["first"])], &|_| false);
+        let sid = r.changed[0].clone();
+        // What older versions did when Larrier ran a turn on it.
+        store.set_import_record(&import_key(&AgentKind::ClaudeCode, id), ImportRecord::linked(&sid));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let r = apply(&store, vec![write(&["first", "second"])], &|_| false);
+        assert_eq!(r.changed, vec![sid.clone()], "{r:?}");
+        assert_eq!(store.load(&sid).unwrap().messages.len(), 4);
+        assert!(!store.import_record(&import_key(&AgentKind::ClaudeCode, id)).unwrap().linked);
     }
 
     /// Two listings of one native session in a pass import it once.

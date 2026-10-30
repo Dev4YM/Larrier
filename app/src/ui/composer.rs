@@ -324,10 +324,18 @@ pub fn Composer(
     let in_plan = plan_id.is_some() && groups.first().map(|g| Some(g.options[g.chosen].id) == plan_id).unwrap_or(false);
     let ctrl_enter = app.config.read().settings.send_with_ctrl_enter;
     let queue_ok = app.config.read().settings.queue_followups;
-    let placeholder = if home { "Plan, Build, / for commands, @ for context" } else { "Send follow-up" };
+    // Running in the agent's own app: replies go there.
+    let elsewhere = session_id.as_ref().map(|id| app.running_elsewhere(id)).unwrap_or(false);
+    let placeholder = if home {
+        "Plan, Build, / for commands, @ for context".to_string()
+    } else if elsewhere {
+        format!("Running in {} — reply there, or once it finishes", agent.display_name())
+    } else {
+        "Send follow-up".to_string()
+    };
     let atts = attachments.read().clone();
     let chips_now = mentions.read().clone();
-    let can_send = !text.read().trim().is_empty() || !atts.is_empty() || !chips_now.is_empty();
+    let can_send = !elsewhere && (!text.read().trim().is_empty() || !atts.is_empty() || !chips_now.is_empty());
     let quote = quote_memo();
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();

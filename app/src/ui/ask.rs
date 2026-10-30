@@ -262,8 +262,16 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
             }
             if open {
                 div { class: "ask-actions",
-                    span { class: "grow hint", if app.is_active(&session_id) { "Sends when the agent finishes this turn" } else { "Sends your answers to the agent" } }
-                    button { class: "primary-btn", disabled: !ready,
+                    span { class: "grow hint",
+                        if app.running_elsewhere(&session_id) {
+                            {format!("Running in {}: answer it there", app.peek_session(&session_id, |s| s.agent.display_name()).unwrap_or_default())}
+                        } else if app.is_active(&session_id) {
+                            "Sends when the agent finishes this turn"
+                        } else {
+                            "Sends your answers to the agent"
+                        }
+                    }
+                    button { class: "primary-btn", disabled: !ready || app.running_elsewhere(&session_id),
                         onclick: move |_| {
                             let text = reply(&qs_send, &chosen_send);
                             sent.set(true);

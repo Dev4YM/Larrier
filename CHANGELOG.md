@@ -5,6 +5,13 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.8 — 2026-10-30
+
+### New
+
+- Read Claude Code's commands, subagents and MCP servers
+- Show the MCP servers agents report themselves
+- The agent's own / commands, @ subagents, /mcp and /usage
 ## 0.1.7 — 2026-10-30
 
 ### New

@@ -31,8 +31,11 @@ struct Repo {
 
 fn sort_items(items: &mut [SessionSummary], sort: SidebarSort) {
     match sort {
-        // Activity never reorders chats: "recent" (older configs) means created.
-        SidebarSort::Recent | SidebarSort::Created => items.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
+        // A chat with a new message (a prompt, a reply, a turn from the
+        // agent's own app) comes first; streaming within a reply doesn't
+        // reorder anything.
+        SidebarSort::Recent => items.sort_by(|a, b| b.activity().cmp(&a.activity())),
+        SidebarSort::Created => items.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
         SidebarSort::Name => items.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
     }
 }
@@ -46,11 +49,11 @@ fn build_agent_groups(list: &[SessionSummary], sort: SidebarSort) -> Vec<Repo> {
             name: s.agent.display_name().to_string(),
             path: None,
             items: Vec::new(),
-            latest: s.created_at,
+            latest: s.activity(),
             agent: Some(s.agent.clone()),
             home: false,
         });
-        e.latest = e.latest.max(s.created_at);
+        e.latest = e.latest.max(s.activity());
         e.items.push(s.clone());
     }
     let mut v: Vec<Repo> = map.into_values().collect();
@@ -76,7 +79,7 @@ fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace
         }
         let key = repo_key(s);
         if key == HOME_KEY {
-            home.latest = home.latest.max(s.created_at);
+            home.latest = home.latest.max(s.activity());
             home.items.push(s.clone());
             continue;
         }
@@ -86,11 +89,11 @@ fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace
             name: if w.name.is_empty() { w.path.clone() } else { w.name.clone() },
             path: Some(w.path.clone()),
             items: Vec::new(),
-            latest: s.created_at,
+            latest: s.activity(),
             agent: None,
             home: false,
         });
-        e.latest = e.latest.max(s.created_at);
+        e.latest = e.latest.max(s.activity());
         e.items.push(s.clone());
     }
     // Folders added in settings show even without agents yet.
@@ -130,7 +133,7 @@ fn by_agent(items: &[SessionSummary]) -> Vec<(AgentKind, Vec<SessionSummary>)> {
             None => groups.push((s.agent.clone(), vec![s.clone()])),
         }
     }
-    groups.sort_by_key(|(_, v)| Reverse(v.iter().map(|s| s.created_at).max()));
+    groups.sort_by_key(|(_, v)| Reverse(v.iter().map(|s| s.activity()).max()));
     groups
 }
 
@@ -259,7 +262,8 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                                 MenuItem { label: "Mixed".to_string(), sub: Some("Project, then agent".to_string()), checked: mixed, onclick: move |_| app.update_config(|c| c.settings.sidebar_group = SidebarGroup::Mixed) }
                                 div { class: "menu-sep" }
                                 div { class: "menu-label", "Sort by" }
-                                MenuItem { label: "Date created".to_string(), checked: sort != SidebarSort::Name, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Created) }
+                                MenuItem { label: "Recent activity".to_string(), checked: sort == SidebarSort::Recent, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Recent) }
+                                MenuItem { label: "Date created".to_string(), checked: sort == SidebarSort::Created, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Created) }
                                 MenuItem { label: "Name".to_string(), checked: sort == SidebarSort::Name, onclick: move |_| app.update_config(|c| c.settings.sidebar_sort = SidebarSort::Name) }
                                 div { class: "menu-sep" }
                                 MenuItem { label: "Show archived".to_string(), checked: show_archived, onclick: move |_| app.update_config(|c| c.settings.show_archived = !c.settings.show_archived) }

@@ -1013,6 +1013,7 @@ impl Session {
             removed,
             files_changed: files,
             message_count: self.messages.len(),
+            active_at: self.messages.iter().map(|m| m.created_at).max(),
             pinned: self.pinned,
             archived: self.archived,
             unread: self.unread,
@@ -1288,6 +1289,18 @@ pub struct SessionSummary {
     /// Token and cost totals (for the Usage page).
     #[serde(default)]
     pub usage: Usage,
+    /// When its latest message began: a prompt, a reply, a message the
+    /// agent's own app added (for "recent activity" ordering).
+    #[serde(default)]
+    pub active_at: Option<DateTime<Utc>>,
+}
+
+impl SessionSummary {
+    /// Time of the latest activity (entries saved before Larrier recorded
+    /// it fall back to when they were last saved).
+    pub fn activity(&self) -> DateTime<Utc> {
+        self.active_at.unwrap_or(self.updated_at).max(self.created_at)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

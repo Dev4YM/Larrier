@@ -1414,6 +1414,7 @@ mod tests {
             environment: "Local".into(),
             created_at: at,
             updated_at: at,
+            active_at: None,
             preview: String::new(),
             added: 0,
             removed: 0,

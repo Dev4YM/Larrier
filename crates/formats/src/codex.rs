@@ -276,6 +276,11 @@ fn convert(lines: &[Value], path: Option<&Path>, meta: &mut Meta) -> (Conv, Vec<
                 if let Some(m) = s(pl, "model") {
                     model = Some(m.to_string());
                 }
+                // A thread can move to another folder (a project, a
+                // worktree): it belongs where its latest turn ran.
+                if let Some(c) = string(pl, "cwd").filter(|c| !c.trim().is_empty()) {
+                    meta.cwd = Some(c);
+                }
             }
             "compacted" => compacted(&mut conv, ts),
             "response_item" => match s(pl, "type").unwrap_or("") {

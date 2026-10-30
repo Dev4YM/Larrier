@@ -303,7 +303,9 @@ fn import_ide(db: &Path, id: &str, info: &NativeSessionInfo) -> Result<Session> 
             native_id: id.to_string(),
             path: Some(db.to_path_buf()),
             title: info.title.clone().or_else(|| string(&data, "name")),
-            cwd: info.cwd.clone(),
+            // The chat's folder now (Cursor moves a chat when its agent
+            // starts working in a project).
+            cwd: workspace_path(&data).or_else(|| info.cwd.clone()),
             created: data["createdAt"].as_i64().and_then(ts_from_ms),
             updated: data["lastUpdatedAt"].as_i64().and_then(ts_from_ms).or(info.updated_at),
             // Archived in Cursor's sidebar (kept on the chat's header).

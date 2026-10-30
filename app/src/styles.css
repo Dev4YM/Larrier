@@ -1067,6 +1067,9 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .mention-chip .x:hover { background: var(--chip-2); color: var(--fg); }
 .mention-chip.skill { background: color-mix(in srgb, var(--accent-c, var(--blue)) 12%, var(--chip)); color: var(--accent-c, var(--blue)); }
 .mention-chip.skill .ic { color: inherit; }
+/* The agent of the user's own the chat runs as (Claude Code's --agent). */
+.mention-chip.run-as { background: color-mix(in srgb, var(--violet, #8b5cf6) 12%, var(--chip)); color: var(--violet, #7c3aed); font-weight: 500; }
+.mention-chip.run-as .ic { color: inherit; }
 .thumb-row .mention-chip { align-self: center; }
 .mention-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .user-card .mention-row:first-child { margin-top: 0; margin-bottom: 6px; }

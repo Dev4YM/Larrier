@@ -181,6 +181,9 @@ struct SessInfo {
     usage: larrier_core::Usage,
     cwd: Option<String>,
     account: Option<String>,
+    run_as: Option<String>,
+    /// Nothing sent yet: who the chat runs as can still change.
+    fresh: bool,
 }
 
 #[component]
@@ -292,6 +295,8 @@ pub fn Composer(
             usage: s.usage.clone(),
             cwd: s.cwd(),
             account: s.account_id.clone(),
+            run_as: s.run_as.clone(),
+            fresh: s.messages.is_empty(),
         })
     });
 
@@ -331,6 +336,12 @@ pub fn Composer(
         Some(_) => sess.read().as_ref().and_then(|s| s.effort.clone()),
         None => app.draft.read().effort.clone(),
     };
+    // One of the agent's own agents the chat runs as (Claude Code's
+    // `--agent`), chosen from @ before the first message.
+    let (run_as, fresh) = match &session_id {
+        Some(_) => sess.read().as_ref().map(|s| (s.run_as.clone(), s.fresh)).unwrap_or((None, false)),
+        None => (app.draft.read().run_as.clone().filter(|_| agent == AgentKind::ClaudeCode), true),
+    };
     // The agent's own modes, e.g. Claude Code Auto / Manual / Plan …
     let groups = mode_view(&app, &agent, [mode.clone(), permission.clone()]);
     let plan_id = plan_option(&agent);
@@ -364,7 +375,7 @@ pub fn Composer(
     let suggs: Vec<Sugg> = if is_dismissed {
         Vec::new()
     } else {
-        suggestions(&app, &text_now, file_index.read().as_deref().unwrap_or(&[]), home, &agent, session_id.as_deref())
+        suggestions(&app, &text_now, file_index.read().as_deref().unwrap_or(&[]), home, &agent, session_id.as_deref(), fresh)
     };
     let hl_i = if suggs.is_empty() { 0 } else { hl().min(suggs.len() - 1) };
     let queued: Vec<crate::state::Queued> = session_id.as_ref().and_then(|id| app.queue.read().get(id).cloned()).unwrap_or_default();
@@ -406,6 +417,14 @@ pub fn Composer(
             _ => {}
         }
     };
+    // Who a chat that hasn't started runs as.
+    let set_run_as = move |name: Option<String>, sid: Option<String>| {
+        let mut app = app;
+        match &sid {
+            Some(id) => app.update_session(id, |s| s.run_as = name),
+            None => app.draft.write().run_as = name,
+        }
+    };
     // Apply a suggestion: the typed `@…` / `/…` becomes a chip, or a
     // Larrier command runs.
     let apply = move |sg: Sugg, sid: Option<String>| {
@@ -425,6 +444,12 @@ pub fn Composer(
                 let t = text.read().clone();
                 let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
                 text.set(format!("{}{s} ", &t[..cut]));
+            }
+            SuggAct::RunAs(name) => {
+                let t = text.read().clone();
+                let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
+                text.set(t[..cut].to_string());
+                set_run_as(Some(name), sid);
             }
         }
         document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
@@ -766,8 +791,24 @@ pub fn Composer(
                         button { class: "icon-btn sm", onclick: move |_| app.ui.write().quote = None, Icon { i: I::X, size: 11 } }
                     }
                 }
-                if !atts.is_empty() || !chips_now.is_empty() {
+                if !atts.is_empty() || !chips_now.is_empty() || run_as.is_some() {
                     div { class: "thumb-row",
+                        if let Some(name) = run_as.clone() {
+                            span { class: "mention-chip run-as",
+                                title: if fresh { format!("This chat runs as your {name} agent: its instructions, tools and MCP servers") } else { format!("This chat runs as your {name} agent") },
+                                span { class: "ic", Icon { i: I::Orbit, size: 12, stroke: 1.6 } }
+                                span { class: "nm", "{name}" }
+                                if fresh {
+                                    button { class: "x", title: "Run as {agent.display_name()} itself",
+                                        onclick: {
+                                            let sid = session_id.clone();
+                                            move |e: MouseEvent| { e.stop_propagation(); set_run_as(None, sid.clone()); }
+                                        },
+                                        Icon { i: I::X, size: 10 }
+                                    }
+                                }
+                            }
+                        }
                         for (i, c) in chips_now.iter().cloned().enumerate() {
                             MentionChipView { key: "m{i}-{c.value}", chip: c,
                                 onremove: move |_| { if i < mentions.read().len() { mentions.write().remove(i); } },
@@ -1497,6 +1538,8 @@ enum SuggAct {
     /// Replace the token being typed with this text (an agent's own
     /// syntax, like Claude Code's `@agent-Explore`).
     Text(String),
+    /// Run the new chat as this agent of the agent's own.
+    RunAs(String),
 }
 
 #[derive(Clone, PartialEq)]
@@ -1532,7 +1575,7 @@ fn harness_items(app: &App) -> Vec<HarnessItem> {
     Vec::new()
 }
 
-fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &AgentKind, current: Option<&str>) -> Vec<Sugg> {
+fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &AgentKind, current: Option<&str>, fresh: bool) -> Vec<Sugg> {
     let mut out = Vec::new();
     if let Some(q) = mention_query(text) {
         let ql = q.to_lowercase();
@@ -1567,7 +1610,8 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
                 act: SuggAct::Chip(MentionChip::agent(s)),
             });
         }
-        // The agent's own subagents, mentioned its own way.
+        // The agent's own agents: a chat that hasn't started can run as one
+        // (listed first), and any chat can hand work to one as a subagent.
         if *agent == AgentKind::ClaudeCode {
             let logo = crate::logos::agent_logo(agent);
             let mut subs: Vec<(String, String)> = app.agent_models(agent).map(|m| m.subagents.iter().map(|s| (s.name.clone(), s.description.clone().unwrap_or_default())).collect()).unwrap_or_default();
@@ -1576,7 +1620,17 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
                     subs.push((it.name.clone(), it.description.clone().unwrap_or_default()));
                 }
             }
-            for (name, desc) in subs.into_iter().filter(|(n, _)| ql.is_empty() || n.to_lowercase().contains(&ql) || "agent".starts_with(&ql)).take(6) {
+            let subs: Vec<(String, String)> = subs.into_iter().filter(|(n, _)| ql.is_empty() || n.to_lowercase().contains(&ql) || "agent".starts_with(&ql)).take(6).collect();
+            if fresh {
+                // Claude Code's own built-ins aren't agents to run as.
+                let own: Vec<Sugg> = subs
+                    .iter()
+                    .filter(|(n, _)| !matches!(n.as_str(), "general-purpose" | "Explore" | "Plan" | "statusline-setup" | "claude-code-guide" | "claude"))
+                    .map(|(name, desc)| Sugg { group: "Run as", icon: I::Orbit, logo, label: name.clone(), sub: desc.chars().take(80).collect(), act: SuggAct::RunAs(name.clone()) })
+                    .collect();
+                out.splice(0..0, own);
+            }
+            for (name, desc) in subs {
                 out.push(Sugg { group: "Subagents", icon: I::Orbit, logo, label: format!("@agent-{name}"), sub: desc.chars().take(80).collect(), act: SuggAct::Text(format!("@agent-{name}")) });
             }
         }

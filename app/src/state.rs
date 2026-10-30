@@ -323,6 +323,9 @@ pub struct Draft {
     /// Reasoning effort; `None` follows the agent's default.
     pub effort: Option<String>,
     pub account_id: Option<String>,
+    /// The agent's own named agent the new chat runs as (Claude Code's
+    /// `--agent`).
+    pub run_as: Option<String>,
     pub workspace: Option<String>,
     pub worktree: bool,
 }
@@ -399,6 +402,7 @@ impl App {
             permission: None,
             effort: None,
             account_id: None,
+            run_as: None,
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
             worktree: cfg.settings.use_worktrees,
         };
@@ -1362,6 +1366,7 @@ impl App {
         s.mode = d.mode.clone();
         s.permission = d.permission.clone();
         s.account_id = d.account_id.clone();
+        s.run_as = d.run_as.clone().filter(|_| d.agent == AgentKind::ClaudeCode);
         if d.worktree {
             if let Some(w) = &ws {
                 let repo = PathBuf::from(&w.path);

@@ -5,6 +5,11 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.6 — 2026-10-30
+
+### New
+
+- An update button that's only there when there's an update
 ## 0.1.5 — 2026-10-30
 
 ### Fixed

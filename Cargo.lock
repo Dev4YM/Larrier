@@ -2987,7 +2987,7 @@ dependencies = [
 
 [[package]]
 name = "larrier-agents"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3011,7 +3011,7 @@ dependencies = [
 
 [[package]]
 name = "larrier-app"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3043,7 +3043,7 @@ dependencies = [
 
 [[package]]
 name = "larrier-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3057,7 +3057,7 @@ dependencies = [
 
 [[package]]
 name = "larrier-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3072,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "larrier-formats"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "chrono",

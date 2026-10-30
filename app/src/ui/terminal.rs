@@ -18,7 +18,7 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde_json::{json, Value};
 
 use crate::icons::{Icon, I};
-use crate::state::use_app;
+use crate::state::{use_app, use_ui};
 
 const SCROLLBACK_BYTES: usize = 512 * 1024;
 
@@ -389,20 +389,46 @@ const CSS: &str = r#"
 .term-item .term-kill { display: none; }
 .term-item:hover .term-kill { display: flex; }
 .term-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-3); font-size: 12px; }
+.term-item + .term-h { margin-top: 8px; }
+.term-item .tk-dots { color: var(--fg-3); margin: 0 3px 0 2px; }
+.term-item.agent .term-name { font-family: var(--mono); font-size: 12px; }
+.aterm { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.aterm-banner { display: flex; align-items: center; gap: 8px; margin: 8px 10px 0; padding: 6px 10px; border-radius: 8px; background: var(--chip);
+  color: var(--fg-2); font-size: 12px; flex-shrink: 0; min-width: 0; }
+.aterm-banner > span:not(.tk-ic) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aterm-banner .tk-ic { display: inline-flex; color: var(--fg-3); }
+.aterm-banner .tk-dots { color: var(--fg-3); }
+.aterm-scroll { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 12px 14px; }
+.aterm-pre { margin: 0; font-family: var(--mono); font-size: var(--fs-term, 12px); line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+  color: var(--fg); user-select: text; }
+.aterm-cmd { color: var(--fg-2); }
+.aterm-cmd .ps { color: var(--green); user-select: none; }
+.aterm-none { color: var(--fg-3); }
 "#;
 
 #[component]
 pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
-    let app = use_app();
-    let dark = app.ui.read().dark;
+    let mut app = use_app();
+    let dark = use_ui(|u| u.dark)();
     let mut show_list = use_signal(|| true);
     let mut tick = use_signal(|| 0u64);
 
-    // First visit to a session's terminal tab starts a shell.
+    // The agent's terminals (its commands), and the one on screen.
+    let viewing = use_ui(|u| u.agent_term.clone());
+    let agent_rows = use_memo(use_reactive!(|session_id| {
+        let keep = viewing().filter(|(s, _)| *s == session_id).map(|(_, t)| t);
+        app.with_session(&session_id, |s| super::tasks::shell_rows(&s.messages, keep.as_deref())).unwrap_or_default()
+    }));
+    let agent_rows = agent_rows();
+    let agent = viewing().filter(|(s, t)| *s == session_id && agent_rows.iter().any(|r| r.id == *t)).map(|(_, t)| t);
+
+    // First visit to a session's terminal tab starts a shell (unless it
+    // opened to show one of the agent's).
     let sid0 = session_id.clone();
     let cwd0 = cwd.clone();
+    let opened_for_agent = agent.is_some();
     use_hook(move || {
-        if count(&sid0) == 0 {
+        if count(&sid0) == 0 && !opened_for_agent {
             open_terminal(&sid0, cwd0, None);
         }
     });
@@ -431,20 +457,25 @@ pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
     let n = terms.len();
     let heading = if n == 1 { "1 Terminal".to_string() } else { format!("{n} Terminals") };
     let (sid_new, cwd_new, sid_kill, sid_new2, cwd_new2) = (session_id.clone(), cwd.clone(), session_id.clone(), session_id.clone(), cwd.clone());
+    let title = match &agent {
+        Some(t) => agent_rows.iter().find(|r| r.id == *t).map(|r| r.title.clone()).unwrap_or_default(),
+        None => current.as_ref().map(|c| c.1.clone()).unwrap_or_else(|| "Terminal".into()),
+    };
 
     rsx! {
         style { {CSS} }
         div { class: "term-wrap", "data-ctx": "terminal",
             div { class: "term-head",
-                span { class: "term-title", {current.as_ref().map(|c| c.1.clone()).unwrap_or_else(|| "Terminal".into())} }
+                span { class: "term-title", "{title}" }
                 button { class: "icon-btn", title: "New terminal",
                     onclick: move |_| {
+                        app.ui.write().agent_term = None;
                         open_terminal(&sid_new, cwd_new.clone(), None);
                         tick += 1;
                     },
                     Icon { i: I::Plus, size: 15, stroke: 1.5 }
                 }
-                if let Some(c) = current.clone() {
+                if let Some(c) = current.clone().filter(|_| agent.is_none()) {
                     button { class: "icon-btn", title: "Kill terminal",
                         onclick: move |_| {
                             remove(&sid_kill, c.0);
@@ -462,9 +493,10 @@ pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
             }
             div { class: "term-body",
                 div { class: "term-main",
-                    match current_id {
-                        Some(cid) => rsx! { XTerm { key: "{cid}", term_id: cid, dark } },
-                        None => rsx! {
+                    match (agent.clone(), current_id) {
+                        (Some(tid), _) => rsx! { AgentTermView { key: "{tid}", session_id: session_id.clone(), tool_id: tid } },
+                        (None, Some(cid)) => rsx! { XTerm { key: "{cid}", term_id: cid, dark } },
+                        (None, None) => rsx! {
                             div { class: "term-empty",
                                 Icon { i: I::Terminal, size: 22, stroke: 1.5 }
                                 "No terminals"
@@ -480,17 +512,41 @@ pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
                         },
                     }
                 }
-                if show_list() && n > 0 {
+                if show_list() && (n > 0 || !agent_rows.is_empty()) {
                     div { class: "term-list",
-                        div { class: "term-h", "{heading}" }
+                        if !agent_rows.is_empty() {
+                            div { class: "term-h", "Agents" }
+                            for r in agent_rows.clone() {
+                                {
+                                    let on = agent.as_deref() == Some(r.id.as_str());
+                                    let cls = format!("term-item agent{}{}", if on { " on" } else { "" }, if r.active { "" } else { " dead" });
+                                    let (sid, tid) = (session_id.clone(), r.id.clone());
+                                    rsx! {
+                                        div { key: "agent-{r.id}", class: "{cls}", role: "button", title: "{r.title}",
+                                            onclick: move |_| app.ui.write().agent_term = Some((sid.clone(), tid.clone())),
+                                            if r.active {
+                                                super::tasks::Dots { size: 12 }
+                                            } else {
+                                                Icon { i: I::Prompt, size: 14, stroke: 1.5 }
+                                            }
+                                            span { class: "term-name", "{r.title}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if n > 0 {
+                            div { class: "term-h", "{heading}" }
+                        }
                         for (id, title, alive) in terms.clone() {
                             {
                                 let (s1, s2) = (session_id.clone(), session_id.clone());
-                                let on = current_id == Some(id);
+                                let on = agent.is_none() && current_id == Some(id);
                                 let cls = format!("term-item{}{}", if on { " on" } else { "" }, if alive { "" } else { " dead" });
                                 rsx! {
                                     div { key: "{id}", class: "{cls}", role: "button",
                                         onclick: move |_| {
+                                            app.ui.write().agent_term = None;
                                             select(&s1, id);
                                             tick += 1;
                                         },
@@ -513,6 +569,168 @@ pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
             }
         }
     }
+}
+
+/// One of the agent's commands, read-only: what it ran and what it printed.
+/// A background command's output file is followed while it is on screen.
+#[component]
+fn AgentTermView(session_id: String, tool_id: String) -> Element {
+    let app = use_app();
+    let info = use_memo(use_reactive!(|session_id, tool_id| {
+        app.with_session(&session_id, |s| {
+            super::tasks::find_tool(&s.messages, &tool_id).map(|t| {
+                let command = ["command", "cmd"].iter().find_map(|k| t.input.get(*k).and_then(|v| v.as_str())).map(str::to_string).unwrap_or_else(|| super::tasks::shell_title(t));
+                (command, t.output.clone().unwrap_or_default(), t.is_active(), super::tasks::status_word(t.status, t.is_error))
+            })
+        })
+        .flatten()
+    }));
+    let mut file_text = use_signal(|| None::<String>);
+    let path = info().and_then(|i| output_path(&i.1));
+    let mut follow = use_signal(|| None::<std::path::PathBuf>);
+    use_effect(use_reactive!(|path| follow.set(path)));
+    use_future(move || async move {
+        loop {
+            if let Some(p) = follow.peek().clone() {
+                let text = tokio::task::spawn_blocking(move || read_tail(&p, 256 * 1024)).await.ok().flatten();
+                if let Some(t) = text.filter(|t| file_text.peek().as_deref() != Some(t.as_str())) {
+                    file_text.set(Some(t));
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(900)).await;
+        }
+    });
+    // The file has everything the command printed; the call's own output
+    // may be just the launch notice.
+    let unread = path.is_some() && file_text().is_none();
+    let shown = match file_text().filter(|t| !t.trim().is_empty()) {
+        Some(t) => clean_term(&t),
+        None => clean_term(&info().map(|i| i.1.lines().filter(|l| !super::tasks::is_launch_notice(l)).collect::<Vec<_>>().join("\n")).unwrap_or_default()),
+    };
+    // Starts at the top like any terminal; follows new output while the
+    // view is scrolled to the end.
+    let el = format!("aterm-{}", tool_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>());
+    let len = shown.len();
+    let el2 = el.clone();
+    use_effect(use_reactive!(|len| {
+        let _ = len;
+        document::eval(&format!(
+            "const el = document.getElementById('{el2}'); if (el) {{ if (!el.dataset.wired) {{ el.dataset.wired = '1'; el.dataset.stick = '1'; \
+             el.addEventListener('scroll', () => {{ el.dataset.stick = el.scrollHeight - el.scrollTop - el.clientHeight < 24 ? '1' : '0'; }}); }} \
+             if (el.dataset.stick === '1') el.scrollTop = el.scrollHeight; }}"
+        ));
+    }));
+    let Some((command, _, active, word)) = info() else {
+        return rsx! { div { class: "term-empty", "This command is no longer in the session" } };
+    };
+    let banner = match (active, word) {
+        (true, _) => "Agent is using this terminal. It's read-only.",
+        (false, "Failed") => "The command failed. This terminal is read-only.",
+        (false, "Stopped") => "The command was stopped. This terminal is read-only.",
+        _ => "The command finished. This terminal is read-only.",
+    };
+    rsx! {
+        div { class: "aterm",
+            div { class: "aterm-banner",
+                if active {
+                    super::tasks::Dots { size: 12 }
+                } else {
+                    span { class: "tk-ic", Icon { i: I::Lock, size: 13 } }
+                }
+                span { "{banner}" }
+            }
+            div { id: "{el}", class: "aterm-scroll",
+                pre { class: "aterm-pre",
+                    span { class: "aterm-cmd", span { class: "ps", "$ " } "{command}\n" }
+                    if shown.trim().is_empty() {
+                        span { class: "aterm-none",
+                            if active { "Waiting for output…" } else if unread { "Its output is no longer available" } else { "No output" }
+                        }
+                    } else {
+                        "{shown}"
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The file a background command writes its output to, as its launch
+/// notice names it ("… Output is being written to: <path>").
+fn output_path(output: &str) -> Option<std::path::PathBuf> {
+    ["Output is being written to:", "output_file:"].iter().find_map(|marker| {
+        let at = output.find(marker)?;
+        let line = output[at + marker.len()..].lines().next()?.trim();
+        // "…\b1.output. You will be notified when it completes."
+        let line = line.split(". ").next().unwrap_or(line);
+        let p = line.trim_matches(|c| c == '"' || c == '\'' || c == '`').trim_end_matches('.');
+        (!p.is_empty()).then(|| std::path::PathBuf::from(p))
+    })
+}
+
+/// The last `max` bytes of a file, from a line start.
+fn read_tail(path: &std::path::Path, max: u64) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let from = len.saturating_sub(max);
+    f.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf).into_owned();
+    Some(match (from > 0, text.find('\n')) {
+        (true, Some(i)) => text[i + 1..].to_string(),
+        _ => text,
+    })
+}
+
+/// Terminal output as plain text: escape sequences dropped, carriage-return
+/// redraws (progress bars) resolved to what the line showed last.
+fn clean_term(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut line = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\x1b' => match chars.next() {
+                // CSI: parameters up to a final byte.
+                Some('[') => {
+                    for n in chars.by_ref() {
+                        if ('@'..='~').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+                // OSC (titles, links): up to BEL or ESC \.
+                Some(']') => {
+                    while let Some(n) = chars.next() {
+                        if n == '\x07' {
+                            break;
+                        }
+                        if n == '\x1b' {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '\r' if chars.peek() == Some(&'\n') => {}
+            '\r' => line.clear(),
+            '\n' => {
+                out.push_str(&line);
+                out.push('\n');
+                line.clear();
+            }
+            '\x08' => {
+                line.pop();
+            }
+            c if c.is_control() && c != '\t' => {}
+            c => line.push(c),
+        }
+    }
+    out.push_str(&line);
+    out
 }
 
 /// Load xterm.js, its CSS and the fit addon into the page (once per process;
@@ -715,6 +933,22 @@ fn XTerm(term_id: u64, dark: bool) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_output_reads_as_plain_text() {
+        assert_eq!(clean_term("\x1b[32mok\x1b[0m\r\nBuilding 10%\rBuilding 100%\n\x1b]0;title\x07done"), "ok\nBuilding 100%\ndone");
+        assert_eq!(clean_term("ab\x08c\tx"), "ac\tx");
+    }
+
+    #[test]
+    fn background_output_file_is_found() {
+        let out = "Command running in background with ID: b1. Output is being written to: C:\\tmp\\b1.output";
+        assert_eq!(output_path(out), Some(std::path::PathBuf::from("C:\\tmp\\b1.output")));
+        let out = "Command running in background with ID: b1. Output is being written to: C:\\tmp\\b1.output. You will be notified when it completes.";
+        assert_eq!(output_path(out), Some(std::path::PathBuf::from("C:\\tmp\\b1.output")));
+        assert_eq!(output_path("Async agent launched\noutput_file: /tmp/a.output\n"), Some(std::path::PathBuf::from("/tmp/a.output")));
+        assert_eq!(output_path("hello"), None);
+    }
 
     #[test]
     fn queries_are_stripped() {

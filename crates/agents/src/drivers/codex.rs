@@ -90,7 +90,7 @@ impl CodexStream {
     }
 
     /// Emit the not-yet-seen tail of a growing text item.
-    fn stream_text(&mut self, id: &str, text: &str, reasoning: bool, sink: &EventSink) {
+    pub(super) fn stream_text(&mut self, id: &str, text: &str, reasoning: bool, sink: &EventSink) {
         let seen = self.emitted.get(id).copied();
         let start = seen.unwrap_or(0);
         if text.len() <= start || !text.is_char_boundary(start) {
@@ -107,7 +107,7 @@ impl CodexStream {
         sink.send(ev);
     }
 
-    fn item(&mut self, phase: &str, item: &Value, sink: &EventSink) {
+    pub(super) fn item(&mut self, phase: &str, item: &Value, sink: &EventSink) {
         let id = s(item, "id").unwrap_or("item").to_string();
         let completed = phase == "item.completed";
         match s(item, "type").unwrap_or("") {
@@ -170,11 +170,24 @@ impl CodexStream {
                 }
                 let status = s(item, "status").unwrap_or(if completed { "completed" } else { "in_progress" });
                 if status != "in_progress" {
-                    let diffs = list.iter().map(|(p, k)| self.diff_for(p, k)).collect();
+                    // The app server sends each change's text or diff; exec
+                    // only names the files.
+                    let diffs = changes
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(|c| {
+                            let (p, k) = (s(c, "path").unwrap_or(""), s(c, "kind").unwrap_or("update"));
+                            match s(c, "diff").filter(|d| !d.is_empty()) {
+                                Some(d) => patch_diff(p, k, d),
+                                None => self.diff_for(p, k),
+                            }
+                        })
+                        .collect();
                     let failed = status == "failed";
                     sink.send(AgentEvent::ToolUpdate {
                         id,
-                        status: Some(if failed { ToolStatus::Failed } else { ToolStatus::Completed }),
+                        status: Some(if failed { ToolStatus::Failed } else if status == "declined" { ToolStatus::Cancelled } else { ToolStatus::Completed }),
                         output: None,
                         diffs,
                         is_error: failed,
@@ -442,6 +455,33 @@ impl LineParser for CodexStream {
     }
 }
 
+/// A change as the app server reports it: a new file's text, a deleted
+/// file's, or a unified diff.
+fn patch_diff(path: &str, kind: &str, diff: &str) -> FileDiff {
+    let mut d = FileDiff { path: path.to_string(), ..Default::default() };
+    match kind {
+        "add" => {
+            d.added = diff.lines().count() as u32;
+            d.new_text = Some(diff.to_string());
+        }
+        "delete" => {
+            d.removed = diff.lines().count() as u32;
+            d.old_text = Some(diff.to_string());
+        }
+        _ => {
+            for l in diff.lines().filter(|l| !l.starts_with("+++") && !l.starts_with("---")) {
+                if l.starts_with('+') {
+                    d.added += 1;
+                } else if l.starts_with('-') {
+                    d.removed += 1;
+                }
+            }
+            d.unified = Some(diff.to_string());
+        }
+    }
+    d
+}
+
 /// Whether `total` includes `base` (cumulative thread totals).
 fn covers(total: &Usage, base: &Usage) -> bool {
     total.input_tokens >= base.input_tokens
@@ -452,7 +492,7 @@ fn covers(total: &Usage, base: &Usage) -> bool {
 }
 
 /// Codex `CollabAgentStatus` → tool status.
-fn collab_status(state: &str) -> ToolStatus {
+pub(super) fn collab_status(state: &str) -> ToolStatus {
     match state {
         "completed" | "shutdown" => ToolStatus::Completed,
         "errored" | "failed" | "not_found" => ToolStatus::Failed,

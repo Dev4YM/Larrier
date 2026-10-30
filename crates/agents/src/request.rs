@@ -597,9 +597,10 @@ pub struct ModelLaunch {
 }
 
 /// Whether a message can be added to the agent's running turn (Claude Code
-/// over its control protocol); others get it after the turn.
+/// over its control protocol, Codex over its app server); others get it
+/// after the turn.
 pub fn can_steer(agent: &AgentKind, cfg: &Config) -> bool {
-    *agent == AgentKind::ClaudeCode && !cfg.agent(agent).prefer_acp
+    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex) && !cfg.agent(agent).prefer_acp
 }
 
 /// Whether an agent takes a reasoning effort on its command line (Cursor

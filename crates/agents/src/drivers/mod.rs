@@ -4,6 +4,7 @@ pub mod acp;
 pub mod chat;
 pub mod claude;
 pub mod codex;
+pub mod codex_app;
 pub mod cursor;
 pub mod droid;
 pub mod gemini;
@@ -29,6 +30,9 @@ pub async fn run(req: TurnRequest, sink: EventSink, control: UnboundedReceiver<T
         Protocol::ClaudeStream => claude::run(req, sink, control).await,
         Protocol::AmpStream => claude::run_amp(req, sink, control).await,
         Protocol::QwenStream => claude::run_qwen(req, sink, control).await,
+        // Codex itself runs through its app server (live approvals); other
+        // agents speaking exec's protocol keep it.
+        Protocol::CodexExec if req.agent == larrier_core::AgentKind::Codex => codex_app::run(req, sink, control).await,
         Protocol::CodexExec => codex::run(req, sink, control).await,
         Protocol::CursorStream => cursor::run(req, sink, control).await,
         Protocol::GeminiStream => gemini::run(req, sink, control).await,

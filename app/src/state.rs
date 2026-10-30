@@ -1415,8 +1415,29 @@ impl App {
                 Err(_) if quiet => UpdateState::Idle,
                 Err(e) => UpdateState::Failed(format!("{e:#}")),
             };
+            let found = matches!(next, UpdateState::Available(_));
             self.update.set(next);
+            // Found on its own: download it now unless the user only wants
+            // to be told.
+            let mode = self.config.peek().settings.updates;
+            if found && quiet && matches!(mode, larrier_core::UpdateMode::Download | larrier_core::UpdateMode::Install) {
+                self.download_update();
+            }
         });
+    }
+
+    /// Put a downloaded release in place when Larrier closes (the Install
+    /// mode): it waits for this process to end, replaces it, and stays
+    /// closed.
+    pub fn install_on_exit(self) {
+        if self.config.peek().settings.updates != larrier_core::UpdateMode::Install {
+            return;
+        }
+        if let UpdateState::Ready { path, .. } = self.update.peek().clone() {
+            if let Err(e) = crate::update::install_after_exit(&path) {
+                tracing::warn!("installing the update on exit: {e:#}");
+            }
+        }
     }
 
     /// Download the available release (checked against its checksum).

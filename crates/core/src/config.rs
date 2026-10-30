@@ -159,8 +159,12 @@ pub struct Settings {
     #[serde(default = "yes")]
     pub notify_on_finish: bool,
     /// Look for a newer release on GitHub (installed copies of Larrier).
+    /// Off turns `updates` off whatever it says (older configs).
     #[serde(default = "yes")]
     pub auto_update: bool,
+    /// What happens when a newer release is found.
+    #[serde(default)]
+    pub updates: UpdateMode,
     /// Which releases to update to.
     #[serde(default)]
     pub update_channel: UpdateChannel,
@@ -216,6 +220,43 @@ pub struct Settings {
     /// does the other of steer and queue).
     #[serde(default)]
     pub busy_send: BusySend,
+}
+
+/// What Larrier does about new releases on its own.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMode {
+    /// Never looks.
+    Off,
+    /// Looks, and shows the update button when there is one.
+    Notify,
+    /// Also downloads it in the background; restarting installs it.
+    #[default]
+    Download,
+    /// Also installs it when Larrier closes.
+    Install,
+}
+
+impl UpdateMode {
+    pub const ALL: [UpdateMode; 4] = [UpdateMode::Off, UpdateMode::Notify, UpdateMode::Download, UpdateMode::Install];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            UpdateMode::Off => "Don't check",
+            UpdateMode::Notify => "Check and tell me",
+            UpdateMode::Download => "Check and download",
+            UpdateMode::Install => "Check, download and install",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            UpdateMode::Off => "Larrier never looks for new releases; check by hand below.",
+            UpdateMode::Notify => "When a new release is out, the update button appears; downloading is up to you.",
+            UpdateMode::Download => "New releases download in the background; Restart puts them in place.",
+            UpdateMode::Install => "New releases download in the background and are installed when Larrier closes.",
+        }
+    }
 }
 
 /// A message sent while the agent is working.
@@ -369,6 +410,7 @@ impl Default for Settings {
             project_order: Vec::new(),
             notify_on_finish: true,
             auto_update: true,
+            updates: UpdateMode::Download,
             update_channel: UpdateChannel::Stable,
             last_version: None,
             accent: String::new(),

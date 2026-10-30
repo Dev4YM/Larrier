@@ -866,7 +866,7 @@ fn Shortcuts() -> Element {
 fn About() -> Element {
     let mut app = use_app();
     let kind = crate::install::current();
-    let auto = app.config.read().settings.auto_update;
+    let mode = if app.config.read().settings.auto_update { app.config.read().settings.updates } else { larrier_core::UpdateMode::Off };
     let channel = app.config.read().settings.update_channel;
     let built = match (crate::version::COMMIT, crate::version::COMMIT_DATE) {
         ("" | "unknown", _) => None,
@@ -940,8 +940,20 @@ fn About() -> Element {
                         },
                     }
                 }
-                Row { title: "Check automatically".to_string(), desc: Some("Look for a new release when Larrier starts, then twice a day.".to_string()),
-                    super::Toggle { on: auto, onchange: move |v: bool| app.update_config(|c| c.settings.auto_update = v) }
+                Row { title: "Updates".to_string(), desc: Some(format!("{} Larrier looks when it starts, then twice a day.", mode.description())),
+                    super::Select {
+                        value: format!("{mode:?}"),
+                        options: larrier_core::UpdateMode::ALL.iter().map(|m| (format!("{m:?}"), m.label().to_string())).collect(),
+                        wide: true,
+                        onchange: move |v: String| {
+                            if let Some(m) = larrier_core::UpdateMode::ALL.into_iter().find(|m| format!("{m:?}") == v) {
+                                app.update_config(move |c| {
+                                    c.settings.updates = m;
+                                    c.settings.auto_update = m != larrier_core::UpdateMode::Off;
+                                });
+                            }
+                        },
+                    }
                 }
             }
             Row { title: "Session format".to_string(), span { class: "code-inline", "LSF {larrier_core::lsf::LSF_VERSION}" } }

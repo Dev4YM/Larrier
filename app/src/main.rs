@@ -66,7 +66,7 @@ fn headless(args: &[String]) -> Option<i32> {
         let scope = if scope == "machine" { install::Scope::Machine } else { install::Scope::User };
         install::install(scope, has("--desktop")).and_then(|exe| if has("--launch") { install::launch(&exe, &[]) } else { Ok(()) })
     } else if let Some(target) = val("--apply-update") {
-        update::apply(std::path::Path::new(&target), val("--pid").and_then(|p| p.parse().ok()))
+        update::apply(std::path::Path::new(&target), val("--pid").and_then(|p| p.parse().ok()), !has("--no-launch"))
     } else if let Some(target) = val("--replace") {
         update::replace(std::path::Path::new(&target))
     } else if has("--uninstall") && (has("--quiet") || has("--confirmed")) {

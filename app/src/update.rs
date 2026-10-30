@@ -212,10 +212,18 @@ pub fn restart_into(downloaded: &Path) -> Result<()> {
     install::launch(downloaded, &["--apply-update", &me.display().to_string(), "--pid", &pid])
 }
 
+/// Like [`restart_into`] for a Larrier that is closing: the new program
+/// takes its place once it has exited, without starting it again.
+pub fn install_after_exit(downloaded: &Path) -> Result<()> {
+    let me = std::env::current_exe()?;
+    let pid = std::process::id().to_string();
+    install::launch(downloaded, &["--apply-update", &me.display().to_string(), "--pid", &pid, "--no-launch"])
+}
+
 /// Run by the downloaded program (`--apply-update <target> --pid <n>`): wait
 /// for the old Larrier, replace it (asking for administrator rights when it
 /// is installed for everyone), record the version and start it.
-pub fn apply(target: &Path, pid: Option<u32>) -> Result<()> {
+pub fn apply(target: &Path, pid: Option<u32>, relaunch: bool) -> Result<()> {
     if let Some(pid) = pid {
         wait_for_exit(pid);
     }
@@ -238,7 +246,10 @@ pub fn apply(target: &Path, pid: Option<u32>) -> Result<()> {
             bail!("the update could not be put in place (code {code})");
         }
     }
-    install::launch(target, &[])
+    if relaunch {
+        install::launch(target, &[])?;
+    }
+    Ok(())
 }
 
 /// Run elevated (`--replace <target>`): put this program in `target`'s place.

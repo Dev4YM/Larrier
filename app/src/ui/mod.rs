@@ -75,7 +75,8 @@ pub fn Root() -> Element {
             dioxus::core::spawn_forever(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(8)).await;
                 loop {
-                    if app.config.peek().settings.auto_update {
+                    let s = app.config.peek().settings.clone();
+                    if s.auto_update && s.updates != larrier_core::UpdateMode::Off {
                         app.check_updates(true);
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(12 * 3600)).await;

@@ -300,24 +300,31 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
             div { class: "side-profile",
                 div { class: "avatar", "{initial}" }
                 span { class: "nm", "{name}" }
+                // Only when there is an update: download it (the label slides
+                // out on hover), its progress, then Restart.
                 {
                     let upd = app.update.read().clone();
                     match upd {
                         crate::state::UpdateState::Available(r) => rsx! {
-                            button { class: "pill", title: "Larrier {r.version} is available", onclick: move |_| app.open_settings(SettingsTab::About),
-                                Icon { i: I::ArrowUp, size: 11, stroke: 2.0 } "Update"
+                            button { class: "update-btn", title: "Download update · Larrier {r.version}", onclick: move |_| app.download_update(),
+                                Icon { i: I::Download, size: 15, stroke: 1.6 }
+                                span { class: "lbl", "Download" }
+                            }
+                        },
+                        crate::state::UpdateState::Downloading { version, got, total } => rsx! {
+                            button { class: "update-btn busy", title: "Downloading Larrier {version}…", disabled: true,
+                                super::Spinner { size: 13 }
+                                span { class: "lbl", {if total > 0 { format!("{}%", got * 100 / total) } else { "Downloading".to_string() }} }
                             }
                         },
                         crate::state::UpdateState::Ready { version, .. } => rsx! {
-                            button { class: "pill", title: "Restart to update to Larrier {version}", onclick: move |_| app.restart_to_update(),
-                                Icon { i: I::Refresh, size: 11, stroke: 2.0 } "Restart"
+                            button { class: "update-btn ready", title: "Restart to update to Larrier {version}", onclick: move |_| app.restart_to_update(),
+                                Icon { i: I::Refresh, size: 14, stroke: 1.8 }
+                                span { class: "lbl", "Restart" }
                             }
                         },
                         _ => rsx! {},
                     }
-                }
-                button { class: "icon-btn", title: "Import sessions from all agents", onclick: move |_| app.sync_imports(false),
-                    Icon { i: I::Download, size: 15, stroke: 1.5 }
                 }
                 button { class: "icon-btn", title: "Settings (Ctrl+,)", onclick: move |_| app.open_settings(SettingsTab::General),
                     Icon { i: I::Settings, size: 16, stroke: 1.5 }

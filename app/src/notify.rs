@@ -434,6 +434,7 @@ fn record(force_save: bool) {
 /// a monitor at startup, and brings the window forward when a toast is
 /// clicked. Call unconditionally from the root component.
 pub fn track_window() {
+    let app = crate::state::use_app();
     use dioxus::desktop::tao::event::{Event, WindowEvent};
     let wid = use_hook(|| {
         let w = dioxus::desktop::window();
@@ -494,6 +495,9 @@ pub fn track_window() {
                 WindowEvent::CloseRequested | WindowEvent::Destroyed => {
                     record(true);
                     crate::state::flush_saves();
+                    if matches!(event, WindowEvent::CloseRequested) {
+                        app.install_on_exit();
+                    }
                 }
                 _ => {}
             }

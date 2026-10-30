@@ -1592,3 +1592,15 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .user-msg.pending { position: relative; top: auto; animation: queue-in .18s ease-out both; }
 .user-msg.pending .user-card { opacity: .55; border-style: dashed; cursor: default; }
 .user-msg.pending .pending-note { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 4px; font-size: 11px; color: var(--fg-3); }
+
+
+/* The update button: only there when there is an update. Its label slides
+   out on hover; while downloading and when ready it stays out. */
+.update-btn { display: inline-flex; align-items: center; height: 28px; padding: 0 7px; border-radius: 14px; overflow: hidden;
+  background: color-mix(in srgb, var(--accent-c, var(--blue)) 14%, transparent); color: var(--accent-c, var(--blue));
+  animation: queue-in .2s ease-out both; transition: background-color .15s ease; }
+.update-btn:hover { background: color-mix(in srgb, var(--accent-c, var(--blue)) 22%, transparent); }
+.update-btn .lbl { max-width: 0; opacity: 0; margin-left: 0; white-space: nowrap; font-size: 12px; font-weight: 500;
+  transition: max-width .22s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, margin-left .22s ease; }
+.update-btn:hover .lbl, .update-btn.busy .lbl, .update-btn.ready .lbl { max-width: 90px; opacity: 1; margin-left: 6px; }
+.update-btn.busy { cursor: default; font-variant-numeric: tabular-nums; }

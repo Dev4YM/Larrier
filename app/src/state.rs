@@ -180,6 +180,8 @@ pub struct Ui {
     /// Attachments produced outside the composer (paste, drop, menus) that
     /// the visible composer picks up.
     pub attach_inbox: Vec<Part>,
+    /// What Customize opens on (from `/mcp`): a kind of item, an agent.
+    pub customize_focus: Option<(Option<larrier_agents::harness::ItemKind>, Option<AgentKind>)>,
     /// Agents that were interrupted when Larrier last closed.
     pub interrupted: Vec<String>,
     /// Text to insert into a composer: (session, text); `None` is the new
@@ -428,6 +430,7 @@ impl App {
             win_w: 1400.0,
             lightbox: None,
             attach_inbox: Vec::new(),
+            customize_focus: None,
             interrupted: Vec::new(),
             compose_inbox: Vec::new(),
             tab_ctx: None,

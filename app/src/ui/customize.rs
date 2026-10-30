@@ -92,8 +92,14 @@ pub fn CustomizeView() -> Element {
     let app = use_app();
     let mut nonce = use_signal(|| 0u32);
     let mut query = use_signal(String::new);
-    let mut kind_filter = use_signal(|| None::<ItemKind>);
-    let mut agent_filter = use_signal(|| None::<AgentKind>);
+    // Opened from `/mcp`: on that agent's MCP servers.
+    let focus = use_hook(|| app.ui.peek().customize_focus.clone());
+    let mut kind_filter = use_signal(|| focus.as_ref().and_then(|f| f.0));
+    let mut agent_filter = use_signal(|| focus.as_ref().and_then(|f| f.1.clone()));
+    use_hook(move || {
+        let mut app = app;
+        app.ui.write().customize_focus = None;
+    });
     let mut scope_open = use_signal(|| false);
     let expanded = use_signal(BTreeSet::<String>::new);
 
@@ -103,7 +109,49 @@ pub fn CustomizeView() -> Element {
         async move { tokio::task::spawn_blocking(move || harness::discover(&ws)).await.unwrap_or_default() }
     });
 
-    let all: Option<Vec<HarnessItem>> = data.read().clone();
+    let mut all: Option<Vec<HarnessItem>> = data.read().clone();
+    // MCP servers the agents report themselves (account connectors,
+    // plugins), next to the ones their config files name.
+    if let Some(items) = all.as_mut() {
+        for (id, models) in app.native_models.read().iter() {
+            let kind = AgentKind::from_id(id);
+            for s in &models.mcp {
+                let known = items.iter().any(|i| i.kind == ItemKind::Mcp && i.name.eq_ignore_ascii_case(&s.name) && i.agents.contains(&kind));
+                if known {
+                    continue;
+                }
+                items.push(HarnessItem {
+                    kind: ItemKind::Mcp,
+                    name: s.name.clone(),
+                    agents: vec![kind.clone()],
+                    scope: Scope::User,
+                    source: PathBuf::new(),
+                    description: Some({
+                        let from = match s.source.as_deref() {
+                            Some("claudeai") => "From your claude.ai account".to_string(),
+                            Some("plugin") => "From a plugin".to_string(),
+                            Some("managed") => "Set by your organization".to_string(),
+                            Some(src @ ("user" | "project" | "local")) => format!("From {}'s {src} settings", kind.display_name()),
+                            _ => format!("Reported by {}", kind.display_name()),
+                        };
+                        match s.tools {
+                            0 => from,
+                            1 => format!("{from} · 1 tool"),
+                            n => format!("{from} · {n} tools"),
+                        }
+                    }),
+                    detail: (s.tools > 0).then(|| format!("{} tools", s.tools)),
+                    status: match s.status.as_str() {
+                        "connected" => Status::Ok,
+                        "needs-auth" => Status::NeedsAuth,
+                        "failed" => Status::Error(s.error.clone().unwrap_or_else(|| "Failed to connect".into())),
+                        "disabled" => Status::Disabled,
+                        _ => Status::Unknown,
+                    },
+                });
+            }
+        }
+    }
     let q = query.read().trim().to_lowercase();
     let agent = agent_filter();
     let kind = kind_filter();
@@ -288,6 +336,8 @@ fn Row(it: HarnessItem) -> Element {
         (None, true) => it.source.to_string_lossy().to_string(),
     };
     let title = format!("{}\n{}", it.source.display(), it.detail.clone().unwrap_or_default());
+    // Servers an agent reports have no file of ours to open.
+    let has_file = !it.source.as_os_str().is_empty();
     let src = it.source.clone();
     let src2 = it.source.clone();
     rsx! {
@@ -309,17 +359,19 @@ fn Row(it: HarnessItem) -> Element {
                     AgentGlyph { key: "{a.id()}", kind: a.clone() }
                 }
             }
-            button { class: "cz-act", title: "Open the file this comes from",
-                onclick: move |_| {
-                    if let Err(e) = open::that(&src) {
-                        app.toast_err(format!("Could not open {}: {e}", src.display()));
-                    }
-                },
-                "Open"
-            }
-            button { class: "icon-btn", title: "Show in folder",
-                onclick: move |_| reveal(&src2),
-                Icon { i: I::FolderOpen, size: 14 }
+            if has_file {
+                button { class: "cz-act", title: "Open the file this comes from",
+                    onclick: move |_| {
+                        if let Err(e) = open::that(&src) {
+                            app.toast_err(format!("Could not open {}: {e}", src.display()));
+                        }
+                    },
+                    "Open"
+                }
+                button { class: "icon-btn", title: "Show in folder",
+                    onclick: move |_| reveal(&src2),
+                    Icon { i: I::FolderOpen, size: 14 }
+                }
             }
         }
     }

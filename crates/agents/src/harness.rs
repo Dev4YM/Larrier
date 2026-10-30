@@ -629,6 +629,15 @@ fn md_items(dir: &Path, kind: ItemKind, agent: AgentKind, scope: &Scope, recursi
             ItemKind::Command => format!("/{rel}"),
             _ => fm.get("name").cloned().unwrap_or(rel),
         };
+        // MCP servers a subagent defines for itself (Claude Code's
+        // `mcpServers:` front matter): there only while it runs.
+        if kind == ItemKind::Subagent {
+            for server in agent_mcp_servers(&text) {
+                let mut m = item(ItemKind::Mcp, server, agent.clone(), scope, &f);
+                m.description = Some(format!("Defined in the {name} agent; there when it runs"));
+                c.push(m);
+            }
+        }
         let mut it = item(kind, name, agent.clone(), scope, &f);
         it.description = fm.get("description").cloned().or_else(|| first_text_line(&text));
         if let Some(m) = fm.get("model") {
@@ -636,6 +645,36 @@ fn md_items(dir: &Path, kind: ItemKind, agent: AgentKind, scope: &Scope, recursi
         }
         c.push(it);
     }
+}
+
+/// Servers an agent file defines inline under `mcpServers:` in its front
+/// matter (`- name:` followed by its settings); bare names only refer to
+/// servers configured elsewhere.
+fn agent_mcp_servers(text: &str) -> Vec<String> {
+    let t = text.trim_start_matches('\u{feff}');
+    let Some(rest) = t.strip_prefix("---") else { return Vec::new() };
+    let Some(end) = rest.find("\n---") else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut inside = false;
+    // The indent of the list's own entries (deeper ones are their settings).
+    let mut level = None;
+    for line in rest[..end].lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with([' ', '\t', '-']) {
+            inside = line.trim_end() == "mcpServers:";
+            level = None;
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        if let Some(entry) = line.trim_start().strip_prefix("- ").filter(|_| inside && *level.get_or_insert(indent) == indent) {
+            if let Some(name) = entry.trim().strip_suffix(':') {
+                out.push(unquote(name));
+            }
+        }
+    }
+    out
 }
 
 /// Gemini custom commands: `commands/**/*.toml` with `description` / `prompt`.
@@ -1040,6 +1079,13 @@ mod tests {
         assert_eq!(v["b"].as_array().unwrap().len(), 2);
         let v = parse_jsonc("{\"é\": \"// not a comment\",}").unwrap();
         assert_eq!(v["é"], "// not a comment");
+    }
+
+    #[test]
+    fn agent_defined_mcp_servers() {
+        let text = "---\nname: site-builder\nmcpServers:\n  - site_builder:\n      type: stdio\n      command: \"node\"\n      args:\n        - \"server.js\"\n        - --flag:\n  - github\n  - \"docs\":\n      type: http\nmodel: inherit\n---\nbody";
+        assert_eq!(agent_mcp_servers(text), ["site_builder", "docs"], "inline definitions, not references or their args");
+        assert!(agent_mcp_servers("---\nname: x\n---\n").is_empty());
     }
 
     #[test]

@@ -221,8 +221,13 @@ if (-not $Publish) {
     Write-Host "Not published. To publish: git push origin main $tag; gh release create $tag dist/$asset dist/$asset.sha256 --notes-file `"$notesFile`"$(if ($preview) { ' --prerelease' })"
     exit 0
 }
-Invoke-Git push -q origin HEAD:main | Out-Null
-Invoke-Git push -q origin $tag | Out-Null
+# Push with the GitHub CLI's login when there is one (it also publishes),
+# so a broken or missing git credential helper doesn't stop the release.
+$auth = @()
+& gh auth status *> $null
+if ($LASTEXITCODE -eq 0) { $auth = @('-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential') }
+Invoke-Git @auth push -q origin HEAD:main | Out-Null
+Invoke-Git @auth push -q origin $tag | Out-Null
 if (-not $SkipBuild) {
     $ghArgs = @('release', 'create', $tag, (Join-Path $dist $asset), (Join-Path $dist "$asset.sha256"), '--title', "Larrier $next", '--notes-file', $notesFile, '--verify-tag')
     $ghArgs += $(if ($preview) { '--prerelease' } else { '--latest' })

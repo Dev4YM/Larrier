@@ -128,15 +128,39 @@ Either way you get a Start menu shortcut (and a Desktop one if you like),
 and Larrier appears in Settings → Apps, where it uninstalls (optionally
 with your data). **Run without installing** starts that copy as it is.
 
-Installed copies check the latest release now and then (Settings → About):
+Installed copies check for a new release now and then (Settings → About):
 they download its program, check it against its published SHA-256 and
-swap it in on restart — no building, no source code. The repository is
-private for now, so updates need a GitHub token (`LARRIER_GITHUB_TOKEN`,
-`GITHUB_TOKEN`, or a signed-in GitHub CLI).
+swap it in on restart — no building, no source code. The **Stable** channel
+gets releases; **Preview** also gets previews (`0.3.0-beta.1`). After an
+update Larrier shows what's new; every version's notes are built in
+(About → Release notes). The repository is private for now, so updates
+need a GitHub token (`LARRIER_GITHUB_TOKEN`, `GITHUB_TOKEN`, or a signed-in
+GitHub CLI).
 
-To publish a release, set the version in `Cargo.toml` and push a matching
-tag (`git tag v0.2.0 && git push origin v0.2.0`): the Release workflow
-builds the Windows program and attaches it with its checksum.
+## Versions and releases
+
+Larrier follows [Semantic Versioning](https://semver.org). The version
+lives in `Cargo.toml` (`[workspace.package]`). Each build also records
+its commit and date: `Larrier.exe --version` prints `Larrier 0.2.0
+(1a2b3c4d5, 2026-11-02)`. Commits follow
+[Conventional Commits](https://www.conventionalcommits.org) (`feat`,
+`fix`, `style`, `perf`, …); they are what the changelog is made from.
+
+`scripts/release.ps1` cuts a release. It bumps the version, writes the
+release's section of [CHANGELOG.md](CHANGELOG.md), commits and tags,
+builds the program, checks that it reports the new version, and with
+`-Publish` pushes and publishes it on GitHub:
+
+```powershell
+./scripts/release.ps1 -Notes                  # what the next release would say
+./scripts/release.ps1 -Bump patch -Publish    # 0.2.0 → 0.2.1
+./scripts/release.ps1 -Bump minor -Publish    # 0.2.1 → 0.3.0
+./scripts/release.ps1 -Bump minor -Pre beta   # 0.3.0-beta.1, a preview
+```
+
+Pushing a `v*` tag also runs the Release workflow, which builds and
+publishes on GitHub's Windows runners (it skips a release the script
+already published).
 
 ## Build and run
 

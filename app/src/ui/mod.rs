@@ -231,7 +231,7 @@ pub fn Root() -> Element {
               }
               if (e.altKey && (k === 'arrowleft' || k === 'arrowright')) { e.preventDefault(); dioxus.send({ t: 'nav', d: k === 'arrowleft' ? -1 : 1 }); return; }
               if (!mod) return;
-              if (['k','n','b','j',',','l','p','r','w','e','g','i','.','/','backspace','=','+','-','0','tab'].includes(k)) {
+              if (['k','n','b','j',',','l','p','r','w','e','g','i','.','/','=','+','-','0','tab'].includes(k)) {
                 e.preventDefault();
                 dioxus.send({ t: 'key', k, shift: e.shiftKey, alt: e.altKey });
               }

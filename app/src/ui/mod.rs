@@ -120,6 +120,57 @@ pub fn Root() -> Element {
             const mq = window.matchMedia('(prefers-color-scheme: dark)');
             dioxus.send({ t: 'theme', dark: mq.matches });
             mq.addEventListener('change', (e) => dioxus.send({ t: 'theme', dark: e.matches }));
+            // Menus stay inside the window whatever loads into them after
+            // they open: each open menu is re-fitted whenever its size
+            // changes (more results, a longer list).
+            if (!window.__larrierMenus) {
+              window.__larrierMenus = true;
+              const pad = 8;
+              const minTop = () => { const b = document.querySelector('.menubar'); return (b ? b.getBoundingClientRect().bottom : 0) + pad; };
+              const set = (m, k, v) => { if (m.style[k] !== v) m.style[k] = v; };
+              const fit = (m) => {
+                if (!m.isConnected) return;
+                const r = m.getBoundingClientRect();
+                if (!r.height) return;
+                const top = minTop(), bottom = innerHeight - pad;
+                const natural = m.scrollHeight;
+                if (m.classList.contains('mention-menu')) {
+                  // Above the composer while it fits there, else below it.
+                  const wrap = m.parentElement.getBoundingClientRect();
+                  const box = (m.parentElement.querySelector('.composer') || m.parentElement).getBoundingClientRect();
+                  const above = box.top - 4 - top, below = bottom - (box.bottom + 4);
+                  const up = above >= Math.min(natural, 220) || above >= below;
+                  const room = Math.max(96, Math.min(340, up ? above : below));
+                  set(m, 'maxHeight', room + 'px');
+                  if (up) { set(m, 'top', 'auto'); set(m, 'bottom', (wrap.bottom - box.top + 4) + 'px'); }
+                  else { set(m, 'bottom', 'auto'); set(m, 'top', (box.bottom - wrap.top + 4) + 'px'); }
+                  m.classList.toggle('flip-up', up);
+                  return;
+                }
+                if (getComputedStyle(m).position !== 'fixed') return;
+                const cap = parseFloat(getComputedStyle(m).getPropertyValue('--menu-max')) || 440;
+                if (m.classList.contains('flip-up')) {
+                  // Grows upward from where it was anchored.
+                  const end = r.bottom;
+                  const h = Math.min(natural, cap, end - top);
+                  set(m, 'maxHeight', Math.max(96, end - top) + 'px');
+                  set(m, 'top', Math.max(top, end - h) + 'px');
+                } else {
+                  set(m, 'maxHeight', Math.max(96, Math.min(cap, bottom - r.top)) + 'px');
+                  if (r.top < top) set(m, 'top', top + 'px');
+                }
+                if (r.right > innerWidth - pad) set(m, 'left', Math.max(pad, innerWidth - pad - r.width) + 'px');
+              };
+              const ro = new ResizeObserver((es) => { for (const e of es) fit(e.target); });
+              const watch = (n) => {
+                if (n.nodeType !== 1) return;
+                const list = n.matches('.menu, .mention-menu') ? [n] : [...n.querySelectorAll('.menu, .mention-menu')];
+                for (const m of list) { if (!m.__fitted) { m.__fitted = true; ro.observe(m); } requestAnimationFrame(() => fit(m)); }
+              };
+              new MutationObserver((ms) => { for (const mu of ms) { for (const n of mu.addedNodes) watch(n); if (mu.type === 'childList' && mu.target.closest) { const m = mu.target.closest('.menu, .mention-menu'); if (m) requestAnimationFrame(() => fit(m)); } } })
+                .observe(document.body, { childList: true, subtree: true });
+              window.addEventListener('resize', () => document.querySelectorAll('.menu, .mention-menu').forEach(fit));
+            }
             // Larrier's own tooltips instead of the system's: a hovered
             // element's title moves to data-tip and shows in a bubble.
             if (!window.__larrierTips) {

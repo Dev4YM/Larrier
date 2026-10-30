@@ -92,7 +92,10 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
         if sub.is_some() { " showing-sub" } else { "" },
     );
     rsx! {
-        div { class: "agent-frame",
+        div { class: if split.is_none() { "agent-frame with-toggle" } else { "agent-frame" },
+        if split.is_none() {
+            PanelToggle {}
+        }
         if rail {
             ChatHeader { id: id.clone() }
         }
@@ -296,6 +299,19 @@ fn span_short(d: chrono::Duration) -> String {
 /// and its tools. Folds down to icons.
 #[component]
 fn SessionRail(id: String) -> Element {
+    let app = use_app();
+    let collapsed = app.config.read().settings.session_rail_collapsed;
+    // One frame whose width animates between the folded card and the full
+    // rail, so the chat beside it eases instead of jumping.
+    rsx! {
+        div { class: if collapsed { "rail-wrap folded" } else { "rail-wrap" },
+            RailBody { id }
+        }
+    }
+}
+
+#[component]
+fn RailBody(id: String) -> Element {
     use larrier_core::PlanStatus;
     let mut app = use_app();
     let id_m = id.clone();
@@ -519,7 +535,6 @@ fn ChatHeader(id: String) -> Element {
     let info = use_memo(move || app.with_session(&id_m, head_info));
     let mut menu = use_signal(|| false);
     let mut export_menu = use_signal(|| false);
-    let right_open = use_ui(|u| u.right_open)();
     let Some(h) = info() else { return rsx! {} };
     let (id_c, id_d, id_e, id_f, id_g, id_h, id_i) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
     let (env_icon, env_tip) = h.env.clone();
@@ -575,15 +590,24 @@ fn ChatHeader(id: String) -> Element {
                     }
                 }
             }
-            if !right_open && app.split.read().is_none() {
-                button { class: "icon-btn", title: "Show side panel (Ctrl+Shift+J)",
-                    onclick: move |_| {
-                        app.ui.write().right_open = true;
-                        app.update_config(|c| c.settings.right_panel_open = true);
-                    },
-                    Icon { i: I::PanelRight, size: 16, stroke: 1.5 }
-                }
-            }
+        }
+    }
+}
+
+/// The side panel's toggle: one button that stays where it is whether the
+/// panel is open or not (the headers under it leave room for it).
+#[component]
+fn PanelToggle() -> Element {
+    let mut app = use_app();
+    let open = use_ui(|u| u.right_open)();
+    rsx! {
+        button { class: if open { "icon-btn pane-toggle panel on" } else { "icon-btn pane-toggle panel" },
+            title: if open { "Hide side panel (Ctrl+Shift+J)" } else { "Show side panel (Ctrl+Shift+J)" },
+            onclick: move |_| {
+                app.ui.write().right_open = !open;
+                app.update_config(|c| c.settings.right_panel_open = !open);
+            },
+            Icon { i: I::PanelRight, size: 16, stroke: 1.5 }
         }
     }
 }

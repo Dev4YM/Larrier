@@ -135,8 +135,9 @@ fn by_agent(items: &[SessionSummary]) -> Vec<(AgentKind, Vec<SessionSummary>)> {
 }
 
 #[component]
-pub fn Sidebar() -> Element {
+pub fn Sidebar(#[props(default)] parked: bool) -> Element {
     let mut app = use_app();
+    let side_open = use_ui(|u| u.sidebar_open)();
     let mut searching = use_signal(|| false);
     let mut dragging = use_signal(|| false);
     let mut last_press = use_signal(|| None::<std::time::Instant>);
@@ -191,12 +192,8 @@ pub fn Sidebar() -> Element {
     let ctx = SideCtx { selected: selected.clone(), running: running.clone(), searching: !query.is_empty() };
 
     rsx! {
-        aside { class: "sidebar",
+        aside { class: if parked { "sidebar parked" } else if side_open { "sidebar" } else { "sidebar closed" }, "aria-hidden": if side_open && !parked { "false" } else { "true" },
             div { class: "side-top",
-                button { class: "icon-btn", title: "Hide sidebar (Ctrl+B)",
-                    onclick: move |_| app.ui.write().sidebar_open = false,
-                    Icon { i: I::PanelLeft, size: 16, stroke: 1.5 }
-                }
                 button { class: if show_search { "icon-btn active" } else { "icon-btn" }, title: "Search agents",
                     onclick: move |_| {
                         let now = !searching();

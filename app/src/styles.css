@@ -1371,9 +1371,9 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
    under it, like Cursor's; folded, the rail is a floating card of tools. */
 .agent-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat-col.bare .sub-layer { top: 0; }
-.agent-body > .tools-col.collapsed { align-self: flex-start; width: auto; margin: 2px 10px 0 0; padding: 4px; gap: 2px;
+.rail-wrap > .tools-col.collapsed { align-self: flex-start; width: auto; margin: 2px 10px 0 auto; padding: 4px; gap: 2px;
   border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: 0 4px 14px -8px rgba(0, 0, 0, .12); }
-.agent-body > .tools-col.collapsed .rail-head { height: 34px; justify-content: center; }
+.rail-wrap > .tools-col.collapsed .rail-head { height: 34px; justify-content: center; }
 
 /* Reasoning effort in the model picker (and Cursor's speed). */
 .picker .lb.eff { font-size: 12px; }
@@ -1448,6 +1448,45 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .req-note:focus { border-color: var(--border-2); }
 .req-actions .primary-btn, .req-actions .ghost-btn { height: 28px; }
 @keyframes req-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* The rail eases between its folded card and the full column. */
+.rail-wrap { flex-shrink: 0; width: 264px; display: flex; min-height: 0; overflow: hidden; transition: width .24s cubic-bezier(.2, .8, .2, 1); }
+.rail-wrap.folded { width: 56px; }
+.rail-wrap > .tools-col:not(.collapsed) { flex: 0 0 264px; animation: rail-content-in .26s ease-out both; }
+.rail-wrap > .tools-col.collapsed { animation: rail-card-in .22s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes rail-content-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+@keyframes rail-card-in { from { opacity: 0; transform: translateX(-6px) scale(.96); } to { opacity: 1; transform: none; } }
+
+/* The sidebar slides out of the way instead of vanishing. */
+.app-body { position: relative; }
+.sidebar { transition: margin-left .24s cubic-bezier(.2, .8, .2, 1), margin-right .24s cubic-bezier(.2, .8, .2, 1), opacity .2s ease, visibility 0s linear 0s; }
+.sidebar.closed { margin-left: calc(-1 * var(--sidebar-w, 300px)); opacity: 0; visibility: hidden; pointer-events: none;
+  transition: margin-left .24s cubic-bezier(.2, .8, .2, 1), margin-right .24s cubic-bezier(.2, .8, .2, 1), opacity .2s ease, visibility 0s linear .24s; }
+.app.sidebar-right .sidebar.closed { margin-left: 0; margin-right: calc(-1 * var(--sidebar-w, 300px)); }
+.app.narrow .sidebar.closed { margin-left: 0; transform: translateX(-100%); }
+.app.narrow .sidebar { transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .2s ease, visibility 0s linear 0s; }
+
+/* The side panel slides in. */
+.right-pane { animation: pane-in .24s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes pane-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+
+/* Pane toggles stay put: one button each, at the same spot whether its
+   pane is open or closed; the headers under them leave room. */
+.side-top, .main-head, .rp-head { height: 44px; }
+.pane-toggle { position: absolute; top: 8px; width: 28px; height: 28px; z-index: 6; }
+.pane-toggle.side { left: 10px; }
+.app.sidebar-right .pane-toggle.side { left: auto; right: 10px; }
+.pane-toggle .badge { position: absolute; top: -2px; right: -4px; }
+.side-top { padding-left: 42px; }
+.app.sidebar-right .side-top { padding-left: 10px; padding-right: 42px; }
+.app.side-closed:not(.sidebar-right) .main-head:not(.split-head) { padding-left: 42px; }
+.agent-frame { position: relative; }
+.agent-frame > .pane-toggle.panel { right: 10px; }
+.app.sidebar-right.side-closed .agent-frame > .pane-toggle.panel { right: 46px; }
+.agent-frame.with-toggle > .main-head, .agent-frame .rp-head { padding-right: 46px; }
+
+/* Behind Settings the sidebar stays as it was, out of sight. */
+.sidebar.parked { position: absolute; left: 0; top: 0; bottom: 0; visibility: hidden; pointer-events: none; transition: none; }
 
 /* The queue: a card that folds into a pill; rows drag to reorder and
    show their actions on hover. */

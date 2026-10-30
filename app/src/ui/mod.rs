@@ -433,6 +433,9 @@ pub fn Root() -> Element {
     drop(cfg);
 
     let in_settings = matches!(&*app.view.read(), View::Settings(_));
+    if !sidebar_open && !in_settings {
+        class.push_str(" side-closed");
+    }
     // Not an inline `style`: Dioxus restores inline properties a new value
     // leaves out, so removed colors (the Larrier preset, Reset) would stick.
     let root_css = format!(".app.larrier-root[data-theme] {{ {style} }}");
@@ -445,13 +448,17 @@ pub fn Root() -> Element {
             div { class: "app-body",
                 if in_settings {
                     settings::SettingsNav {}
-                } else if sidebar_open {
-                    sidebar::Sidebar {}
-                    if narrow {
-                        div { class: "narrow-backdrop", onclick: move |_| { let mut a = app; a.ui.write().sidebar_open = false; } }
-                    }
+                }
+                // Always mounted: it slides in and out, and keeps its scroll
+                // and open groups while Settings is shown.
+                sidebar::Sidebar { parked: in_settings }
+                if narrow && sidebar_open && !in_settings {
+                    div { class: "narrow-backdrop", onclick: move |_| { let mut a = app; a.ui.write().sidebar_open = false; } }
                 }
                 Main {}
+                if !in_settings {
+                    SideToggle {}
+                }
             }
             Palette {}
             ModalHost {}
@@ -896,7 +903,31 @@ pub fn CopyButton(text: String, #[props(default = 14)] size: u32, #[props(defaul
     }
 }
 
-/// Sidebar toggle shown in pane headers when the sidebar is hidden.
+/// The sidebar's toggle: one button that stays where it is whether the
+/// sidebar is open or not (headers leave room for it).
+#[component]
+fn SideToggle() -> Element {
+    let mut app = crate::state::use_app();
+    let open = app.ui.read().sidebar_open;
+    let review = app
+        .sessions
+        .read()
+        .iter()
+        .filter(|s| !s.archived && s.unread && matches!(s.status, larrier_core::SessionStatus::Review | larrier_core::SessionStatus::Done))
+        .count();
+    rsx! {
+        button { class: if open { "icon-btn pane-toggle side on" } else { "icon-btn pane-toggle side" },
+            title: if open { "Hide sidebar (Ctrl+B)" } else { "Show sidebar (Ctrl+B)" },
+            onclick: move |_| { let o = !app.ui.read().sidebar_open; app.ui.write().sidebar_open = o; },
+            Icon { i: I::PanelLeft, size: 16, stroke: 1.5 }
+            if !open && review > 0 {
+                span { class: "badge", "{review}" }
+            }
+        }
+    }
+}
+
+/// Search, in pane headers while the sidebar (which has its own) is hidden.
 #[component]
 pub fn SidebarToggle() -> Element {
     let mut app = crate::state::use_app();
@@ -907,17 +938,11 @@ pub fn SidebarToggle() -> Element {
         .iter()
         .filter(|s| !s.archived && s.unread && matches!(s.status, larrier_core::SessionStatus::Review | larrier_core::SessionStatus::Done))
         .count();
+    let _ = review;
     if open {
         return rsx! {};
     }
     rsx! {
-        button { class: "icon-btn", title: "Show sidebar (Ctrl+B)",
-            onclick: move |_| app.ui.write().sidebar_open = true,
-            Icon { i: I::PanelLeft, size: 16, stroke: 1.5 }
-            if review > 0 {
-                span { class: "badge", "{review}" }
-            }
-        }
         button { class: "icon-btn", title: "Search (Ctrl+K)",
             onclick: move |_| {
                 let mut ui = app.ui.write();

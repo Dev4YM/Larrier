@@ -119,13 +119,6 @@ pub fn RightPane(id: String) -> Element {
                     },
                     Icon { i: I::Maximize2, size: 15, stroke: 1.5 }
                 }
-                button { class: "icon-btn active", title: "Hide panel (Ctrl+Shift+J)",
-                    onclick: move |_| {
-                        app.ui.write().right_open = false;
-                        app.update_config(|c| c.settings.right_panel_open = false);
-                    },
-                    Icon { i: I::PanelRight, size: 16, stroke: 1.5 }
-                }
             }
             div { class: "rp-body",
                 match tab {

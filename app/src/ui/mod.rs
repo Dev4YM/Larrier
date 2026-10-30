@@ -606,16 +606,26 @@ pub fn zoom(app: App, delta: f64) {
 fn Main() -> Element {
     let app = crate::state::use_app();
     let view = app.view.read().clone();
+    // A session and its subagent tabs are one view: switching tabs swaps the
+    // transcript and keeps the header and side panel as they are.
+    let chat = match &view {
+        View::Agent(id) => Some((id.clone(), None)),
+        View::Subagent { session, tool } => Some((session.clone(), Some(tool.clone()))),
+        _ => None,
+    };
     rsx! {
         div { class: "main",
             InterruptedBanner {}
-            match view {
-                View::Home => rsx! { home::Home {} },
-                View::Agent(id) => rsx! { chat::AgentView { key: "{id}", id: id.clone() } },
-                View::Subagent { session, tool } => rsx! { chat::SubagentView { key: "{session}:{tool}", session: session.clone(), tool: tool.clone() } },
-                View::Settings(tab) => rsx! { settings::SettingsView { tab } },
-                View::Automations => rsx! { PageFrame { automations::AutomationsView {} } },
-                View::Customize => rsx! { PageFrame { customize::CustomizeView {} } },
+            if let Some((id, sub)) = chat {
+                chat::AgentView { key: "{id}", id, sub }
+            } else {
+                match view {
+                    View::Home => rsx! { home::Home {} },
+                    View::Settings(tab) => rsx! { settings::SettingsView { tab } },
+                    View::Automations => rsx! { PageFrame { automations::AutomationsView {} } },
+                    View::Customize => rsx! { PageFrame { customize::CustomizeView {} } },
+                    View::Agent(_) | View::Subagent { .. } => rsx! {},
+                }
             }
         }
     }

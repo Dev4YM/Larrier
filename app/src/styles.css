@@ -1315,3 +1315,10 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .tk-dots circle { fill: currentColor; opacity: .22; animation: tk-dot 1.2s linear infinite; }
 @keyframes tk-dot { 0%, 10% { opacity: 1; } 62%, 100% { opacity: .22; } }
 .app.no-motion .tk-dots circle { animation: none; opacity: .7; }
+
+/* A subagent's transcript over its session's chat (which stays laid out
+   underneath, hidden, so its scroll position survives). */
+.chat-col.showing-sub > :not(.main-head):not(.sub-layer):not(.resizer) { visibility: hidden; }
+.sub-layer { position: absolute; top: 44px; left: 0; right: 0; bottom: 0; z-index: 4; display: flex; flex-direction: column; min-height: 0;
+  background: var(--pane); animation: fade-in .16s ease-out; }
+.app.no-motion .sub-layer { animation: none; }

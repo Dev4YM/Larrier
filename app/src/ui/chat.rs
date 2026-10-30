@@ -68,8 +68,10 @@ pub fn commit_message(title: &str, summary: &str) -> String {
     }
 }
 
+/// A session: its chat (or one of its subagents' transcripts, `sub`), with
+/// the side panel, the session rail or a second session beside it.
 #[component]
-pub fn AgentView(id: String) -> Element {
+pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
     let mut app = use_app();
     let right_open = use_ui(|u| u.right_open)();
     let loaded = app.open.read().contains_key(&id);
@@ -82,10 +84,22 @@ pub fn AgentView(id: String) -> Element {
     rsx! {
         div { class: if split.is_some() { "agent-body split" } else { "agent-body" },
             div {
-                class: if right_open && split.is_none() { "chat-col primary fixed" } else { "chat-col primary" },
+                class: match (right_open && split.is_none(), sub.is_some()) {
+                    (true, true) => "chat-col primary fixed showing-sub",
+                    (true, false) => "chat-col primary fixed",
+                    (false, true) => "chat-col primary showing-sub",
+                    (false, false) => "chat-col primary",
+                },
                 "data-session": "{id}",
                 ChatHeader { id: id.clone() }
+                // The chat stays laid out under a subagent's transcript, so
+                // going back finds it as it was.
                 ChatColumn { id: id.clone(), input_id: "composer-input" }
+                if let Some(tool) = sub.clone() {
+                    div { key: "{tool}", class: "sub-layer",
+                        super::tasks::SubagentTranscript { session_id: id.clone(), tool_id: tool }
+                    }
+                }
                 if right_open && split.is_none() {
                     div {
                         class: if dragging() { "resizer dragging" } else { "resizer" },
@@ -760,24 +774,6 @@ pub fn DropZones(target: Option<String>) -> Element {
 }
 
 // ------------------------------------------------------------------ subagent tab
-
-/// A subagent's transcript in its own tab (its header links back to the
-/// parent chat).
-#[component]
-pub fn SubagentView(session: String, tool: String) -> Element {
-    rsx! {
-        div { class: "agent-body",
-            div { class: "chat-col primary", style: "flex: 1;",
-                div { class: "main-head",
-                    SidebarToggle {}
-                    TabStrip {}
-                    DragRegion {}
-                }
-                super::tasks::SubagentTranscript { session_id: session.clone(), tool_id: tool.clone() }
-            }
-        }
-    }
-}
 
 /// Background-task chips, then "Changes +N -M" and "Commit & Push ▾", above
 /// the composer.

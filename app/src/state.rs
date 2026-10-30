@@ -1698,18 +1698,21 @@ pub const HOME_KEY: &str = "~home";
 /// chats without a project — no folder, the home folder itself, Codex's
 /// project-less thread folders (`~/Documents/Codex/<date>/<name>`) and the
 /// scratch folders of Claude's "This computer" sessions
-/// (`<app data>/Claude/scratch-workspaces/…`).
+/// (`<app data>/Claude/scratch-workspaces/<id>/<id>/scratch-…`). A project
+/// made inside one of those is a project of its own.
 pub fn project_key(path: Option<&str>) -> String {
     let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
     let Some(p) = path.map(norm).filter(|p| !p.is_empty()) else { return HOME_KEY.into() };
-    static HOMES: OnceLock<(Option<String>, Vec<String>)> = OnceLock::new();
+    // Scratch roots and how many folders deep their scratch folders are.
+    static HOMES: OnceLock<(Option<String>, Vec<(String, usize)>)> = OnceLock::new();
     let (home, roots) = HOMES.get_or_init(|| {
         let home = dirs::home_dir().map(|h| norm(&h.to_string_lossy()));
-        let mut roots: Vec<String> = home.iter().map(|h| format!("{h}/documents/codex/")).collect();
-        roots.extend(dirs::config_dir().map(|c| format!("{}/claude/scratch-workspaces/", norm(&c.to_string_lossy()))));
+        let mut roots: Vec<(String, usize)> = home.iter().map(|h| (format!("{h}/documents/codex/"), 2)).collect();
+        roots.extend(dirs::config_dir().map(|c| (format!("{}/claude/scratch-workspaces/", norm(&c.to_string_lossy())), 3)));
         (home, roots)
     });
-    if home.as_deref() == Some(p.as_str()) || roots.iter().any(|r| p.starts_with(r.as_str())) {
+    let scratch = roots.iter().any(|(r, depth)| p.strip_prefix(r.as_str()).map(|rest| rest.split('/').count() == *depth).unwrap_or(false));
+    if home.as_deref() == Some(p.as_str()) || scratch {
         return HOME_KEY.into();
     }
     p
@@ -1926,6 +1929,8 @@ mod tests {
         assert_ne!(project_key(Some(&format!("{home}/projects/app"))), HOME_KEY);
         let app_data = dirs::config_dir().unwrap().to_string_lossy().to_string();
         assert_eq!(project_key(Some(&format!("{app_data}/Claude/scratch-workspaces/a/b/scratch-2026-10-29-4d46fd"))), HOME_KEY);
+        // A project made inside a scratch folder is a project.
+        assert_ne!(project_key(Some(&format!("{app_data}/Claude/scratch-workspaces/a/b/scratch-2026-01-01-000000/demo"))), HOME_KEY);
     }
 
     #[test]

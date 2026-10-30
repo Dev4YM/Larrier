@@ -159,6 +159,11 @@ icons! {
     PanelBottom => "panel-bottom",
     Maximize2 => "maximize-2",
     Minimize2 => "minimize-2",
+    Orbit => "orbit",
+    Prompt => "terminal",
+    Minus => "minus",
+    Gauge => "gauge",
+    Timer => "timer",
 }
 
 /// Hand-drawn Windows caption glyphs.

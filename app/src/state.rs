@@ -185,6 +185,9 @@ pub struct Ui {
     pub compose_inbox: Vec<(Option<String>, String)>,
     /// Right-click menu of a chat tab.
     pub tab_ctx: Option<TabCtx>,
+    /// An agent's terminal shown read-only in the Terminal tab:
+    /// (session id, shell tool call id).
+    pub agent_term: Option<(String, String)>,
 }
 
 impl Ui {
@@ -389,6 +392,7 @@ impl App {
             interrupted: Vec::new(),
             compose_inbox: Vec::new(),
             tab_ctx: None,
+            agent_term: None,
         };
         App {
             sessions: root_signal(store().list()),

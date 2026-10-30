@@ -423,7 +423,7 @@ fn SessionRail(id: String) -> Element {
                     for (i, (title, sub)) in h.tasks.iter().take(4).enumerate() {
                         button { key: "{i}", class: "rail-act link", onclick: move |_| app.ui.write().open_panel(RightTab::Tasks, false),
                             span { class: "ic", super::Spinner { size: 11 } }
-                            Icon { i: if *sub { I::Bot } else { I::Terminal }, size: 12, stroke: 1.6 }
+                            Icon { i: if *sub { I::Orbit } else { I::Prompt }, size: 12, stroke: 1.6 }
                             span { class: "t", title: "{title}", "{title}" }
                         }
                     }
@@ -712,7 +712,7 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
                 if running {
                     super::Spinner { size: 14 }
                 } else if sub.is_some() {
-                    Icon { i: I::Bot, size: 14, stroke: 1.5 }
+                    Icon { i: I::Orbit, size: 14, stroke: 1.5 }
                 } else {
                     AgentGlyph { kind: agent }
                 }
@@ -779,7 +779,8 @@ pub fn SubagentView(session: String, tool: String) -> Element {
     }
 }
 
-/// "Changes +N -M" and "Commit & Push ▾" above the composer.
+/// Background-task chips, then "Changes +N -M" and "Commit & Push ▾", above
+/// the composer.
 #[component]
 fn AboveComposer(id: String) -> Element {
     let app = use_app();
@@ -814,6 +815,8 @@ fn AboveComposer(id: String) -> Element {
         let _ = info();
         app.peek_session(&id_f, |s| s.diff_stats()).unwrap_or_default()
     });
+    let id_t = id.clone();
+    let tasks = use_memo(move || app.is_active(&id_t) && app.with_session(&id_t, |s| super::tasks::has_live(&s.messages)).unwrap_or(false));
     if info().is_none() {
         return rsx! {};
     }
@@ -825,7 +828,10 @@ fn AboveComposer(id: String) -> Element {
             (f, a, r)
         }
     };
-    if files == 0 || running {
+    // Changes and Commit wait for the agent; its background work shows
+    // while it runs.
+    let show_changes = files > 0 && !running;
+    if !show_changes && !tasks() {
         return rsx! {};
     }
     let in_git = git_stats.is_some();
@@ -875,25 +881,27 @@ fn AboveComposer(id: String) -> Element {
         div { class: "composer-wrap", style: "padding-bottom: 8px;",
             div { class: "row above-composer", style: "gap: 6px;",
                 super::tasks::BackgroundChips { session_id: id.clone() }
-                button { class: "pill-btn", onclick: move |_| open_tool(app, RightTab::Changes),
-                    "Changes"
-                    span { class: "add num", "+{added}" }
-                    span { class: "del num", "-{removed}" }
-                }
-                if in_git {
-                    div { class: "menu-anchor",
-                        div { class: "pill-btn split-btn",
-                            button { class: "main", disabled: busy(), onclick: move |_| run("push"),
-                                if busy() { "Working…" } else { "Commit & Push" }
+                if show_changes {
+                    button { class: "pill-btn", onclick: move |_| open_tool(app, RightTab::Changes),
+                        "Changes"
+                        span { class: "add num", "+{added}" }
+                        span { class: "del num", "-{removed}" }
+                    }
+                    if in_git {
+                        div { class: "menu-anchor",
+                            div { class: "pill-btn split-btn",
+                                button { class: "main", disabled: busy(), onclick: move |_| run("push"),
+                                    if busy() { "Working…" } else { "Commit & Push" }
+                                }
+                                button { class: "chev", onclick: move |_| menu.set(true),
+                                    Icon { i: I::ChevronDown, size: 12 }
+                                }
                             }
-                            button { class: "chev", onclick: move |_| menu.set(true),
-                                Icon { i: I::ChevronDown, size: 12 }
+                            Dropdown { open: menu, up: true,
+                                MenuItem { label: "Commit".to_string(), icon: Some(I::Commit), onclick: move |_| run2("commit") }
+                                MenuItem { label: "Commit & Push".to_string(), icon: Some(I::Upload), onclick: move |_| run3("push") }
+                                MenuItem { label: "Create Pull Request".to_string(), icon: Some(I::PullRequest), onclick: move |_| run4("pr") }
                             }
-                        }
-                        Dropdown { open: menu, up: true,
-                            MenuItem { label: "Commit".to_string(), icon: Some(I::Commit), onclick: move |_| run2("commit") }
-                            MenuItem { label: "Commit & Push".to_string(), icon: Some(I::Upload), onclick: move |_| run3("push") }
-                            MenuItem { label: "Create Pull Request".to_string(), icon: Some(I::PullRequest), onclick: move |_| run4("pr") }
                         }
                     }
                 }

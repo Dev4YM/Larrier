@@ -1309,3 +1309,9 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .step.quiet { cursor: default; }
 .step.quiet:hover .verb { color: var(--fg-2); }
 .step.quiet:hover .target { color: var(--fg-3); }
+
+/* Background work: six dots lit in turn (tasks::Dots) */
+.tk-dots { flex-shrink: 0; overflow: visible; }
+.tk-dots circle { fill: currentColor; opacity: .22; animation: tk-dot 1.2s linear infinite; }
+@keyframes tk-dot { 0%, 10% { opacity: 1; } 62%, 100% { opacity: .22; } }
+.app.no-motion .tk-dots circle { animation: none; opacity: .7; }

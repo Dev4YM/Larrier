@@ -176,6 +176,8 @@ fn ChatColumn(id: String, input_id: &'static str) -> Element {
 struct RailInfo {
     agent: larrier_core::AgentKind,
     model: Option<String>,
+    /// The user's own agent the chat runs as (Claude Code's `--agent`).
+    run_as: Option<String>,
     workspace: Option<String>,
     branch: Option<String>,
     env: String,
@@ -259,6 +261,7 @@ fn rail_info(s: &Session) -> RailInfo {
     RailInfo {
         agent: s.agent.clone(),
         model: model_raw.as_deref().map(larrier_core::models::display_name),
+        run_as: s.run_as.clone(),
         workspace: s.workspace.as_ref().map(|w| if w.name.is_empty() { w.path.clone() } else { w.name.clone() }),
         branch: s.workspace.as_ref().and_then(|w| w.branch.clone()),
         env: match &s.environment {
@@ -365,6 +368,12 @@ fn RailBody(id: String) -> Element {
                     AgentGlyph { kind: h.agent.clone() }
                     span { class: "a", "{h.agent.display_name()}" }
                     if let Some(m) = &h.model { span { class: "m", title: "{m}", "{m}" } }
+                }
+                if let Some(a) = &h.run_as {
+                    div { class: "rail-line run-as", title: "This chat runs as your {a} agent: its instructions, tools and MCP servers",
+                        Icon { i: I::Orbit, size: 12, stroke: 1.6 }
+                        span { "{a} agent" }
+                    }
                 }
                 div { class: "rail-line",
                     if running { super::Spinner { size: 12 } } else { span { class: "dot" } }

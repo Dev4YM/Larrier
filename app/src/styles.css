@@ -1179,6 +1179,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .rail-card .who .a { color: var(--fg); font-weight: 500; white-space: nowrap; }
 .rail-card .who .m { color: var(--fg-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.rail-line.run-as { color: var(--violet, #7c3aed); font-weight: 500; }
 .rail-line > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-line > svg { flex-shrink: 0; color: var(--fg-3); }
 .rail-line .dot { width: 6px; height: 6px; margin: 0 3px; border-radius: 50%; background: var(--fg-4); flex-shrink: 0; }

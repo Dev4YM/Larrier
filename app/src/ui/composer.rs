@@ -791,9 +791,11 @@ pub fn Composer(
                         button { class: "icon-btn sm", onclick: move |_| app.ui.write().quote = None, Icon { i: I::X, size: 11 } }
                     }
                 }
-                if !atts.is_empty() || !chips_now.is_empty() || run_as.is_some() {
+                // Who the chat runs as is picked here before it starts; after
+                // that the session rail says it.
+                if !atts.is_empty() || !chips_now.is_empty() || (fresh && run_as.is_some()) {
                     div { class: "thumb-row",
-                        if let Some(name) = run_as.clone() {
+                        if let Some(name) = run_as.clone().filter(|_| fresh) {
                             span { class: "mention-chip run-as",
                                 title: if fresh { format!("This chat runs as your {name} agent: its instructions, tools and MCP servers") } else { format!("This chat runs as your {name} agent") },
                                 span { class: "ic", Icon { i: I::Orbit, size: 12, stroke: 1.6 } }

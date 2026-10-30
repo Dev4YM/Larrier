@@ -250,6 +250,20 @@ impl EditState {
     }
 }
 
+/// Where updating Larrier stands.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub enum UpdateState {
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    Available(crate::update::Release),
+    Downloading { version: String, got: u64, total: u64 },
+    /// Downloaded and checked: restarting puts it in place.
+    Ready { version: String, path: PathBuf },
+    Failed(String),
+}
+
 /// A follow-up waiting for the agent to finish its current turn.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Queued {
@@ -330,6 +344,7 @@ pub struct App {
     /// Running sessions whose agent finished its reply while background work
     /// (subagents, commands) keeps the turn open: not "generating".
     pub idle: Signal<HashSet<String>>,
+    pub update: Signal<UpdateState>,
 }
 
 /// Signals owned by the root scope so background tasks can use them for the
@@ -413,6 +428,7 @@ impl App {
             drag: root_signal(None),
             live: root_signal(HashMap::new()),
             idle: root_signal(HashSet::new()),
+            update: root_signal(UpdateState::default()),
         }
     }
 
@@ -1242,6 +1258,61 @@ impl App {
 
     pub fn set_unread(self, id: &str, unread: bool) {
         self.update_session(id, |s| s.unread = unread);
+    }
+
+    /// Look for a newer release. `quiet` keeps failures (offline, no
+    /// releases yet) out of sight.
+    pub fn check_updates(mut self, quiet: bool) {
+        if matches!(*self.update.peek(), UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Ready { .. }) {
+            return;
+        }
+        if !quiet {
+            self.update.set(UpdateState::Checking);
+        }
+        spawn_forever(async move {
+            let next = match crate::update::check().await {
+                Ok(Some(rel)) => UpdateState::Available(rel),
+                Ok(None) => UpdateState::UpToDate,
+                Err(_) if quiet => UpdateState::Idle,
+                Err(e) => UpdateState::Failed(format!("{e:#}")),
+            };
+            self.update.set(next);
+        });
+    }
+
+    /// Download the available release (checked against its checksum).
+    pub fn download_update(mut self) {
+        let UpdateState::Available(rel) = self.update.peek().clone() else { return };
+        self.update.set(UpdateState::Downloading { version: rel.version.clone(), got: 0, total: rel.size });
+        spawn_forever(async move {
+            let version = rel.version.clone();
+            let mut shown = 0u64;
+            let r = crate::update::download(&rel, |got, total| {
+                // A redraw per percent, not per chunk.
+                let pct = if total > 0 { got * 100 / total } else { 0 };
+                if pct != shown {
+                    shown = pct;
+                    self.update.set(UpdateState::Downloading { version: version.clone(), got, total });
+                }
+            })
+            .await;
+            self.update.set(match r {
+                Ok(path) => UpdateState::Ready { version, path },
+                Err(e) => UpdateState::Failed(format!("{e:#}")),
+            });
+        });
+    }
+
+    /// Close and let the downloaded release take this one's place.
+    pub fn restart_to_update(self) {
+        let UpdateState::Ready { path, .. } = self.update.peek().clone() else { return };
+        if !self.running.peek().is_empty() {
+            return self.toast("Agents are still working — stop them or wait, then restart to update");
+        }
+        match crate::update::restart_into(&path) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => self.toast_err(format!("Could not start the update: {e:#}")),
+        }
     }
 
     /// Clear every unread dot (sessions not open are saved off the UI thread).

@@ -774,13 +774,78 @@ fn Shortcuts() -> Element {
 
 #[component]
 fn About() -> Element {
+    let app = use_app();
+    let kind = crate::install::current();
+    let auto = app.config.read().settings.auto_update;
+    let upd = app.update.read().clone();
+    let (where_t, where_d) = match kind {
+        crate::install::Kind::Installed(crate::install::Scope::Machine) => ("Installed for everyone", crate::install::layout(crate::install::Scope::Machine).bin_dir.display().to_string()),
+        crate::install::Kind::Installed(crate::install::Scope::User) => ("Installed for you", crate::install::layout(crate::install::Scope::User).bin_dir.display().to_string()),
+        crate::install::Kind::Portable => ("Not installed", "Running this copy as it is. Run it again to install it.".to_string()),
+        crate::install::Kind::Dev => ("Development build", "Built from source: updates come from your checkout.".to_string()),
+    };
+    let installed = matches!(kind, crate::install::Kind::Installed(_));
+    let can_update = !matches!(kind, crate::install::Kind::Dev);
+    let status = match &upd {
+        crate::state::UpdateState::Idle => "Updates come from Larrier's releases on GitHub.".to_string(),
+        crate::state::UpdateState::Checking => "Checking…".to_string(),
+        crate::state::UpdateState::UpToDate => format!("Larrier {} is the newest release.", larrier_core::APP_VERSION),
+        crate::state::UpdateState::Available(r) => format!("Larrier {} is available.", r.version),
+        crate::state::UpdateState::Downloading { version, got, total } => {
+            let pct = if *total > 0 { got * 100 / total } else { 0 };
+            format!("Downloading Larrier {version}… {pct}%")
+        }
+        crate::state::UpdateState::Ready { version, .. } => format!("Larrier {version} is ready: restart to finish."),
+        crate::state::UpdateState::Failed(e) => e.clone(),
+    };
     rsx! {
         h1 { "Larrier" }
         div { class: "sub", "One window for every coding agent and AI chat." }
         div { class: "set-card",
             Row { title: "Version".to_string(), span { class: "code-inline", "{larrier_core::APP_VERSION}" } }
+            Row { title: where_t.to_string(), desc: Some(where_d) }
+            Row { title: "Updates".to_string(), desc: Some(status),
+                match &upd {
+                    _ if !can_update => rsx! {},
+                    crate::state::UpdateState::Available(r) => {
+                        let page = r.page.clone();
+                        rsx! {
+                            if !page.is_empty() {
+                                button { class: "ghost-btn", onclick: move |_| { let _ = open::that(&page); }, "What's new" }
+                            }
+                            button { class: "primary-btn", onclick: move |_| app.download_update(), "Download" }
+                        }
+                    }
+                    crate::state::UpdateState::Ready { .. } => rsx! {
+                        button { class: "primary-btn", onclick: move |_| app.restart_to_update(), "Restart to update" }
+                    },
+                    crate::state::UpdateState::Checking | crate::state::UpdateState::Downloading { .. } => rsx! { super::Spinner { size: 14 } },
+                    _ => rsx! {
+                        button { class: "ghost-btn", onclick: move |_| app.check_updates(false), "Check for updates" }
+                    },
+                }
+            }
+            if can_update {
+                Row { title: "Check automatically".to_string(), desc: Some("Look for a new release when Larrier starts, then twice a day.".to_string()),
+                    super::Toggle { on: auto, onchange: move |v: bool| app.update_config(|c| c.settings.auto_update = v) }
+                }
+            }
             Row { title: "Session format".to_string(), span { class: "code-inline", "LSF {larrier_core::lsf::LSF_VERSION}" } }
             Row { title: "Source".to_string(), a { href: "https://github.com/Dev4YM/Larrier", "github.com/Dev4YM/Larrier" } }
+            if installed {
+                Row { title: "Uninstall".to_string(), desc: Some("Remove Larrier from this computer. You choose whether your sessions go too.".to_string()),
+                    button { class: "ghost-btn",
+                        onclick: move |_| {
+                            if let Ok(me) = std::env::current_exe() {
+                                if crate::install::launch(&me, &["--uninstall"]).is_ok() {
+                                    std::process::exit(0);
+                                }
+                            }
+                        },
+                        "Uninstall…"
+                    }
+                }
+            }
         }
     }
 }

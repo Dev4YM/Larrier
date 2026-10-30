@@ -158,6 +158,9 @@ pub struct Settings {
     pub project_order: Vec<String>,
     #[serde(default = "yes")]
     pub notify_on_finish: bool,
+    /// Look for a newer release on GitHub (installed copies of Larrier).
+    #[serde(default = "yes")]
+    pub auto_update: bool,
 
     // ---- appearance
     /// Accent color (`#rrggbb`); empty = theme default.
@@ -316,6 +319,7 @@ impl Default for Settings {
             show_archived: false,
             project_order: Vec::new(),
             notify_on_finish: true,
+            auto_update: true,
             accent: String::new(),
             ui_font: None,
             mono_font: None,

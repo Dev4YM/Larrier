@@ -299,6 +299,22 @@ pub fn Sidebar() -> Element {
             div { class: "side-profile",
                 div { class: "avatar", "{initial}" }
                 span { class: "nm", "{name}" }
+                {
+                    let upd = app.update.read().clone();
+                    match upd {
+                        crate::state::UpdateState::Available(r) => rsx! {
+                            button { class: "pill", title: "Larrier {r.version} is available", onclick: move |_| app.open_settings(SettingsTab::About),
+                                Icon { i: I::ArrowUp, size: 11, stroke: 2.0 } "Update"
+                            }
+                        },
+                        crate::state::UpdateState::Ready { version, .. } => rsx! {
+                            button { class: "pill", title: "Restart to update to Larrier {version}", onclick: move |_| app.restart_to_update(),
+                                Icon { i: I::Refresh, size: 11, stroke: 2.0 } "Restart"
+                            }
+                        },
+                        _ => rsx! {},
+                    }
+                }
                 button { class: "icon-btn", title: "Import sessions from all agents", onclick: move |_| app.sync_imports(false),
                     Icon { i: I::Download, size: 15, stroke: 1.5 }
                 }

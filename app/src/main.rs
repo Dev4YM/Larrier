@@ -4,6 +4,7 @@
 mod automations;
 mod highlight;
 mod icons;
+mod install;
 mod live;
 mod logo;
 mod logos;
@@ -13,6 +14,7 @@ mod notify;
 mod quota;
 mod state;
 mod ui;
+mod update;
 
 use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 
@@ -43,10 +45,72 @@ fn scrub_host_session_env() {
     }
 }
 
+/// Where installing, updating and uninstalling note what went wrong (an
+/// elevated helper can only hand back an exit code).
+pub fn setup_log() -> std::path::PathBuf {
+    std::env::temp_dir().join("larrier-setup.log")
+}
+
+/// Steps that run without a window (installing, updating, uninstalling,
+/// often with administrator rights). `None` starts a window.
+fn headless(args: &[String]) -> Option<i32> {
+    let has = |f: &str| args.iter().any(|a| a == f);
+    let val = |f: &str| args.iter().position(|a| a == f).and_then(|i| args.get(i + 1)).cloned();
+    let result: anyhow::Result<()> = if let Some(scope) = val("--install") {
+        let scope = if scope == "machine" { install::Scope::Machine } else { install::Scope::User };
+        install::install(scope, has("--desktop")).and_then(|exe| if has("--launch") { install::launch(&exe, &[]) } else { Ok(()) })
+    } else if let Some(target) = val("--apply-update") {
+        update::apply(std::path::Path::new(&target), val("--pid").and_then(|p| p.parse().ok()))
+    } else if let Some(target) = val("--replace") {
+        update::replace(std::path::Path::new(&target))
+    } else if has("--uninstall") && (has("--quiet") || has("--confirmed")) {
+        match install::current() {
+            install::Kind::Installed(scope) if scope == install::Scope::User || install::can_install(scope) => install::uninstall(scope, has("--remove-data")),
+            install::Kind::Installed(_) => std::env::current_exe().map_err(Into::into).and_then(|me| {
+                let code = install::run_elevated(&me, &["--uninstall".into(), "--confirmed".into()])?;
+                anyhow::ensure!(code == 0, "uninstall failed (code {code})");
+                Ok(())
+            }),
+            _ => Err(anyhow::anyhow!("this copy of Larrier isn't installed")),
+        }
+    } else {
+        return None;
+    };
+    Some(match result {
+        Ok(()) => 0,
+        Err(e) => {
+            let _ = std::fs::write(setup_log(), format!("{e:#}"));
+            1
+        }
+    })
+}
+
+/// Which window to open.
+#[derive(Clone, Copy, PartialEq)]
+enum Start {
+    App,
+    /// A downloaded program run from outside an install: offer to install.
+    Setup,
+    Uninstall,
+}
+
 fn main() {
     scrub_host_session_env();
     let filter = std::env::var("LARRIER_LOG").unwrap_or_else(|_| "info,larrier=debug".into());
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = headless(&args) {
+        std::process::exit(code);
+    }
+    install::tidy();
+    let start = if args.iter().any(|a| a == "--uninstall") {
+        Start::Uninstall
+    } else if install::current() == install::Kind::Portable && !args.iter().any(|a| a == "--portable") {
+        Start::Setup
+    } else {
+        Start::App
+    };
 
     let root = state::store().root().to_path_buf();
     let dark = state::store().load_config().settings.theme == larrier_core::Theme::Dark;
@@ -64,6 +128,13 @@ fn main() {
     {
         use dioxus::desktop::tao::platform::windows::WindowBuilderExtWindows;
         window = window.with_undecorated_shadow(true);
+    }
+    if start != Start::App {
+        // The installer and uninstaller: a small window with the system's frame.
+        window = WindowBuilder::new()
+            .with_title(if start == Start::Setup { "Install Larrier" } else { "Uninstall Larrier" })
+            .with_inner_size(LogicalSize::new(640.0, if start == Start::Setup { 560.0 } else { 360.0 }))
+            .with_resizable(false);
     }
 
     let cfg = Config::new()
@@ -90,7 +161,11 @@ fn main() {
             true
         });
 
-    dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(ui::Root);
+    match start {
+        Start::App => dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(ui::Root),
+        Start::Setup => dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(ui::setup::SetupRoot),
+        Start::Uninstall => dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(ui::setup::UninstallRoot),
+    }
 }
 
 /// The Larrier mark as the window icon, drawn at runtime (no image files).

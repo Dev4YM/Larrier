@@ -14,6 +14,7 @@ mod models;
 mod overlays;
 mod right;
 mod settings;
+pub mod setup;
 mod sidebar;
 mod tasks;
 mod terminal;
@@ -54,6 +55,18 @@ pub fn Root() -> Element {
         }
         // Sessions other apps are writing update here as they change.
         crate::live::start(app);
+        // Installed copies look for a newer release now and then.
+        if matches!(crate::install::current(), crate::install::Kind::Installed(_)) {
+            dioxus::core::spawn_forever(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                loop {
+                    if app.config.peek().settings.auto_update {
+                        app.check_updates(true);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(12 * 3600)).await;
+                }
+            });
+        }
         // `larrier-desktop --open <session-id>` opens a session directly.
         let args: Vec<String> = std::env::args().collect();
         if let Some(id) = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1)) {

@@ -120,6 +120,54 @@ pub fn Root() -> Element {
             const mq = window.matchMedia('(prefers-color-scheme: dark)');
             dioxus.send({ t: 'theme', dark: mq.matches });
             mq.addEventListener('change', (e) => dioxus.send({ t: 'theme', dark: e.matches }));
+            // Larrier's own tooltips instead of the system's: a hovered
+            // element's title moves to data-tip and shows in a bubble.
+            if (!window.__larrierTips) {
+              window.__larrierTips = true;
+              const tip = document.createElement('div');
+              tip.className = 'l-tip';
+              tip.setAttribute('role', 'tooltip');
+              document.body.appendChild(tip);
+              let target = null, timer = null;
+              const hide = () => { clearTimeout(timer); timer = null; target = null; tip.classList.remove('on'); };
+              const place = (el) => {
+                const r = el.getBoundingClientRect();
+                const t = tip.getBoundingClientRect();
+                let x = Math.max(6, Math.min(r.left + r.width / 2 - t.width / 2, innerWidth - t.width - 6));
+                let y = r.bottom + 6;
+                if (y + t.height > innerHeight - 6) y = r.top - t.height - 6;
+                tip.style.left = x + 'px';
+                tip.style.top = y + 'px';
+              };
+              document.addEventListener('mouseover', (e) => {
+                const el = e.target && e.target.closest ? e.target.closest('[title], [data-tip]') : null;
+                if (!el) { if (target) hide(); return; }
+                if (el.hasAttribute('title')) {
+                  const t = el.getAttribute('title');
+                  el.removeAttribute('title');
+                  if (t) el.setAttribute('data-tip', t); else el.removeAttribute('data-tip');
+                }
+                if (el === target) return;
+                hide();
+                if (!el.getAttribute('data-tip')) return;
+                target = el;
+                timer = setTimeout(() => {
+                  if (target !== el || !el.isConnected) return;
+                  const root = document.querySelector('.larrier-root');
+                  tip.classList.toggle('dark', !!root && root.getAttribute('data-theme') === 'dark');
+                  tip.classList.toggle('still', !!root && root.classList.contains('no-motion'));
+                  tip.textContent = el.getAttribute('data-tip');
+                  tip.style.left = '0px';
+                  tip.style.top = '0px';
+                  place(el);
+                  tip.classList.add('on');
+                }, 450);
+              }, true);
+              document.addEventListener('mousedown', hide, true);
+              document.addEventListener('keydown', hide, true);
+              document.addEventListener('scroll', hide, true);
+              window.addEventListener('blur', hide);
+            }
             window.addEventListener('keydown', (e) => {
               // Keys typed into a terminal belong to the terminal.
               if (e.target && e.target.closest && e.target.closest('.xterm')) return;

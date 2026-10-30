@@ -1488,6 +1488,15 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* Behind Settings the sidebar stays as it was, out of sight. */
 .sidebar.parked { position: absolute; left: 0; top: 0; bottom: 0; visibility: hidden; pointer-events: none; transition: none; }
 
+/* Larrier's own tooltips (the title of whatever is hovered). */
+.l-tip { position: fixed; left: 0; top: 0; z-index: 3000; max-width: 340px; padding: 5px 9px; border-radius: 7px;
+  background: #24231f; color: #f5f4ef; font: 500 11.5px/1.45 var(--font, system-ui, sans-serif); white-space: pre-wrap; word-break: break-word;
+  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .4); pointer-events: none; opacity: 0; transform: translateY(-3px) scale(.98);
+  transition: opacity .12s ease, transform .14s cubic-bezier(.2, .8, .2, 1); }
+.l-tip.dark { background: #f1f0eb; color: #1d1c19; box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .7); }
+.l-tip.on { opacity: 1; transform: none; }
+.l-tip.still { transition: none; }
+
 /* The queue: a card that folds into a pill; rows drag to reorder and
    show their actions on hover. */
 .queue-card { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-2); padding: 5px 6px 6px; animation: queue-in .2s cubic-bezier(.2, .8, .2, 1) both; }

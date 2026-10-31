@@ -600,13 +600,13 @@ fn BrowserTab() -> Element {
     let shown_url = active.as_ref().map(|t| t.url.clone()).unwrap_or_default();
     use_effect(use_reactive!(|shown_url| {
         if !*editing.peek() {
-            input.set(if shown_url == "about:blank" { String::new() } else { shown_url });
+            input.set(if host::is_blank(&shown_url) { String::new() } else { shown_url });
         }
     }));
     let loading = active.as_ref().is_some_and(|t| t.loading);
     let has_page = active.is_some();
     let url_now = active.as_ref().map(|t| t.url.clone()).unwrap_or_default();
-    let external = has_page && !url_now.starts_with("about:");
+    let external = has_page && (url_now.starts_with("http://") || url_now.starts_with("https://"));
     let url_open = url_now.clone();
     rsx! {
         if st.tabs.len() > 1 {
@@ -614,7 +614,7 @@ fn BrowserTab() -> Element {
                 for t in st.tabs.clone() {
                     {
                         let on = Some(t.id) == st.active;
-                        let label = if !t.title.is_empty() { t.title.clone() } else { page_host(&t.url) };
+                        let label = tab_label(&t);
                         rsx! {
                             div { key: "{t.id}", class: if on { "browser-tab on" } else { "browser-tab" }, title: "{t.url}",
                                 onclick: move |_| host::activate(t.id),
@@ -656,14 +656,14 @@ fn BrowserTab() -> Element {
                         document::eval("document.querySelector('.browser-bar .url-input')?.blur()");
                     }
                     if e.key() == Key::Escape {
-                        input.set(if url_now == "about:blank" { String::new() } else { url_now.clone() });
+                        input.set(if host::is_blank(&url_now) { String::new() } else { url_now.clone() });
                         document::eval("document.querySelector('.browser-bar .url-input')?.blur()");
                     }
                 },
             }
             button { class: "icon-btn sm", title: "New tab",
                 onclick: move |_| {
-                    host::new_tab("about:blank");
+                    host::new_tab("");
                     document::eval("setTimeout(() => document.querySelector('.browser-bar .url-input')?.focus(), 30)");
                 },
                 Icon { i: I::Plus, size: 14 }
@@ -706,6 +706,17 @@ fn BrowserTab() -> Element {
 /// A page's host name, for a tab without a title yet.
 fn page_host(url: &str) -> String {
     url.split("://").nth(1).unwrap_or(url).split('/').next().unwrap_or(url).to_string()
+}
+
+/// A page tab's name: its page's title, "New Tab" for a new one.
+fn tab_label(t: &crate::browser_host::Tab) -> String {
+    if crate::browser_host::is_blank(&t.url) {
+        "New Tab".into()
+    } else if !t.title.is_empty() {
+        t.title.clone()
+    } else {
+        page_host(&t.url)
+    }
 }
 
 /// Latest diff per file from the agent's own tool calls.

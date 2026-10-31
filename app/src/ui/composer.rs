@@ -277,6 +277,39 @@ pub fn Composer(
         }
     }));
 
+    // A message taken back from the agent: back in this chat's box as it was
+    // (its objects, images and files), ahead of whatever was being typed.
+    let restore_len = crate::state::use_ui(|u| u.restore_inbox.len())();
+    let sid_restore = session_id.clone();
+    use_effect(use_reactive!(|restore_len| {
+        if restore_len == 0 {
+            return;
+        }
+        let Some(sid) = sid_restore.clone() else { return };
+        let (mut app, mut text, mut mentions, mut at) = (app, text, mentions, attachments);
+        let mine: Vec<crate::state::Queued> = {
+            let mut ui = app.ui.write();
+            let (m, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut ui.restore_inbox).into_iter().partition(|(s, _)| *s == sid);
+            ui.restore_inbox = rest;
+            m.into_iter().map(|(_, q)| q).collect()
+        };
+        for q in mine {
+            let (t, chips) = super::mentions::to_edit(&q.text, &app.sessions.peek());
+            let typed = text.peek().clone();
+            text.set(if typed.trim().is_empty() { t.clone() } else { format!("{t}\n{typed}") });
+            for c in chips {
+                if !mentions.peek().iter().any(|m| m.marked() == c.marked()) {
+                    mentions.write().push(c);
+                }
+            }
+            let mut all = q.attachments.clone();
+            all.extend(at.peek().iter().cloned());
+            at.set(all);
+            let end = t.encode_utf16().count();
+            document::eval(&format!("setTimeout(() => {{ const el = document.getElementById('{input_id}'); if (el) {{ el.focus(); el.setSelectionRange({end}, {end}); }} }}, 40)"));
+        }
+    }));
+
     // Focus when asked (Ctrl+L, new agent, opening a session).
     let focus = crate::state::use_ui(|u| u.focus_composer)();
     use_effect(use_reactive!(|focus| {

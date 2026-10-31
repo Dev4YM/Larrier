@@ -110,7 +110,7 @@ where
                     let _ = child.start_kill();
                     break;
                 }
-                Some(TurnCommand::Permission { .. } | TurnCommand::Steer { .. }) => {}
+                Some(TurnCommand::Permission { .. } | TurnCommand::Steer { .. } | TurnCommand::Unsteer { .. }) => {}
             },
         }
     }

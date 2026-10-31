@@ -110,6 +110,8 @@ pub fn Transcript(id: String) -> Element {
     let app = use_app();
     let mut at_bottom = use_signal(|| true);
     let mut shown = use_signal(|| TURN_WINDOW);
+    // Messages sent into the turn that are being taken back.
+    let taking_back = crate::state::use_ui(|u| u.unsteering.clone())();
     let Some(sig) = app.session_sig(&id) else { return rsx! {} };
     let tid = format!("transcript-{}", &id[id.len().saturating_sub(10)..]);
 
@@ -349,6 +351,15 @@ pub fn Transcript(id: String) -> Element {
                 for q in steering.iter() {
                     div { key: "steer-{q.id}", class: "user-msg pending", title: "Sent into the running turn: the agent reads it at its next step",
                         div { class: "user-card short", dir: "auto",
+                            // Take it back while the agent hasn't read it.
+                            button { class: "icon-btn sm steer-x", title: "Take it back into the box",
+                                disabled: taking_back.contains(&q.id),
+                                onclick: {
+                                    let (sid, key) = (id.clone(), q.id);
+                                    move |e: MouseEvent| { e.stop_propagation(); app.unsteer(&sid, key); }
+                                },
+                                Icon { i: I::X, size: 12 }
+                            }
                             if q.attachments.iter().any(|a| matches!(a, Part::Image { .. })) {
                                 div { class: "msg-images",
                                     for (i, a) in q.attachments.iter().enumerate().filter(|(_, a)| matches!(a, Part::Image { .. })) {
@@ -358,7 +369,7 @@ pub fn Transcript(id: String) -> Element {
                             }
                             super::mentions::PromptText { text: q.text.clone() }
                         }
-                        div { class: "pending-note", super::loaders::Dots { size: 10 } "Sending into this turn…" }
+                        div { class: "pending-note", super::loaders::Orbit { size: 11 } if taking_back.contains(&q.id) { "Taking it back…" } else { "Sending into this turn…" } }
                     }
                 }
                 if let Some(req) = permission {

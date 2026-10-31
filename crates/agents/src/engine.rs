@@ -207,6 +207,8 @@ impl TurnRecorder {
                 session.status = SessionStatus::Running;
                 true
             }
+            // A message taken back never reached the transcript.
+            AgentEvent::Unsteered { .. } => false,
             AgentEvent::Steered { text, attachments } => {
                 // The prompt goes where the agent took it in; what follows
                 // is a new reply.
@@ -416,7 +418,7 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
             }
             return;
         }
-        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::PermissionClosed { .. } | AgentEvent::Steered { .. } | AgentEvent::Mode { .. } | AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Idle | AgentEvent::Done { .. } => return,
+        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::PermissionClosed { .. } | AgentEvent::Steered { .. } | AgentEvent::Unsteered { .. } | AgentEvent::Mode { .. } | AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Idle | AgentEvent::Done { .. } => return,
         _ => {}
     }
     let parts: usize = msgs.iter().map(|m| m.parts.len()).sum();

@@ -168,7 +168,9 @@ pub struct ClaudeLive {
     out: Vec<String>,
     asks: HashMap<String, Ask>,
     /// Messages sent during the turn, by uuid, until Claude takes them in.
-    steers: HashMap<String, (String, Vec<Part>)>,
+    steers: HashMap<String, (String, Vec<Part>, u64)>,
+    /// `cancel_async_message` requests in flight: request id → steer key.
+    unsteers: HashMap<String, u64>,
     host_requests: u64,
     stop_at: Option<std::time::Instant>,
     finished: bool,
@@ -407,14 +409,25 @@ impl super::process::Interactive for ClaudeLive {
                     }
                 }
             }
-            "control_response" | "keep_alive" => {}
+            // Claude's answer to taking a message back.
+            "control_response" => {
+                let r = &v["response"];
+                if let Some(key) = s(r, "request_id").and_then(|id| self.unsteers.remove(id)) {
+                    let taken_back = s(r, "subtype") == Some("success") && r["response"]["cancelled"].as_bool() == Some(true);
+                    if taken_back {
+                        self.steers.retain(|_, (_, _, k)| *k != key);
+                    }
+                    sink.send(AgentEvent::Unsteered { key, taken_back });
+                }
+            }
+            "keep_alive" => {}
             // A prompt line taken in: messages sent during the turn are
             // recorded where Claude read them.
             "user" if v["isReplay"].as_bool() == Some(true) => {
                 let uuid = s(&v, "uuid");
                 if uuid.is_some() && uuid == self.prompt.as_deref() {
                     self.prompt = None;
-                } else if let Some((text, parts)) = uuid.and_then(|u| self.steers.remove(u)) {
+                } else if let Some((text, parts, _)) = uuid.and_then(|u| self.steers.remove(u)) {
                     sink.send(AgentEvent::Steered { text, attachments: parts });
                 }
             }
@@ -457,14 +470,27 @@ impl super::process::Interactive for ClaudeLive {
                 }
             }
             TurnCommand::Permission { request_id, reply } => self.answer(&request_id, reply, sink),
-            TurnCommand::Steer { text, attachments, now } => {
+            TurnCommand::Steer { text, attachments, now, key } => {
                 if self.finished {
                     return;
                 }
                 let id = uuid::Uuid::new_v4().to_string();
                 let line = self.user_line(&text, &attachments, now, Some(&id));
-                self.steers.insert(id, (text, attachments));
+                self.steers.insert(id, (text, attachments, key));
                 self.out.push(line);
+            }
+            TurnCommand::Unsteer { key } => {
+                let uuid = self.steers.iter().find(|(_, (_, _, k))| *k == key).map(|(u, _)| u.clone());
+                match uuid {
+                    // Claude holds it until its next step: ask for it back.
+                    Some(uuid) if !self.finished => {
+                        self.host_requests += 1;
+                        let rid = format!("larrier_{}", self.host_requests);
+                        self.unsteers.insert(rid.clone(), key);
+                        self.out.push(json!({"type": "control_request", "request_id": rid, "request": {"subtype": "cancel_async_message", "message_uuid": uuid}}).to_string());
+                    }
+                    _ => sink.send(AgentEvent::Unsteered { key, taken_back: false }),
+                }
             }
         }
     }
@@ -1489,6 +1515,38 @@ mod tests {
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Mode { id } if id == "acceptEdits")), "later turns start in the new mode");
     }
 
+    /// A message sent into the turn can be taken back until Claude reads it
+    /// (`cancel_async_message`); once read, Claude says so.
+    #[test]
+    fn live_take_back() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = EventSink::new(tx);
+        let mut p = ClaudeLive::default();
+        for (key, text) in [(7, "never mind"), (8, "too late")] {
+            p.command(TurnCommand::Steer { text: text.into(), attachments: Vec::new(), now: false, key }, &sink);
+        }
+        let sent: Vec<Value> = p.take_output().iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+        p.command(TurnCommand::Unsteer { key: 7 }, &sink);
+        let ask: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
+        assert_eq!((ask["request"]["subtype"].as_str(), ask["request"]["message_uuid"].as_str()), (Some("cancel_async_message"), sent[0]["uuid"].as_str()));
+        let rid = ask["request_id"].as_str().unwrap();
+        p.handle(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": {"cancelled": true}}}).to_string(), &sink);
+        // The other was already read: Claude answers it wasn't cancelled.
+        p.command(TurnCommand::Unsteer { key: 8 }, &sink);
+        let ask: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
+        p.handle(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": ask["request_id"], "response": {"cancelled": false}}}).to_string(), &sink);
+        // One Larrier never sent: nothing to ask.
+        p.command(TurnCommand::Unsteer { key: 9 }, &sink);
+        assert!(p.take_output().is_empty());
+        let ev: Vec<AgentEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        let answers: Vec<(u64, bool)> = ev.iter().filter_map(|e| match e { AgentEvent::Unsteered { key, taken_back } => Some((*key, *taken_back)), _ => None }).collect();
+        assert_eq!(answers, [(7, true), (8, false), (9, false)]);
+        // The turn may end now: only the message Claude kept is waited for.
+        p.handle(&json!({"type": "user", "isReplay": true, "uuid": sent[1]["uuid"], "message": {"role": "user", "content": "too late"}}).to_string(), &sink);
+        p.handle(r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s1","usage":{"input_tokens":1,"output_tokens":1}}"#, &sink);
+        assert!(p.finished());
+    }
+
     #[test]
     fn live_denial_steer_and_stop() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1499,7 +1557,7 @@ mod tests {
         let r: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
         assert_eq!(r["response"]["response"], json!({"behavior": "deny", "message": "Use git clean instead"}));
         // A message for the running turn is recorded once Claude takes it in.
-        p.command(TurnCommand::Steer { text: "also update the docs".into(), attachments: Vec::new(), now: false }, &sink);
+        p.command(TurnCommand::Steer { text: "also update the docs".into(), attachments: Vec::new(), now: false, key: 1 }, &sink);
         let line: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
         let uuid = line["uuid"].as_str().unwrap().to_string();
         assert!(line.get("priority").is_none());

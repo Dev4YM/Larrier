@@ -187,6 +187,11 @@ pub struct Ui {
     /// Text to insert into a composer: (session, text); `None` is the new
     /// agent composer.
     pub compose_inbox: Vec<(Option<String>, String)>,
+    /// Messages taken back from the agent, for their chat's composer to
+    /// hold again (text, objects, images and files).
+    pub restore_inbox: Vec<(String, Queued)>,
+    /// Messages sent into a turn that are being taken back (their keys).
+    pub unsteering: HashSet<u64>,
     /// Right-click menu of a chat tab.
     pub tab_ctx: Option<TabCtx>,
     /// An agent's terminal shown read-only in the Terminal tab:
@@ -450,6 +455,8 @@ impl App {
             customize_focus: None,
             interrupted: Vec::new(),
             compose_inbox: Vec::new(),
+            restore_inbox: Vec::new(),
+            unsteering: HashSet::new(),
             tab_ctx: None,
             agent_term: None,
             models_agent: None,
@@ -1165,6 +1172,19 @@ impl App {
                                     }
                                 }
                             }
+                            AgentEvent::Unsteered { key, taken_back } => {
+                                app.ui.write().unsteering.remove(key);
+                                if *taken_back {
+                                    let item = app.steering.write().get_mut(&id).and_then(|v| v.iter().position(|q| q.id == *key).map(|i| v.remove(i)));
+                                    if let Some(item) = item {
+                                        let mut ui = app.ui.write();
+                                        ui.restore_inbox.push((id.clone(), item));
+                                        ui.focus_composer += 1;
+                                    }
+                                } else {
+                                    app.toast(format!("{} had already read that message, so it stays in the chat", s.agent.display_name()));
+                                }
+                            }
                             AgentEvent::PermissionClosed { id: rid } => {
                                 if let Some(v) = app.permissions.write().get_mut(&id) {
                                     v.retain(|r| &r.id != rid);
@@ -1300,7 +1320,7 @@ impl App {
         match how {
             BusySend::Steer | BusySend::Interrupt if steerable => {
                 if let Some(c) = self.running.read().get(id) {
-                    c.steer(item.text.clone(), item.attachments.clone(), how == BusySend::Interrupt);
+                    c.steer(item.text.clone(), item.attachments.clone(), how == BusySend::Interrupt, item.id);
                 }
                 self.steering.write().entry(id.to_string()).or_default().push(item);
             }
@@ -1316,6 +1336,15 @@ impl App {
                     c.cancel();
                 }
             }
+        }
+    }
+
+    /// Take back a message sent into the running turn that the agent hasn't
+    /// read yet; it goes back into the composer (see `Unsteered`).
+    pub fn unsteer(mut self, id: &str, key: u64) {
+        if let Some(c) = self.running.read().get(id) {
+            self.ui.write().unsteering.insert(key);
+            c.unsteer(key);
         }
     }
 

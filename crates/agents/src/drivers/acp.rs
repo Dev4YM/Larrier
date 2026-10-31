@@ -318,7 +318,7 @@ impl Acp {
                 }
             }
             // ACP has no way to add to a running prompt.
-            Some(TurnCommand::Steer { .. }) => {}
+            Some(TurnCommand::Steer { .. } | TurnCommand::Unsteer { .. }) => {}
         }
     }
 

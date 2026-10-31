@@ -1670,3 +1670,9 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .app.no-motion .ink-orbit-ring, .app.no-motion .ink-stamp-a, .app.no-motion .ink-stamp-b { transform: none !important; opacity: 1 !important; }
 .app.no-motion .ink-stamp-dot { transform: none !important; opacity: 1 !important; }
 .c-working { display: inline-flex; margin: 0 4px; }
+
+/* A message sent into the turn: an × takes it back into the box. */
+.user-msg.pending .user-card { position: relative; padding-right: 36px; }
+.user-msg.pending .steer-x { position: absolute; top: 7px; right: 7px; opacity: .7; }
+.user-msg.pending .steer-x:hover { opacity: 1; }
+.user-msg.pending .user-card .steer-x { cursor: pointer; }

@@ -81,7 +81,7 @@ enum Pending {
     Init,
     Thread,
     Turn,
-    Steer(String, Vec<Part>),
+    Steer(String, Vec<Part>, u64),
     Other,
 }
 
@@ -134,9 +134,9 @@ pub struct CodexLive {
     base: Option<Usage>,
     total: Option<Usage>,
     /// Messages sent during a turn that Codex hasn't taken in.
-    waiting: Vec<(String, Vec<Part>)>,
+    waiting: Vec<(String, Vec<Part>, u64)>,
     /// Messages to send once the interrupt they asked for lands.
-    restart: Vec<(String, Vec<Part>)>,
+    restart: Vec<(String, Vec<Part>, u64)>,
     /// The plan this turn proposed (plan mode).
     plan: Option<String>,
     interrupting: bool,
@@ -242,13 +242,13 @@ impl CodexLive {
         }
     }
 
-    fn steer(&mut self, text: String, parts: Vec<Part>) {
+    fn steer(&mut self, text: String, parts: Vec<Part>, key: u64) {
         match (self.thread.clone(), self.turn.clone()) {
             (Some(thread), Some(turn)) if !self.interrupting => {
                 let input = input(&text, &parts);
-                self.send("turn/steer", json!({"threadId": thread, "input": input, "expectedTurnId": turn}), Pending::Steer(text, parts));
+                self.send("turn/steer", json!({"threadId": thread, "input": input, "expectedTurnId": turn}), Pending::Steer(text, parts, key));
             }
-            _ => self.waiting.push((text, parts)),
+            _ => self.waiting.push((text, parts, key)),
         }
     }
 
@@ -307,15 +307,15 @@ impl CodexLive {
                     self.interrupt();
                 }
                 // Messages sent before the turn began join it now.
-                for (text, parts) in std::mem::take(&mut self.waiting) {
-                    self.steer(text, parts);
+                for (text, parts, key) in std::mem::take(&mut self.waiting) {
+                    self.steer(text, parts, key);
                 }
             }
-            Pending::Steer(text, parts) => match err {
+            Pending::Steer(text, parts, key) => match err {
                 None => sink.send(AgentEvent::Steered { text, attachments: parts }),
                 // The turn had ended: it starts the next one, or goes back
                 // to the queue.
-                Some(_) => self.waiting.push((text, parts)),
+                Some(_) => self.waiting.push((text, parts, key)),
             },
             Pending::Other => {}
         }
@@ -517,7 +517,7 @@ impl CodexLive {
         // Words that came with a refusal reach Codex as a message.
         if !allowed {
             if let Some(m) = reply.message.filter(|m| !m.trim().is_empty()) {
-                self.steer(m, Vec::new());
+                self.steer(m, Vec::new(), 0);
             }
         }
     }
@@ -715,7 +715,7 @@ impl CodexLive {
         };
         if !next.is_empty() {
             let mut all = Vec::new();
-            for (text, parts) in next {
+            for (text, parts, _) in next {
                 all.extend(input(&text, &parts));
                 sink.send(AgentEvent::Steered { text, attachments: parts });
             }
@@ -795,16 +795,23 @@ impl Interactive for CodexLive {
                 }
             }
             TurnCommand::Permission { request_id, reply } => self.answer(&request_id, reply, sink),
-            TurnCommand::Steer { text, attachments, now } => {
+            TurnCommand::Steer { text, attachments, now, key } => {
                 if self.finished {
                     return;
                 }
                 if now && self.turn.is_some() {
-                    self.restart.push((text, attachments));
+                    self.restart.push((text, attachments, key));
                     self.interrupt();
                 } else {
-                    self.steer(text, attachments);
+                    self.steer(text, attachments, key);
                 }
+            }
+            TurnCommand::Unsteer { key } => {
+                let held = self.waiting.len() + self.restart.len();
+                self.waiting.retain(|(_, _, k)| *k != key);
+                self.restart.retain(|(_, _, k)| *k != key);
+                let taken_back = self.waiting.len() + self.restart.len() < held;
+                sink.send(AgentEvent::Unsteered { key, taken_back });
             }
         }
     }
@@ -1127,12 +1134,12 @@ mod tests {
             p.handle(l, &sink);
         }
         p.take_output();
-        p.command(TurnCommand::Steer { text: "also this".into(), attachments: Vec::new(), now: false }, &sink);
+        p.command(TurnCommand::Steer { text: "also this".into(), attachments: Vec::new(), now: false, key: 1 }, &sink);
         let w: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
         assert_eq!((w["method"].as_str(), w["params"]["expectedTurnId"].as_str()), (Some("turn/steer"), Some("u1")));
         let sid = w["id"].as_u64().unwrap();
         p.handle(&json!({"id": sid, "result": {"turnId": "u1"}}).to_string(), &sink);
-        p.command(TurnCommand::Steer { text: "late".into(), attachments: Vec::new(), now: false }, &sink);
+        p.command(TurnCommand::Steer { text: "late".into(), attachments: Vec::new(), now: false, key: 2 }, &sink);
         let late: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
         p.handle(&json!({"id": late["id"], "error": {"message": "no active turn"}}).to_string(), &sink);
         p.handle(r#"{"method":"turn/completed","params":{"turn":{"id":"u1","status":"completed"}}}"#, &sink);
@@ -1146,6 +1153,23 @@ mod tests {
         }
         assert_eq!(steered, ["also this", "late"]);
         assert!(!p.finished());
+        // A message Larrier still holds (no turn yet) can be taken back; one
+        // Codex has can't.
+        p.take_output();
+        let n = p.waiting.len();
+        p.turn = None;
+        p.command(TurnCommand::Steer { text: "held".into(), attachments: Vec::new(), now: false, key: 3 }, &sink);
+        assert_eq!(p.waiting.len(), n + 1);
+        p.command(TurnCommand::Unsteer { key: 3 }, &sink);
+        p.command(TurnCommand::Unsteer { key: 1 }, &sink);
+        let mut answers = Vec::new();
+        while let Ok(e) = rx.try_recv() {
+            if let AgentEvent::Unsteered { key, taken_back } = e {
+                answers.push((key, taken_back));
+            }
+        }
+        assert_eq!(answers, [(3, true), (1, false)]);
+        assert_eq!(p.waiting.len(), n);
     }
 
     #[test]

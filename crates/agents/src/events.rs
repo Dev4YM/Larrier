@@ -64,6 +64,9 @@ pub enum AgentEvent {
         #[serde(default)]
         attachments: Vec<Part>,
     },
+    /// The answer to `TurnCommand::Unsteer`: the message was taken back, or
+    /// the agent had already read it.
+    Unsteered { key: u64, taken_back: bool },
     Usage { usage: Usage },
     Notice { text: String },
     Error { message: String },
@@ -148,7 +151,11 @@ pub enum TurnCommand {
     Permission { request_id: String, reply: Reply },
     /// A message for the running turn: folded in where the agent can take
     /// it (`now`: the agent stops what it is doing and answers it first).
-    Steer { text: String, attachments: Vec<Part>, now: bool },
+    /// `key` names it for `Unsteer`.
+    Steer { text: String, attachments: Vec<Part>, now: bool, key: u64 },
+    /// Take back a `Steer` message the agent hasn't read yet; answered with
+    /// `AgentEvent::Unsteered`.
+    Unsteer { key: u64 },
 }
 
 /// The user's answer to a request.
@@ -189,8 +196,12 @@ impl TurnControl {
     pub fn respond(&self, request_id: impl Into<String>, reply: Reply) {
         let _ = self.tx.send(TurnCommand::Permission { request_id: request_id.into(), reply });
     }
-    pub fn steer(&self, text: String, attachments: Vec<Part>, now: bool) {
-        let _ = self.tx.send(TurnCommand::Steer { text, attachments, now });
+    pub fn steer(&self, text: String, attachments: Vec<Part>, now: bool, key: u64) {
+        let _ = self.tx.send(TurnCommand::Steer { text, attachments, now, key });
+    }
+
+    pub fn unsteer(&self, key: u64) {
+        let _ = self.tx.send(TurnCommand::Unsteer { key });
     }
 }
 

@@ -154,7 +154,9 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
         (c.settings.sidebar_group, c.settings.sidebar_sort, c.settings.show_archived, c.settings.project_order.clone())
     };
     let mut filter_menu = use_signal(|| false);
-    let all: Vec<SessionSummary> = all.into_iter().filter(|s| show_archived || !s.archived).collect();
+    // A harness turned off in Settings takes its chats out of the list too.
+    let off: Vec<larrier_core::AgentKind> = app.config.read().agents.iter().filter(|a| !a.enabled).map(|a| a.kind.clone()).collect();
+    let all: Vec<SessionSummary> = all.into_iter().filter(|s| (show_archived || !s.archived) && !off.contains(&s.agent)).collect();
     let filtered: Vec<SessionSummary> = if query.is_empty() {
         all
     } else {

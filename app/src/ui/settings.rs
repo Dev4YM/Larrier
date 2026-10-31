@@ -313,10 +313,10 @@ fn Agents() -> Element {
                                 match &d {
                                     Some(d) if d.installed() => rsx! { span { class: "status-pill ok", Icon { i: I::Check, size: 11 } {d.version.clone().map(|v| format!("v{v}")).unwrap_or("Installed".into())} } },
                                     Some(_) => rsx! { span { class: "status-pill missing", "Not installed" } },
-                                    None => rsx! { div { class: "spinner" } },
+                                    None => rsx! { super::loaders::Orbit { size: 13 } },
                                 }
                                 if installed {
-                                    div { class: "agent-on", title: if enabled { "On: offered in pickers, its sessions sync" } else { "Off: hidden from pickers, its sessions don't sync" },
+                                    div { class: "agent-on", title: if enabled { "On: offered in pickers, its sessions sync" } else { "Off: hidden from pickers and the sidebar, its sessions don't sync" },
                                         onclick: move |e| e.stop_propagation(),
                                         Toggle { on: enabled, onchange: move |v| app.update_config(|c| c.agent_mut(&k7).enabled = v) }
                                     }

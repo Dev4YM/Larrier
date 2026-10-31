@@ -815,7 +815,8 @@ select.input { cursor: pointer; padding-right: 4px; }
 
 /* Transcript items don't animate in: re-renders never make them jump. */
 .user-msg, .a-block, .tool-card, .step, .msg-actions { animation: none; }
-.user-msg.editing { animation: rise-in .16s ease-out both; }
+/* Editing a prompt turns its card editable in place: nothing moves. */
+.user-msg.editing { animation: none; }
 
 /* Sticky prompt card: opaque, with the fade drawn on top of its own
    background so nothing behind it shows through. */

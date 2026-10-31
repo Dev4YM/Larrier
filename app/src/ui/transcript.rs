@@ -570,6 +570,14 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
     let mid_m = msg.id.clone();
     // Only this message re-renders when editing starts or stops.
     let editing = use_memo(move || app.editing.read().msg.as_deref() == Some(mid_m.as_str()));
+    // Once edited, the card stays put when it goes back: it doesn't slide in
+    // again like a new message.
+    let mut was_editing = use_signal(|| false);
+    use_effect(move || {
+        if editing() {
+            was_editing.set(true);
+        }
+    });
     let text = msg.text();
     if let Some(note) = task_notification_note(&text) {
         return rsx! { div { class: "notice task-note", id: "m-{msg.id}", Icon { i: I::Bot, size: 12, stroke: 1.5 } "{note}" } };
@@ -723,7 +731,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
         card_class.push_str(" has-images");
     }
     rsx! {
-        div { class: "user-msg", id: "m-{msg.id}",
+        div { class: if was_editing() { "user-msg still" } else { "user-msg" }, id: "m-{msg.id}",
             div {
                 class: card_class,
                 dir: "auto",

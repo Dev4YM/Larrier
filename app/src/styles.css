@@ -1098,6 +1098,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
    Motion (.app.no-motion). */
 @keyframes stream-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .turn.live .a-block > *, .turn.live > .user-msg, .turn.live .tool-images img { animation: stream-in .28s cubic-bezier(.2, .8, .2, 1) backwards; }
+/* A prompt being edited, or back from it, is the same card: no slide-in. */
+.turn.live > .user-msg.editing, .turn.live > .user-msg.still { animation: none; }
 .thinking-row { animation: fade-in .24s ease-out backwards; }
 .sub-steps, .tool-card.tool-io, .reasoning-text, .tool-card .cmd, .tool-card > pre, .preview.open { transition: opacity .2s ease, transform .2s cubic-bezier(.2, .8, .2, 1); }
 @starting-style {

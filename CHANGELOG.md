@@ -5,6 +5,11 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.21 — 2026-10-31
+
+### Fixed
+
+- Background work no longer holds up the chat
 ## 0.1.20 — 2026-10-31
 
 ### Fixed

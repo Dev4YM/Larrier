@@ -263,6 +263,7 @@ pub fn init_tray() {
 /// Tray hook: creates the icon when `tray_icon` is on and handles its menu.
 /// Call unconditionally from the root component.
 pub fn use_tray(on_new_agent: impl FnMut() + 'static) {
+    let app = crate::state::use_app();
     let mut on_new_agent = on_new_agent;
     use_hook(|| {
         if settings().tray_icon {
@@ -277,7 +278,10 @@ pub fn use_tray(on_new_agent: impl FnMut() + 'static) {
                 bring_to_front();
                 on_new_agent();
             }
-            TRAY_QUIT => w.close(),
+            TRAY_QUIT => {
+                app.install_on_exit();
+                w.close()
+            }
             _ => {}
         }
     });

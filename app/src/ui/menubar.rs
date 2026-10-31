@@ -72,7 +72,10 @@ fn run(mut app: App, c: Cmd) {
             }
         }
         Cmd::Settings => app.open_settings(SettingsTab::General),
-        Cmd::Exit => dioxus::desktop::window().close(),
+        Cmd::Exit => {
+            app.install_on_exit();
+            dioxus::desktop::window().close()
+        }
         Cmd::Edit(e) => edit_command(e),
         Cmd::Palette => {
             let mut ui = app.ui.write();

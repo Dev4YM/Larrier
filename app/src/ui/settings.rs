@@ -944,7 +944,7 @@ fn About() -> Element {
                         },
                     }
                 }
-                Row { title: "Updates".to_string(), desc: Some(format!("{} Larrier looks when it starts, then twice a day.", mode.description())),
+                Row { title: "Updates".to_string(), desc: Some(format!("{} Larrier looks when it starts, then every hour.", mode.description())),
                     super::Select {
                         value: format!("{mode:?}"),
                         options: larrier_core::UpdateMode::ALL.iter().map(|m| (format!("{m:?}"), m.label().to_string())).collect(),
@@ -955,6 +955,11 @@ fn About() -> Element {
                                     c.settings.updates = m;
                                     c.settings.auto_update = m != larrier_core::UpdateMode::Off;
                                 });
+                                // Picked a mode that looks: look now (and
+                                // download, if it says to).
+                                if m != larrier_core::UpdateMode::Off {
+                                    app.check_updates(true);
+                                }
                             }
                         },
                     }

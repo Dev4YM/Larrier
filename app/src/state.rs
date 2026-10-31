@@ -1483,42 +1483,69 @@ impl App {
         self.update_session(id, |s| s.unread = unread);
     }
 
-    /// Look for a newer release. `quiet` keeps failures (offline, no
-    /// releases yet) out of sight.
-    pub fn check_updates(mut self, quiet: bool) {
-        if matches!(*self.update.peek(), UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Ready { .. }) {
-            return;
+    /// Look for a newer release. `quiet` (the automatic look) keeps failures
+    /// (offline, no releases yet) out of sight.
+    pub fn check_updates(self, quiet: bool) {
+        spawn_forever(async move {
+            self.look_for_update(quiet).await;
+        });
+    }
+
+    /// Look for a newer release and say what was found. The automatic look
+    /// (`quiet`) keeps failures out of sight and downloads what it finds
+    /// unless the user only wants to be told. Returns whether GitHub could
+    /// be asked (the automatic look tries again soon when it couldn't).
+    pub async fn look_for_update(mut self, quiet: bool) -> bool {
+        let before = self.update.peek().clone();
+        if matches!(before, UpdateState::Checking | UpdateState::Downloading { .. }) {
+            return true;
         }
-        if !quiet {
+        let waiting = matches!(before, UpdateState::Ready { .. });
+        if !quiet && !waiting {
             self.update.set(UpdateState::Checking);
         }
         let channel = self.config.peek().settings.update_channel;
-        spawn_forever(async move {
-            let next = match crate::update::check(channel).await {
-                Ok(Some(rel)) => UpdateState::Available(rel),
-                Ok(None) => UpdateState::UpToDate,
-                Err(_) if quiet => UpdateState::Idle,
-                Err(e) => UpdateState::Failed(format!("{e:#}")),
-            };
-            let found = matches!(next, UpdateState::Available(_));
-            self.update.set(next);
-            // Found on its own: download it now unless the user only wants
-            // to be told.
-            let mode = self.config.peek().settings.updates;
-            if found && quiet && matches!(mode, larrier_core::UpdateMode::Download | larrier_core::UpdateMode::Install) {
-                self.download_update();
+        let found = match crate::update::check(channel).await {
+            Ok(found) => found,
+            Err(_) if quiet => return false,
+            Err(e) => {
+                self.update.set(UpdateState::Failed(format!("{e:#}")));
+                return false;
             }
+        };
+        // A release already downloaded waits for a restart: only a newer
+        // one takes its place.
+        if let UpdateState::Ready { version, .. } = &before {
+            if !found.as_ref().is_some_and(|r| crate::version::newer(&r.version, version)) {
+                return true;
+            }
+        }
+        let fresh = found.is_some();
+        self.update.set(match found {
+            Some(rel) => UpdateState::Available(rel),
+            None => UpdateState::UpToDate,
         });
+        // Found on its own: download it now unless the user only wants to
+        // be told.
+        let mode = self.config.peek().settings.updates;
+        if fresh && quiet && matches!(mode, larrier_core::UpdateMode::Download | larrier_core::UpdateMode::Install) {
+            self.download_update();
+        }
+        true
     }
 
     /// Put a downloaded release in place when Larrier closes (the Install
     /// mode): it waits for this process to end, replaces it, and stays
-    /// closed.
+    /// closed. Called by every way of closing (once).
     pub fn install_on_exit(self) {
+        static HANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if self.config.peek().settings.updates != larrier_core::UpdateMode::Install {
             return;
         }
         if let UpdateState::Ready { path, .. } = self.update.peek().clone() {
+            if HANDED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
             if let Err(e) = crate::update::install_after_exit(&path) {
                 tracing::warn!("installing the update on exit: {e:#}");
             }

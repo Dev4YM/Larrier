@@ -72,16 +72,24 @@ pub fn Root() -> Element {
         }
         // Sessions other apps are writing update here as they change.
         crate::live::start(app);
-        // Installed copies look for a newer release now and then.
-        if matches!(crate::install::current(), crate::install::Kind::Installed(_)) {
+        // Installed and portable copies look for a newer release when they
+        // start, then every hour. The clock decides when, so a computer that
+        // slept looks as it wakes; a look that couldn't reach GitHub is tried
+        // again in a few minutes. Turned on in Settings, it looks at once.
+        if !matches!(crate::install::current(), crate::install::Kind::Dev) {
             dioxus::core::spawn_forever(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+                use std::time::{Duration, SystemTime};
+                // LARRIER_UPDATE_EVERY (seconds) shortens the hour for tests.
+                let every = std::env::var("LARRIER_UPDATE_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10).unwrap_or(3600);
+                tokio::time::sleep(Duration::from_secs(8)).await;
+                let mut due = SystemTime::now();
                 loop {
                     let s = app.config.peek().settings.clone();
-                    if s.auto_update && s.updates != larrier_core::UpdateMode::Off {
-                        app.check_updates(true);
+                    if s.auto_update && s.updates != larrier_core::UpdateMode::Off && SystemTime::now() >= due {
+                        let asked = app.look_for_update(true).await;
+                        due = SystemTime::now() + Duration::from_secs(if asked { every } else { every.min(300) });
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs(12 * 3600)).await;
+                    tokio::time::sleep(Duration::from_secs(every.min(30))).await;
                 }
             });
         }
@@ -1345,7 +1353,7 @@ pub fn WindowControls() -> Element {
                     Icon { i: I::Maximize, size: 13, stroke: 1.2 }
                 }
             }
-            button { class: "win-btn close", title: "Close", onclick: move |_| w3.close(),
+            button { class: "win-btn close", title: "Close", onclick: move |_| { app.install_on_exit(); w3.close() },
                 Icon { i: I::X, size: 15, stroke: 1.2 }
             }
         }

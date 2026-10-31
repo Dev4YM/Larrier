@@ -436,7 +436,7 @@ fn RailBody(id: String) -> Element {
                     for (i, (title, active, failed)) in h.recent.iter().enumerate() {
                         div { key: "{i}", class: if *failed { "rail-act failed" } else { "rail-act" },
                             span { class: "ic",
-                                if *active { super::loaders::Dots { size: 11 } }
+                                if *active { super::loaders::Orbit { size: 12 } }
                                 else if *failed { Icon { i: I::X, size: 11, stroke: 2.0 } }
                                 else { Icon { i: I::Check, size: 11, stroke: 2.0 } }
                             }
@@ -473,7 +473,7 @@ fn RailBody(id: String) -> Element {
                     div { class: "rail-sec-head", span { "Running in background · {h.tasks.len()}" } }
                     for (i, (title, sub)) in h.tasks.iter().take(4).enumerate() {
                         button { key: "{i}", class: "rail-act link", onclick: move |_| app.ui.write().open_panel(RightTab::Tasks, false),
-                            span { class: "ic", if *sub { super::loaders::Stamp { size: 12 } } else { super::loaders::Dots { size: 11 } } }
+                            span { class: "ic", super::loaders::Stamp { size: 12 } }
                             Icon { i: if *sub { I::Orbit } else { I::Prompt }, size: 12, stroke: 1.6 }
                             span { class: "t", title: "{title}", "{title}" }
                         }

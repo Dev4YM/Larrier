@@ -390,14 +390,13 @@ const CSS: &str = r#"
 .term-item:hover .term-kill { display: flex; }
 .term-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-3); font-size: 12px; }
 .term-item + .term-h { margin-top: 8px; }
-.term-item .tk-dots { color: var(--fg-3); margin: 0 3px 0 2px; }
+.term-item .ink-loader { margin: 0 3px 0 2px; }
 .term-item.agent .term-name { font-family: var(--mono); font-size: 12px; }
 .aterm { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .aterm-banner { display: flex; align-items: center; gap: 8px; margin: 8px 10px 0; padding: 6px 10px; border-radius: 8px; background: var(--chip);
   color: var(--fg-2); font-size: 12px; flex-shrink: 0; min-width: 0; }
 .aterm-banner > span:not(.tk-ic) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aterm-banner .tk-ic { display: inline-flex; color: var(--fg-3); }
-.aterm-banner .tk-dots { color: var(--fg-3); }
 .aterm-scroll { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 12px 14px; }
 .aterm-pre { margin: 0; font-family: var(--mono); font-size: var(--fs-term, 12px); line-height: 1.45; white-space: pre-wrap; word-break: break-word;
   color: var(--fg); user-select: text; }
@@ -525,7 +524,7 @@ pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
                                         div { key: "agent-{r.id}", class: "{cls}", role: "button", title: "{r.title}",
                                             onclick: move |_| app.ui.write().agent_term = Some((sid.clone(), tid.clone())),
                                             if r.active {
-                                                super::loaders::Dots { size: 12 }
+                                                super::loaders::Stamp { size: 13 }
                                             } else {
                                                 Icon { i: I::Prompt, size: 14, stroke: 1.5 }
                                             }
@@ -633,7 +632,7 @@ fn AgentTermView(session_id: String, tool_id: String) -> Element {
         div { class: "aterm",
             div { class: "aterm-banner",
                 if active {
-                    super::loaders::Dots { size: 12 }
+                    super::loaders::Stamp { size: 13 }
                 } else {
                     span { class: "tk-ic", Icon { i: I::Lock, size: 13 } }
                 }

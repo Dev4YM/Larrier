@@ -1304,11 +1304,6 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .step.quiet:hover .verb { color: var(--fg-2); }
 .step.quiet:hover .target { color: var(--fg-3); }
 
-/* Background work: six dots lit in turn (tasks::Dots) */
-.tk-dots { flex-shrink: 0; overflow: visible; }
-.tk-dots circle { fill: currentColor; opacity: .22; animation: tk-dot 1.2s linear infinite; }
-@keyframes tk-dot { 0%, 10% { opacity: 1; } 62%, 100% { opacity: .22; } }
-.app.no-motion .tk-dots circle { animation: none; opacity: .7; }
 
 /* A subagent's transcript over its session's chat (which stays laid out
    underneath, hidden, so its scroll position survives). */
@@ -1647,8 +1642,8 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .diff-body { max-width: 100%; }
 .rp-note { display: flex; align-items: center; gap: 6px; padding: 12px 16px 2px; font-size: 12px; color: var(--fg-3); }
 
-/* Loaders (ui/loaders.rs): Dots for a tool at work, Seal Stamp for a
-   subagent in the background, Ink Orbit for a chat at work and loading. */
+/* Loaders (ui/loaders.rs): Ink Orbit for a tool or chat at work and for
+   loading, Seal Stamp for work in the background. */
 .ink-loader { display: inline-block; flex-shrink: 0; vertical-align: middle; overflow: visible; }
 .ink-loader path, .ink-loader circle { fill: currentColor; }
 .ink-orbit { color: var(--accent-c, var(--blue)); }

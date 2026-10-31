@@ -1,29 +1,12 @@
 //! Larrier's loaders, one set for the whole app:
 //!
-//! - [`Dots`]: a tool at work (a command running, a file being written, a
-//!   terminal executing).
-//! - [`Stamp`]: a subagent working in the background.
-//! - [`Orbit`]: a chat at work (sidebar, tabs), and anything loading.
+//! - [`Orbit`]: a tool at work (a command running, a file being written),
+//!   a chat at work (sidebar, tabs), and anything loading.
+//! - [`Stamp`]: work in the background (subagents, background terminals).
 //!
 //! With Reduce Motion they hold still.
 
 use dioxus::prelude::*;
-
-/// Six dots (a braille ⠿) lit one after another.
-#[component]
-pub fn Dots(#[props(default = 12)] size: u32) -> Element {
-    // Clockwise around the 2×3 grid, so the light travels in a loop.
-    const AT: [(u8, u8); 6] = [(2, 2), (6, 2), (6, 6), (6, 10), (2, 10), (2, 6)];
-    let w = size * 2 / 3;
-    let dots = AT.iter().enumerate().map(|(k, (x, y))| (*x, *y, format!("animation-delay: {:.1}s", k as f32 * 0.2 - 1.2)));
-    rsx! {
-        svg { class: "tk-dots", width: "{w}", height: "{size}", view_box: "0 0 8 12", role: "img", "aria-label": "Running",
-            for (x, y, delay) in dots {
-                circle { key: "{x}-{y}", cx: "{x}", cy: "{y}", r: "1.35", style: "{delay}" }
-            }
-        }
-    }
-}
 
 /// Ink Orbit: two ink strokes circling, easing as they go.
 #[component]

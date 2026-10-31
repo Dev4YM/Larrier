@@ -11,7 +11,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
-use super::loaders::{Dots, Stamp};
+use super::loaders::{Orbit, Stamp};
 use larrier_core::{Message, Part, Role, ToolCall, ToolKind, ToolStatus};
 
 use crate::icons::{Icon, I};
@@ -312,7 +312,7 @@ pub fn BackgroundChips(session_id: String) -> Element {
         }
         if !terms.is_empty() {
             button { class: chip(open() == Some(TaskKind::Shell)), title: "Running terminals", onclick: move |_| toggle(TaskKind::Shell),
-                Dots { size: 12 }
+                Stamp { size: 13 }
                 span { class: "n", "{n_terms}" }
             }
         }
@@ -502,8 +502,7 @@ fn TaskRowView(session_id: String, row: TaskRow) -> Element {
             title: if kind == TaskKind::Subagent { "Open the subagent" } else { "Show the terminal" },
             onclick: move |_| open_row(app, &session_id, &id, kind),
             span { class: "tk-lead",
-                if row.active && kind == TaskKind::Subagent { Stamp { size: 13 } }
-                else if row.active { Dots { size: 12 } }
+                if row.active { Stamp { size: 13 } }
                 else { StatusIcon { status: row.status, error: row.is_error } }
             }
             div { class: "tk-row-main",
@@ -529,7 +528,7 @@ fn StatusIcon(status: ToolStatus, error: bool) -> Element {
     }
     match status {
         ToolStatus::Running | ToolStatus::Pending | ToolStatus::Approval => rsx! {
-            span { class: "tk-st", title: "Running", Dots { size: 12 } }
+            span { class: "tk-st", title: "Running", Orbit { size: 13 } }
         },
         ToolStatus::Cancelled => rsx! { span { class: "tk-st muted", title: "Stopped", Icon { i: I::Stop, size: 10 } } },
         _ => rsx! { span { class: "tk-st ok", title: "Done", Icon { i: I::CircleCheck, size: 13 } } },

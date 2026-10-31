@@ -314,7 +314,7 @@ fn ContextPanel(session_id: String, agent: AgentKind, used: u64, window: Option<
                         let id = p.id.clone();
                         let on = lit.as_deref() == Some(p.id.as_str());
                         rsx! {
-                            div { key: "{p.id}", class: if on { "seg hot" } else { "seg" },
+                            div { key: "{p.id}", class: if on { "part hot" } else { "part" },
                                 style: "flex-grow: {p.tokens}; background: {color(&p.id, i)};",
                                 onmouseenter: move |_| hot.set(Some(id.clone())),
                             }

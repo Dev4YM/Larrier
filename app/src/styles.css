@@ -1731,12 +1731,11 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .meter-pop .foot { border-top: 1px solid var(--border); margin: 0 -8px; padding-top: 4px; }
 .meter-pop .ctx-total .big { font-size: 18px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
 .meter-pop .ctx-total .s { color: var(--fg-3); }
-.ctx-bar { display: flex; gap: 2px; height: 10px; }
-.ctx-bar .seg { min-width: 3px; height: 100%; border-radius: 2px; transform-origin: center; transition: opacity .15s ease, transform .2s cubic-bezier(.2, .8, .2, 1); }
-.ctx-bar .seg:first-child { border-radius: 5px 2px 2px 5px; }
-.ctx-bar .seg:last-child { border-radius: 2px 5px 5px 2px; }
-.ctx-bar.has-hot .seg { opacity: .3; }
-.ctx-bar.has-hot .seg.hot { opacity: 1; transform: scaleY(1.4); }
+/* One line, its parts flush (like Cursor's): only the line's ends are round. */
+.ctx-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--fg-3) 16%, transparent); }
+.ctx-bar .part { min-width: 2px; height: 100%; transition: opacity .15s ease; }
+.ctx-bar.has-hot .part { opacity: .3; }
+.ctx-bar.has-hot .part.hot { opacity: 1; }
 .ctx-legend { display: flex; flex-direction: column; gap: 1px; margin: 0 -8px; }
 .ctx-legend .row { display: grid; grid-template-columns: 10px 1fr auto 46px; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: default; transition: background .12s, opacity .12s; }
 .ctx-legend .row .dot { width: 9px; height: 9px; border-radius: 3px; }

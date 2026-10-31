@@ -945,7 +945,7 @@ fn About() -> Element {
                         },
                     }
                 }
-                Row { title: "Updates".to_string(), desc: Some(format!("{} Larrier looks when it starts, then every hour.", mode.description())),
+                Row { title: "Updates".to_string(), desc: Some(format!("{} Larrier looks when it starts, then every 10 minutes.", mode.description())),
                     super::Select {
                         value: format!("{mode:?}"),
                         options: larrier_core::UpdateMode::ALL.iter().map(|m| (format!("{m:?}"), m.label().to_string())).collect(),

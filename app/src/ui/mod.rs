@@ -84,14 +84,15 @@ pub fn Root() -> Element {
         // Sessions other apps are writing update here as they change.
         crate::live::start(app);
         // Installed and portable copies look for a newer release when they
-        // start, then every hour. The clock decides when, so a computer that
-        // slept looks as it wakes; a look that couldn't reach GitHub is tried
-        // again in a few minutes. Turned on in Settings, it looks at once.
+        // start, then every ten minutes. The clock decides when, so a
+        // computer that slept looks as it wakes; a look that couldn't reach
+        // GitHub is tried again in a few minutes. Turned on in Settings, it
+        // looks at once.
         if !matches!(crate::install::current(), crate::install::Kind::Dev) {
             dioxus::core::spawn_forever(async move {
                 use std::time::{Duration, SystemTime};
-                // LARRIER_UPDATE_EVERY (seconds) shortens the hour for tests.
-                let every = std::env::var("LARRIER_UPDATE_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10).unwrap_or(3600);
+                // LARRIER_UPDATE_EVERY (seconds) shortens the wait for tests.
+                let every = std::env::var("LARRIER_UPDATE_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10).unwrap_or(600);
                 tokio::time::sleep(Duration::from_secs(8)).await;
                 let mut due = SystemTime::now();
                 loop {

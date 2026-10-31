@@ -5,6 +5,21 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.14 — 2026-10-31
+
+### New
+
+- One set of loaders: dots for tools, a stamp for subagents, an orbit for chats
+- @files, /commands, chats and agents sit in the text as objects
+- Spelling suggestions in the right-click menu
+- A harness turned off in Settings takes its chats out of the sidebar
+
+### Fixed
+
+- A thin typing cursor that sits right in Arabic and mixed text
+- Editing a sent message no longer jumps
+- The Changes tab wraps long file names and scrolls code per block
+- The side panel's + menu opens again
 ## 0.1.13 — 2026-10-30
 
 ### New

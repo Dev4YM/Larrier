@@ -258,7 +258,7 @@ pub fn CustomizeView() -> Element {
                     }
                 }
                 match &all {
-                    None => rsx! { div { class: "cz-empty", div { class: "spinner lg", style: "margin: 0 auto 10px;" } "Scanning agent configurations…" } },
+                    None => rsx! { div { class: "cz-empty", span { style: "display: inline-flex; margin: 0 auto 10px;", super::loaders::Orbit { size: 18 } } "Scanning agent configurations…" } },
                     Some(_) if visible.is_empty() => rsx! {
                         div { class: "cz-empty",
                             if q.is_empty() && kind.is_none() && agent.is_none() {

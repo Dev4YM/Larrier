@@ -313,7 +313,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                         },
                         crate::state::UpdateState::Downloading { version, got, total } => rsx! {
                             button { class: "update-btn busy", title: "Downloading Larrier {version}…", disabled: true,
-                                super::Spinner { size: 13 }
+                                super::loaders::Orbit { size: 13 }
                                 span { class: "lbl", {if total > 0 { format!("{}%", got * 100 / total) } else { "Downloading".to_string() }} }
                             }
                         },
@@ -515,7 +515,7 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             },
             span { class: "bullet",
                 if running {
-                    super::Spinner { size: 14 }
+                    super::loaders::Orbit { size: 14 }
                 } else if logo {
                     AgentGlyph { kind: s.agent.clone() }
                     if s.unread { span { class: "unread-dot" } }

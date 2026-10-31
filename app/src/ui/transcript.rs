@@ -1397,7 +1397,7 @@ fn EditCard(diff: FileDiff, running: bool) -> Element {
                     ui.open_panel(RightTab::Changes, false);
                     ui.reveal_file = Some(path.clone());
                 },
-                span { class: "ic", if running { super::Spinner { size: 13 } } else { Icon { i: I::Lines, size: 13 } } }
+                span { class: "ic", if running { super::loaders::Dots { size: 13 } } else { Icon { i: I::Lines, size: 13 } } }
                 span { class: "name", "{name}" }
                 // The counts count up as lines arrive (an animated CSS property).
                 span { class: "stats",
@@ -1501,7 +1501,7 @@ fn CommandCard(tool: ToolCall) -> Element {
         div { class: "tool-card",
             div { class: "tool-card-head", onclick: move |_| open.toggle(),
                 span { class: "ic",
-                    if running { super::Spinner { size: 13 } }
+                    if running { super::loaders::Dots { size: 13 } }
                     else if failed { span { style: "color: var(--red)", Icon { i: I::Alert, size: 13 } } }
                     else { Icon { i: I::Terminal, size: 13 } }
                 }

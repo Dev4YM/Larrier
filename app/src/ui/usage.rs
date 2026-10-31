@@ -727,7 +727,7 @@ pub fn UsageView() -> Element {
                 crate::ui::Select { value: sc.clone(), options: options.clone(), onchange: move |v: String| scope.set(v), wide: true }
                 div { class: "grow" }
                 if busy {
-                    span { class: "us-loading", div { class: "spinner" } if st.is_none() { "Analyzing {fmt_int(n_sessions as u64)} sessions…" } else { "Updating…" } }
+                    span { class: "us-loading", super::loaders::Orbit { size: 13 } if st.is_none() { "Analyzing {fmt_int(n_sessions as u64)} sessions…" } else { "Updating…" } }
                 } else if report.as_ref().map(|r| r.estimated).unwrap_or(false) {
                     span { class: "us-note", title: "Some agents (e.g. Codex) only report a total per session. Those tokens are spread over the days the agent replied.",
                         Icon { i: I::Info, size: 12 } "Some days are estimated"
@@ -949,7 +949,7 @@ fn PlansSection(agents: Vec<AgentKind>, only_account: Option<String>, accounts: 
             if let Some(u) = updated { span { class: "meta", "{u}" } }
             div { class: "grow" }
             button { class: "us-link", disabled: busy, title: "Check limits now", onclick: move |_| refresh_quotas(app, true),
-                if busy { div { class: "spinner" } } else { Icon { i: I::Refresh, size: 12 } }
+                if busy { super::loaders::Orbit { size: 13 } } else { Icon { i: I::Refresh, size: 12 } }
                 "Refresh"
             }
         }

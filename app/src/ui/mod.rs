@@ -8,6 +8,7 @@ mod composer;
 mod customize;
 mod files;
 mod home;
+pub mod loaders;
 pub mod mentions;
 mod menubar;
 mod agent_models;

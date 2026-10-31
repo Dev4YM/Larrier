@@ -376,7 +376,7 @@ fn RailBody(id: String) -> Element {
                     }
                 }
                 div { class: "rail-line",
-                    if running { super::Spinner { size: 12 } } else { span { class: "dot" } }
+                    if running { super::loaders::Orbit { size: 12 } } else { span { class: "dot" } }
                     span { "{status}" }
                 }
                 div { class: "rail-line",
@@ -436,7 +436,7 @@ fn RailBody(id: String) -> Element {
                     for (i, (title, active, failed)) in h.recent.iter().enumerate() {
                         div { key: "{i}", class: if *failed { "rail-act failed" } else { "rail-act" },
                             span { class: "ic",
-                                if *active { super::Spinner { size: 11 } }
+                                if *active { super::loaders::Dots { size: 11 } }
                                 else if *failed { Icon { i: I::X, size: 11, stroke: 2.0 } }
                                 else { Icon { i: I::Check, size: 11, stroke: 2.0 } }
                             }
@@ -473,7 +473,7 @@ fn RailBody(id: String) -> Element {
                     div { class: "rail-sec-head", span { "Running in background · {h.tasks.len()}" } }
                     for (i, (title, sub)) in h.tasks.iter().take(4).enumerate() {
                         button { key: "{i}", class: "rail-act link", onclick: move |_| app.ui.write().open_panel(RightTab::Tasks, false),
-                            span { class: "ic", super::Spinner { size: 11 } }
+                            span { class: "ic", if *sub { super::loaders::Stamp { size: 12 } } else { super::loaders::Dots { size: 11 } } }
                             Icon { i: if *sub { I::Orbit } else { I::Prompt }, size: 12, stroke: 1.6 }
                             span { class: "t", title: "{title}", "{title}" }
                         }
@@ -634,7 +634,7 @@ fn SplitHeader(id: String) -> Element {
         div { class: "main-head split-head",
             span { class: "ctab on static",
                 span { class: "ic",
-                    if running { super::Spinner { size: 14 } } else { AgentGlyph { kind: agent } }
+                    if running { super::loaders::Orbit { size: 14 } } else { AgentGlyph { kind: agent } }
                 }
                 span { class: "t", dir: "auto", "{title}" }
             }
@@ -769,7 +769,7 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
             },
             span { class: "ic",
                 if running {
-                    super::Spinner { size: 14 }
+                    super::loaders::Orbit { size: 14 }
                 } else if sub.is_some() {
                     Icon { i: I::Orbit, size: 14, stroke: 1.5 }
                 } else {

@@ -167,7 +167,7 @@ pub fn SetupRoot() -> Element {
                 }
                 div { class: "grow" }
                 button { class: "primary-btn", disabled: busy(), onclick: go,
-                    if busy() { super::Spinner { size: 13 } " Installing…" } else { "Install" }
+                    if busy() { super::loaders::Orbit { size: 13 } " Installing…" } else { "Install" }
                 }
             }
         }

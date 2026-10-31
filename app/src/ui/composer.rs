@@ -1063,7 +1063,11 @@ pub fn Composer(
                         ChatUsage { usage: u }
                     }
                     super::usage::QuotaChip { agent: agent.clone(), account_id: sess.read().as_ref().and_then(|s| s.account.clone()) }
-                    span { class: if running { "ring busy" } else { "ring" }, title: if running { "Working" } else { "Idle" } }
+                    if running {
+                        span { class: "c-working", title: "Working", super::loaders::Orbit { size: 15 } }
+                    } else {
+                        span { class: "ring", title: "Idle" }
+                    }
                 }
             }
             if home {

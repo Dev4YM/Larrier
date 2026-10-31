@@ -189,8 +189,6 @@ svg { flex-shrink: 0; display: block; }
 .resizer:hover, .resizer.dragging { background: linear-gradient(90deg, transparent 2px, var(--blue) 2px, var(--blue) 4px, transparent 4px); opacity: .5; }
 
 /* status glyphs */
-.spinner { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--fg-4); border-top-color: var(--fg-2); animation: spin .75s linear infinite; }
-.spinner.lg { width: 16px; height: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
 .dot.amber { background: var(--amber); }
@@ -684,7 +682,6 @@ select.input { cursor: pointer; padding-right: 4px; }
 .below-composer .grow { flex: 1; }
 .env-chip { height: 26px; font-size: 13px; color: var(--fg-2); padding: 0 8px; gap: 6px; }
 .ring { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--fg-4); margin: 0 4px; }
-.ring.busy { border-top-color: var(--fg); animation: spin .8s linear infinite; }
 .quote-chip { display: flex; align-items: flex-start; gap: 6px; margin: 8px 12px 0; padding: 6px 8px; border-radius: 10px; background: var(--blue-bg); color: var(--blue); font-size: 12px; line-height: 17px; }
 .quote-chip .tx { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .files-bar { margin: 0; border-bottom: 1px solid var(--border); padding: 0 8px 0 16px; height: 34px; }
@@ -745,7 +742,6 @@ select.input { cursor: pointer; padding-right: 4px; }
 }
 .send-btn:active, .primary-btn:active, .pill-btn:active, .icon-btn:active, .plus-btn:active { transform: scale(.94); }
 .app.no-motion *, .app.no-motion *::before, .app.no-motion *::after { animation: none !important; transition: none !important; }
-.app.no-motion .spinner, .app.no-motion .ring.busy { animation: spin .8s linear infinite !important; }
 
 /* Styled select */
 .select-btn { height: 28px; min-width: 140px; max-width: 320px; padding: 0 8px 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--input); display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg); }
@@ -1630,3 +1626,27 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .l-caret.blink { animation: caret-blink 1.06s steps(1) infinite; }
 @keyframes caret-blink { 50% { opacity: 0; } }
 .l-caret-on { caret-color: transparent !important; }
+
+/* Loaders (ui/loaders.rs): Dots for a tool at work, Seal Stamp for a
+   subagent in the background, Ink Orbit for a chat at work and loading. */
+.ink-loader { display: inline-block; flex-shrink: 0; vertical-align: middle; overflow: visible; }
+.ink-loader path, .ink-loader circle { fill: currentColor; }
+.ink-orbit { color: var(--accent-c, var(--blue)); }
+.ink-orbit-ring { transform-origin: 24px 24px; animation: ink-orbit 1.8s cubic-bezier(.55, .04, .3, 1) infinite; }
+@keyframes ink-orbit {
+  0% { transform: rotate(-25deg); opacity: .65; }
+  36% { transform: rotate(122deg); opacity: 1; }
+  57% { transform: rotate(150deg); opacity: 1; }
+  100% { transform: rotate(335deg); opacity: .65; }
+}
+.ink-stamp { color: var(--accent-c, var(--blue)); }
+.ink-stamp-a, .ink-stamp-b { transform-origin: 24px 24px; animation: ink-stamp-a 1.8s cubic-bezier(.32, 0, .25, 1) infinite; }
+.ink-stamp-b { animation-name: ink-stamp-b; }
+.ink-stamp-dot { transform-origin: 24px 24px; animation: ink-stamp-dot 1.8s ease-in-out infinite; }
+@keyframes ink-stamp-a { 0%, 100% { transform: translate(-3px, -3px); opacity: .55; } 38%, 67% { transform: none; opacity: 1; } }
+@keyframes ink-stamp-b { 0%, 100% { transform: translate(3px, 3px); opacity: .55; } 38%, 67% { transform: none; opacity: 1; } }
+@keyframes ink-stamp-dot { 0%, 31%, 85%, 100% { transform: scale(0); opacity: 0; } 43%, 67% { transform: scale(1); opacity: 1; } }
+.app.no-motion .ink-loader * { animation: none !important; }
+.app.no-motion .ink-orbit-ring, .app.no-motion .ink-stamp-a, .app.no-motion .ink-stamp-b { transform: none !important; opacity: 1 !important; }
+.app.no-motion .ink-stamp-dot { transform: none !important; opacity: 1 !important; }
+.c-working { display: inline-flex; margin: 0 4px; }

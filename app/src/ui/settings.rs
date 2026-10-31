@@ -233,14 +233,14 @@ fn SourceControl() -> Element {
                 match git.read().clone() {
                     Some(true) => rsx! { span { class: "status-pill ok", Icon { i: I::Check, size: 11 } "Found" } },
                     Some(false) => rsx! { span { class: "status-pill missing", "Not found" } },
-                    None => rsx! { div { class: "spinner" } },
+                    None => rsx! { super::loaders::Orbit { size: 13 } },
                 }
             }
             Row { title: "GitHub CLI".to_string(), desc: Some("Needed for pull requests (gh auth login).".to_string()),
                 match gh.read().clone() {
                     Some(true) => rsx! { span { class: "status-pill ok", Icon { i: I::Check, size: 11 } "Found" } },
                     Some(false) => rsx! { a { href: "https://cli.github.com", "Install GitHub CLI" } },
-                    None => rsx! { div { class: "spinner" } },
+                    None => rsx! { super::loaders::Orbit { size: 13 } },
                 }
             }
         }
@@ -927,7 +927,7 @@ fn About() -> Element {
                     crate::state::UpdateState::Ready { .. } => rsx! {
                         button { class: "primary-btn", onclick: move |_| app.restart_to_update(), "Restart to update" }
                     },
-                    crate::state::UpdateState::Checking | crate::state::UpdateState::Downloading { .. } => rsx! { super::Spinner { size: 14 } },
+                    crate::state::UpdateState::Checking | crate::state::UpdateState::Downloading { .. } => rsx! { super::loaders::Orbit { size: 14 } },
                     _ => rsx! {
                         button { class: "ghost-btn", onclick: move |_| app.check_updates(false), "Check for updates" }
                     },

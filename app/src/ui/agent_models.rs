@@ -123,7 +123,7 @@ pub fn AgentModelsPanel(kind: AgentKind) -> Element {
             div { class: "grow" }
             button { class: "ghost-btn sm", disabled: refreshing, title: "Read the agent's settings and model list again",
                 onclick: { let k = kind.clone(); move |_| app.refresh_agent_models(Some(k.clone()), true) },
-                if refreshing { div { class: "spinner sm" } } else { Icon { i: I::Refresh, size: 13 } }
+                if refreshing { super::loaders::Orbit { size: 12 } } else { Icon { i: I::Refresh, size: 13 } }
                 if refreshing { "Reading…" } else { "Refresh" }
             }
         }

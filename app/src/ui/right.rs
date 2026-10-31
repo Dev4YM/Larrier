@@ -322,7 +322,7 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
             }
             div { class: "diff-list",
                 if gs.is_none() {
-                    div { class: "rp-empty", div { class: "spinner lg" } }
+                    div { class: "rp-empty", super::loaders::Orbit { size: 18 } }
                 } else if files.is_empty() {
                     div { class: "rp-empty",
                         Icon { i: I::CircleCheck, size: 22 }

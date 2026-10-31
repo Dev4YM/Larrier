@@ -525,7 +525,7 @@ pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
                                         div { key: "agent-{r.id}", class: "{cls}", role: "button", title: "{r.title}",
                                             onclick: move |_| app.ui.write().agent_term = Some((sid.clone(), tid.clone())),
                                             if r.active {
-                                                super::tasks::Dots { size: 12 }
+                                                super::loaders::Dots { size: 12 }
                                             } else {
                                                 Icon { i: I::Prompt, size: 14, stroke: 1.5 }
                                             }
@@ -633,7 +633,7 @@ fn AgentTermView(session_id: String, tool_id: String) -> Element {
         div { class: "aterm",
             div { class: "aterm-banner",
                 if active {
-                    super::tasks::Dots { size: 12 }
+                    super::loaders::Dots { size: 12 }
                 } else {
                     span { class: "tk-ic", Icon { i: I::Lock, size: 13 } }
                 }

@@ -1033,7 +1033,7 @@ fn PreviewPane(dark: bool) -> Element {
                         div { class: "ap-m-sec", "Projects" }
                         div { class: "repo-row", span { class: "ic", Icon { i: I::FolderOpen, size: 15, stroke: 1.5 } } span { class: "nm", "larrier" } }
                         div { class: "chat-row selected", span { class: "bullet", span { class: "pt" } } span { class: "t", "Refactor parser" } span { class: "tm", "2m" } }
-                        div { class: "chat-row", span { class: "bullet", super::Spinner { size: 13 } } span { class: "t", "Add dark mode" } span { class: "tm", "now" } }
+                        div { class: "chat-row", span { class: "bullet", super::loaders::Orbit { size: 13 } } span { class: "t", "Add dark mode" } span { class: "tm", "now" } }
                         div { class: "chat-sub", "Editing theme.rs" }
                         div { class: "chat-row unread", span { class: "bullet", span { class: "pt" } } span { class: "t", "Fix flaky test" } span { class: "tm", "1h" } }
                         div { class: "chat-row review unread", span { class: "bullet", span { class: "pt" } } span { class: "t", "Ship v0.4" } span { class: "tm", "3h" } }

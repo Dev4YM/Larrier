@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::sync::OnceLock;
 
 use dioxus::core::spawn_forever;
-use dioxus::desktop::wry::dpi::{LogicalPosition, LogicalSize};
+use dioxus::desktop::wry::dpi::{PhysicalPosition, PhysicalSize};
 use dioxus::desktop::wry::{NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows};
 use dioxus::prelude::*;
 
@@ -50,7 +50,8 @@ fn annotate_token() -> &'static str {
     TOKEN.get_or_init(|| uuid::Uuid::new_v4().simple().to_string())
 }
 
-/// Where the Browser tab's page area is (CSS px = logical px), if shown.
+/// Where the Browser tab's page area is, in the window's own pixels (the
+/// app's zoom and the display's scale applied), if shown.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Area {
     pub x: f64,
@@ -197,7 +198,7 @@ const AWAY: f64 = -30_000.0;
 fn bounds(area: Option<Area>, shown: bool) -> Rect {
     let a = area.unwrap_or(Area { x: 0.0, y: 0.0, w: 1280.0, h: 800.0 });
     let x = if shown { a.x } else { AWAY };
-    Rect { position: LogicalPosition::new(x, a.y).into(), size: LogicalSize::new(a.w.max(1.0), a.h.max(1.0)).into() }
+    Rect { position: PhysicalPosition::new(x as i32, a.y as i32).into(), size: PhysicalSize::new(a.w.max(1.0) as u32, a.h.max(1.0) as u32).into() }
 }
 
 fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {

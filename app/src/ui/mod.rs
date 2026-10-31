@@ -413,7 +413,8 @@ pub fn Root() -> Element {
                     const q = o.getBoundingClientRect();
                     if (q.width && q.height && q.right > r.left && q.left < r.right && q.bottom > r.top && q.top < r.bottom && getComputedStyle(o).visibility !== 'hidden') { covered = true; break; }
                   }
-                  msg = { t: 'browser-area', x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), covered };
+                  const d = window.devicePixelRatio || 1;
+                  msg = { t: 'browser-area', x: Math.round(r.left * d), y: Math.round(r.top * d), w: Math.round(r.width * d), h: Math.round(r.height * d), covered };
                 }
                 const k = JSON.stringify(msg);
                 if (k !== last) { last = k; dioxus.send(msg); }

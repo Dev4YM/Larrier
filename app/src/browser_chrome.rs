@@ -288,6 +288,8 @@ struct Worker {
     /// with when and where: once their address is known they leave it for
     /// a tab of their own.
     strays: HashMap<String, (Instant, String)>,
+    /// When the tabs' titles and addresses were last read whole.
+    synced: Instant,
 }
 
 fn worker(rx: Receiver<Cmd>, events: UnboundedSender<Ev>, frame: isize, annotate_js: String) {
@@ -306,7 +308,7 @@ fn worker(rx: Receiver<Cmd>, events: UnboundedSender<Ev>, frame: isize, annotate
             return stopped();
         }
     };
-    let mut w = Worker { cdp, chrome, frame, tabs: HashMap::new(), shown: None, size, events, annotate_js, known: HashSet::new(), strays: HashMap::new() };
+    let mut w = Worker { cdp, chrome, frame, tabs: HashMap::new(), shown: None, size, events, annotate_js, known: HashSet::new(), strays: HashMap::new(), synced: Instant::now() };
     let _ = w.cdp.call("Target.setDiscoverTargets", json!({"discover": true}), None);
     // Its first window, with the first page.
     let page = page_targets(&w.cdp).into_iter().next();
@@ -765,6 +767,17 @@ impl Worker {
             }
             let _ = self.cdp.call("Target.closeTarget", json!({"targetId": t}), None);
             let _ = self.events.send(Ev::Open { url: if unsettled(&url) { "chrome://newtab/".into() } else { url } });
+        }
+        // Every tab's title and address, read whole now and then: a page
+        // that loaded before Larrier attached sends no news of its own.
+        if self.synced.elapsed() > Duration::from_millis(1500) {
+            self.synced = Instant::now();
+            let infos = self.cdp.call_for("Target.getTargets", json!({}), None, Duration::from_secs(2)).ok();
+            for i in infos.as_ref().and_then(|v| v["targetInfos"].as_array()).into_iter().flatten() {
+                if let Some(id) = i["targetId"].as_str().and_then(|t| by_target.get(t)).copied() {
+                    self.news(id, i);
+                }
+            }
         }
         // The page moved in its window (an infobar, DevTools docked): follow.
         if let Some(id) = self.shown {

@@ -60,11 +60,19 @@ pub fn start() {
         .ok();
 }
 
+/// The DevTools target showing tab `id`, when Larrier's Chrome shows it.
+fn target_of(id: u64) -> Option<String> {
+    #[cfg(windows)]
+    return crate::browser_chrome::target_of(id);
+    #[cfg(not(windows))]
+    None
+}
+
 /// One request, on the UI thread.
 fn answer(req: &Value) -> Value {
     let st = host::STATE.peek().clone();
     match req["cmd"].as_str().unwrap_or("") {
-        "tabs" => json!({"tabs": st.tabs.iter().map(|t| json!({"id": t.id, "url": t.url, "title": t.title, "active": Some(t.id) == st.active})).collect::<Vec<_>>()}),
+        "tabs" => json!({"tabs": st.tabs.iter().map(|t| json!({"id": t.id, "url": t.url, "title": t.title, "active": Some(t.id) == st.active, "target": target_of(t.id)})).collect::<Vec<_>>()}),
         "new_tab" => match host::new_tab(req["url"].as_str().unwrap_or("about:blank")) {
             Some(id) => json!({"id": id}),
             None => json!({"error": st.error.unwrap_or_else(|| "Larrier couldn't open a tab".into())}),

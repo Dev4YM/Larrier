@@ -3,6 +3,7 @@
 
 mod agent_models;
 mod automations;
+mod browser_chrome;
 mod browser_control;
 mod browser_host;
 mod highlight;

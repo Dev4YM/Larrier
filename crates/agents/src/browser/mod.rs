@@ -1,8 +1,9 @@
-//! The browser Larrier shares with its agents: the real browser views in
-//! Larrier's Browser tab (WebView2, with a profile of their own), driven
-//! over their DevTools port. Agents use them through `Larrier mcp-browser`
-//! (an MCP server on stdio, added to their runs), so the user sees and can
-//! use the very pages the agent works in.
+//! The browser Larrier shares with its agents: the real pages in Larrier's
+//! Browser tab (Google Chrome when it's installed, WebView2 otherwise, each
+//! with a profile of its own), driven over their DevTools port. Agents use
+//! them through `Larrier mcp-browser` (an MCP server on stdio, added to
+//! their runs), so the user sees and can use the very pages the agent works
+//! in.
 
 pub mod cdp;
 pub mod control;
@@ -79,15 +80,37 @@ pub fn view_dir() -> PathBuf {
     larrier_core::store::data_root().join("browser-view")
 }
 
-/// The views' DevTools websocket address, when Larrier has them open.
-pub fn view_running() -> Option<String> {
-    let text = std::fs::read_to_string(view_dir().join("EBWebView").join("DevToolsActivePort")).ok()?;
+/// Larrier's own Google Chrome: its profile folder.
+pub fn chrome_dir() -> PathBuf {
+    larrier_core::store::data_root().join("browser-chrome")
+}
+
+/// A browser's DevTools port and websocket path, from the file it writes
+/// when it starts, if it's answering.
+fn devtools_at(file: PathBuf) -> Option<(u16, String)> {
+    let text = std::fs::read_to_string(file).ok()?;
     let mut lines = text.lines();
-    let port = lines.next()?.trim().to_string();
+    let port: u16 = lines.next()?.trim().parse().ok()?;
     let path = lines.next()?.trim().to_string();
     let addr = format!("127.0.0.1:{port}").parse().ok()?;
     std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)).ok()?;
-    Some(format!("ws://127.0.0.1:{port}{path}"))
+    Some((port, path))
+}
+
+/// Larrier's Chrome's DevTools port, while it runs.
+pub fn chrome_port() -> Option<u16> {
+    devtools_at(chrome_dir().join("DevToolsActivePort")).map(|(p, _)| p)
+}
+
+/// Larrier's Chrome's DevTools websocket address, while it runs.
+pub fn chrome_running() -> Option<String> {
+    devtools_at(chrome_dir().join("DevToolsActivePort")).map(|(port, path)| format!("ws://127.0.0.1:{port}{path}"))
+}
+
+/// The DevTools websocket address of the browser behind Larrier's Browser
+/// tab (its Chrome, or its WebView2 views), when it's open.
+pub fn view_running() -> Option<String> {
+    chrome_running().or_else(|| devtools_at(view_dir().join("EBWebView").join("DevToolsActivePort")).map(|(port, path)| format!("ws://127.0.0.1:{port}{path}")))
 }
 
 /// The page target showing Larrier tab `tab` (each view tells its pages
@@ -144,7 +167,7 @@ pub fn address(input: &str) -> String {
         return format!("{}://{t}", if local { "http" } else { "https" });
     }
     let q: String = t.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else if b == b' ' { "+".into() } else { format!("%{b:02X}") }).collect();
-    format!("https://www.bing.com/search?q={q}")
+    format!("https://www.google.com/search?q={q}")
 }
 
 #[cfg(test)]
@@ -156,6 +179,6 @@ mod tests {
         assert_eq!(address("example.com"), "https://example.com");
         assert_eq!(address("localhost:3000/x"), "http://localhost:3000/x");
         assert_eq!(address("http://a.b"), "http://a.b");
-        assert_eq!(address("rust lang"), "https://www.bing.com/search?q=rust+lang");
+        assert_eq!(address("rust lang"), "https://www.google.com/search?q=rust+lang");
     }
 }

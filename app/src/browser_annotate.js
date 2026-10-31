@@ -10,7 +10,12 @@
   let picked = [];
   let last = null;
 
-  const send = (msg) => { try { window.ipc.postMessage(JSON.stringify(Object.assign({ larrier: TOKEN }, msg))); } catch (e) {} };
+  // Larrier's Chrome hears pages through a DevTools binding (it may come
+  // after this script), its WebView2 through the view's own channel.
+  const send = (msg) => {
+    const body = JSON.stringify(Object.assign({ larrier: TOKEN }, msg));
+    try { if (typeof window.__larrierPost === 'function') window.__larrierPost(body); else window.ipc.postMessage(body); } catch (e) {}
+  };
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const css = `

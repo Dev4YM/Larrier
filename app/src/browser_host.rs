@@ -1,13 +1,13 @@
-//! Larrier's browser: real browser views (WebView2, the engine Larrier runs
-//! on) laid over the Browser tab, one per page tab. They share a profile of
-//! their own and a DevTools port, so agents drive the very pages the user
-//! sees (`Larrier mcp-browser` attaches to that port) and sites see an
-//! ordinary Edge, not a headless one.
+//! Larrier's browser: real browser pages laid over the Browser tab, one per
+//! page tab. With Google Chrome installed they're Larrier's own Chrome's
+//! (see `browser_chrome`); otherwise WebView2 views (the engine Larrier runs
+//! on). Either way they have a profile of their own and a DevTools port, so
+//! agents drive the very pages the user sees (`Larrier mcp-browser` attaches
+//! to that port) and sites see an ordinary browser, not a headless one.
 //!
-//! The views are native child windows: they live on the main thread, are
-//! placed over the tab's area as the layout reports it, and step aside
-//! (offscreen, still rendering) when the tab isn't shown or a menu or dialog
-//! opens over them.
+//! The pages are native child windows: placed over the tab's area as the
+//! layout reports it, they step aside (offscreen, still rendering) when the
+//! tab isn't shown or a menu or dialog opens over them.
 
 use std::cell::RefCell;
 use std::sync::OnceLock;
@@ -60,10 +60,14 @@ pub struct Area {
     pub h: f64,
 }
 
-/// What the views report, handled on the UI side.
-enum Ev {
+/// What the pages report, handled on the UI side.
+pub(crate) enum Ev {
     Load { id: u64, started: bool, url: String },
     Title { id: u64, title: String },
+    /// The page's address changed (a link, the page itself).
+    Url { id: u64, url: String },
+    /// The tab's page closed by itself (the page closed it, Chrome quit).
+    Gone { id: u64 },
     Open { url: String },
     Failed { id: u64, error: String },
     Nav { id: u64, back: bool, forward: bool },
@@ -104,6 +108,56 @@ thread_local! {
 /// Called once by the root component.
 pub fn set_app(app: crate::state::App) {
     APP.with(|a| a.set(Some(app)));
+    #[cfg(windows)]
+    {
+        use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+        crate::browser_chrome::setup(dioxus::desktop::window().window.hwnd(), events(), annotate_script());
+    }
+}
+
+/// Larrier's own Chrome is the engine when Google Chrome is installed;
+/// WebView2 views otherwise.
+#[cfg(windows)]
+fn chrome() -> bool {
+    crate::browser_chrome::chrome_exe().is_some()
+}
+
+#[cfg(not(windows))]
+fn chrome() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn to_chrome(cmd: crate::browser_chrome::Cmd) {
+    crate::browser_chrome::send(cmd);
+}
+
+/// What a new tab opens: Chrome's New Tab page, or a blank page.
+pub fn blank() -> &'static str {
+    if chrome() {
+        "chrome://newtab/"
+    } else {
+        "about:blank"
+    }
+}
+
+/// A new tab's page (no address worth showing).
+pub fn is_blank(url: &str) -> bool {
+    url.is_empty() || url == "about:blank" || url.starts_with("chrome://newtab") || url.starts_with("chrome://new-tab-page") || url.starts_with("chrome-search://")
+}
+
+/// The annotate script, with this run's token.
+fn annotate_script() -> String {
+    include_str!("browser_annotate.js").replace("__LARRIER_TOKEN__", annotate_token())
+}
+
+/// A picture of tab `id`, or of part of it (CSS pixels): base64 JPEG.
+fn capture(id: u64, clip: Option<(f64, f64, f64, f64)>) -> Option<String> {
+    #[cfg(windows)]
+    if chrome() {
+        return crate::browser_chrome::capture(id, clip);
+    }
+    larrier_agents::browser::view_capture(id, clip)
 }
 
 static EVENTS: OnceLock<tokio::sync::mpsc::UnboundedSender<Ev>> = OnceLock::new();
@@ -114,7 +168,7 @@ fn data_dir() -> std::path::PathBuf {
     larrier_agents::browser::view_dir()
 }
 
-fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
+pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
     EVENTS
         .get_or_init(|| {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Ev>();
@@ -133,8 +187,9 @@ fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                             if started && st.active == Some(id) {
                                 *ANNOTATING.write() = false;
                             }
-                            // Where back and forward lead, once it has loaded.
-                            if !started {
+                            // Where back and forward lead, once it has loaded
+                            // (Chrome's worker says so itself).
+                            if !started && !chrome() {
                                 let tx = events();
                                 std::thread::spawn(move || {
                                     if let Some((back, forward)) = history(id) {
@@ -167,6 +222,13 @@ fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                                 t.title = title;
                             }
                         }
+                        Ev::Url { id, url } => {
+                            let mut st = STATE.write();
+                            if let Some(t) = st.tabs.iter_mut().find(|t| t.id == id) {
+                                t.url = url;
+                            }
+                        }
+                        Ev::Gone { id } => close_tab(id),
                         Ev::Open { url } => {
                             new_tab(&url);
                         }
@@ -215,6 +277,11 @@ fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {
 /// Put every view where it belongs: the active one over the area (when the
 /// tab is shown and nothing covers it), the rest out of sight.
 fn place(h: &Host) {
+    #[cfg(windows)]
+    if chrome() {
+        crate::browser_chrome::place(h.area.filter(|_| !h.aside), h.active);
+        return;
+    }
     for (id, v) in &h.views {
         let shown = Some(*id) == h.active && h.area.is_some() && !h.aside;
         let _ = v.set_bounds(bounds(h.area, shown));
@@ -238,6 +305,12 @@ pub fn new_tab(url: &str) -> Option<u64> {
         st.tabs.push(Tab { id, url: url.clone(), loading: true, ..Default::default() });
         st.active = Some(id);
         st.error = None;
+    }
+    #[cfg(windows)]
+    if chrome() {
+        to_chrome(crate::browser_chrome::Cmd::NewTab { id, url });
+        with_host(|h| place(h));
+        return Some(id);
     }
     PENDING.with(|p| p.borrow_mut().push((id, url)));
     BUILDER.with(|b| b.borrow_mut().get_or_insert_with(|| dioxus::desktop::window().window.clone()).clone());
@@ -347,8 +420,12 @@ pub fn close_tab(id: u64) {
     }
     let active = st.active;
     drop(st);
+    #[cfg(windows)]
+    if chrome() {
+        to_chrome(crate::browser_chrome::Cmd::Close { id });
+    }
     with_host(|h| {
-        if !h.views.iter().any(|(v, _)| *v == id) {
+        if !chrome() && !h.views.iter().any(|(v, _)| *v == id) {
             h.closed.insert(id);
         }
         h.views.retain(|(v, _)| *v != id);
@@ -361,38 +438,79 @@ fn active_view<R>(f: impl FnOnce(&WebView) -> R) -> Option<R> {
     with_host(|h| h.views.iter().find(|(v, _)| Some(*v) == h.active).map(|(_, w)| f(w))).flatten()
 }
 
+/// Hand Chrome's worker a command for the tab shown, when Chrome is the
+/// engine (`false`: it isn't, the view does it).
+#[cfg(windows)]
+fn chrome_active(cmd: impl FnOnce(u64) -> crate::browser_chrome::Cmd) -> bool {
+    if !chrome() {
+        return false;
+    }
+    if let Some(id) = STATE.peek().active {
+        to_chrome(cmd(id));
+    }
+    true
+}
+
 pub fn navigate(input: &str) {
     let url = normalize(input);
     if STATE.peek().active.is_none() {
         new_tab(&url);
         return;
     }
+    #[cfg(windows)]
+    if chrome_active(|id| crate::browser_chrome::Cmd::Navigate { id, url: url.clone() }) {
+        return;
+    }
     active_view(|v| v.load_url(&url));
 }
 
 pub fn back() {
+    #[cfg(windows)]
+    if chrome_active(|id| crate::browser_chrome::Cmd::History { id, back: true }) {
+        return;
+    }
     active_view(|v| v.evaluate_script("history.back()"));
 }
 
 pub fn forward() {
+    #[cfg(windows)]
+    if chrome_active(|id| crate::browser_chrome::Cmd::History { id, back: false }) {
+        return;
+    }
     active_view(|v| v.evaluate_script("history.forward()"));
 }
 
 pub fn reload() {
+    #[cfg(windows)]
+    if chrome_active(|id| crate::browser_chrome::Cmd::Reload { id }) {
+        return;
+    }
     active_view(|v| v.reload());
 }
 
 pub fn stop() {
+    #[cfg(windows)]
+    if chrome_active(|id| crate::browser_chrome::Cmd::Stop { id }) {
+        return;
+    }
     active_view(|v| v.evaluate_script("window.stop()"));
 }
 
 pub fn devtools() {
+    #[cfg(windows)]
+    if chrome_active(|id| crate::browser_chrome::Cmd::DevTools { id }) {
+        return;
+    }
     active_view(|v| v.open_devtools());
 }
 
 /// Turn annotate mode on or off in the tab shown.
 pub fn annotate(on: bool) {
     *ANNOTATING.write() = on;
+    #[cfg(windows)]
+    if chrome_active(|id| crate::browser_chrome::Cmd::Script { id, js: format!("window.__larrierAnnotate && window.__larrierAnnotate({on})") }) {
+        return;
+    }
     active_view(|v| {
         let _ = v.evaluate_script(&format!("window.__larrierAnnotate && window.__larrierAnnotate({on})"));
         if on {
@@ -423,7 +541,7 @@ fn annotated(id: u64, body: &str) {
                     let (x, y, w, h) = (r["x"].as_f64().unwrap_or(0.0), r["y"].as_f64().unwrap_or(0.0), r["w"].as_f64().unwrap_or(1.0), r["h"].as_f64().unwrap_or(1.0));
                     (x - 8.0, y - 8.0, w + 16.0, h + 16.0)
                 }).collect();
-                let shots = tokio::task::spawn_blocking(move || clips.into_iter().map(|c| larrier_agents::browser::view_capture(id, Some(c))).collect::<Vec<_>>()).await.unwrap_or_default();
+                let shots = tokio::task::spawn_blocking(move || clips.into_iter().map(|c| capture(id, Some(c))).collect::<Vec<_>>()).await.unwrap_or_default();
                 let mut parts = Vec::new();
                 for (n, item) in items.iter().enumerate() {
                     if let Some(Some(jpeg)) = shots.get(n) {
@@ -476,7 +594,7 @@ pub fn set_area(area: Option<Area>, covered: bool) {
         match active {
             Some(tab) => {
                 std::thread::spawn(move || {
-                    let shot = larrier_agents::browser::view_snapshot(tab);
+                    let shot = capture(tab, None);
                     let _ = tx.send(Ev::Covered { gen, shot });
                 });
             }
@@ -504,9 +622,9 @@ fn history(id: u64) -> Option<(bool, bool)> {
 fn normalize(input: &str) -> String {
     let s = input.trim();
     if s.is_empty() {
-        return "about:blank".into();
+        return blank().into();
     }
-    if s.contains("://") || s.starts_with("about:") || s.starts_with("data:") || s.starts_with("file:") {
+    if s.contains("://") || s.starts_with("about:") || s.starts_with("data:") || s.starts_with("file:") || s.starts_with("chrome:") {
         return s.to_string();
     }
     let host = s.split(['/', '?', '#']).next().unwrap_or("");
@@ -517,7 +635,7 @@ fn normalize(input: &str) -> String {
         let local = host.starts_with("localhost") || host.starts_with("127.") || host.ends_with(".localhost") || host.ends_with(".test") || intranet;
         return format!("{}://{s}", if local { "http" } else { "https" });
     }
-    format!("https://www.bing.com/search?q={}", urlencode(s))
+    format!("https://www.google.com/search?q={}", urlencode(s))
 }
 
 fn urlencode(s: &str) -> String {
@@ -539,8 +657,8 @@ mod tests {
         assert_eq!(normalize("example.com"), "https://example.com");
         assert_eq!(normalize("localhost:3000/x"), "http://localhost:3000/x");
         assert_eq!(normalize("http://a.b"), "http://a.b");
-        assert_eq!(normalize("rust lifetimes"), "https://www.bing.com/search?q=rust+lifetimes");
+        assert_eq!(normalize("rust lifetimes"), "https://www.google.com/search?q=rust+lifetimes");
         assert_eq!(normalize("intranet/wiki/Home/?C=x"), "http://intranet/wiki/Home/?C=x");
-        assert_eq!(normalize("intranet"), "https://www.bing.com/search?q=intranet");
+        assert_eq!(normalize("intranet"), "https://www.google.com/search?q=intranet");
     }
 }

@@ -275,13 +275,23 @@ impl Browser {
             .collect())
     }
 
+    /// The page target showing tab `id`: as Larrier knows it, or found by
+    /// asking the pages which tab they're in.
+    fn target(&self, id: u64) -> Option<String> {
+        let known = control::request(json!({"cmd": "tabs"})).ok().and_then(|v| {
+            let tabs = v["tabs"].as_array()?.clone();
+            tabs.iter().find(|t| t["id"].as_u64() == Some(id))?["target"].as_str().map(String::from)
+        });
+        known.or_else(|| view_target(&self.cdp, id))
+    }
+
     /// Open a tab in Larrier and wait until its page can be driven.
     fn new_tab(&mut self, url: &str) -> Result<u64, String> {
         let v = control::request(json!({"cmd": "new_tab", "url": url}))?;
         let id = v["id"].as_u64().ok_or("Larrier couldn't open a tab")?;
         let until = Instant::now() + Duration::from_secs(20);
         while Instant::now() < until {
-            if view_target(&self.cdp, id).is_some() {
+            if self.target(id).is_some() {
                 return Ok(id);
             }
             std::thread::sleep(Duration::from_millis(200));
@@ -306,7 +316,7 @@ impl Browser {
             None => false,
         };
         if !alive {
-            let target = view_target(&self.cdp, id).ok_or(format!("There's no tab {id}. tabs_context lists them."))?;
+            let target = self.target(id).ok_or(format!("There's no tab {id}. tabs_context lists them."))?;
             let r = self.cdp.call("Target.attachToTarget", json!({"targetId": target, "flatten": true}), None)?;
             let session = r["sessionId"].as_str().ok_or("couldn't attach to the tab")?.to_string();
             for m in ["Page.enable", "Runtime.enable", "Log.enable", "Network.enable"] {

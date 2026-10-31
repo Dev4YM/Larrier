@@ -144,6 +144,67 @@ pub async fn run_qwen(req: TurnRequest, sink: EventSink, mut control: UnboundedR
 }
 
 /// Larrier's browser as an MCP server for this run, its tools allowed.
+/// Claude Code's own breakdown of a chat's context window (what its
+/// `/context` shows: system prompt, tools, MCP tools, memory files, skills,
+/// messages, free space…), from a short-lived Claude on the chat's session
+/// asked over the control protocol. No prompt is sent: no turn runs and
+/// nothing is added to the chat.
+pub async fn context_usage(req: TurnRequest) -> Result<Value, String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let Some(target) = req.resume_path.as_ref().or(req.resume_id.as_ref()) else {
+        return Err("This chat hasn't run in Claude Code yet.".into());
+    };
+    let mut cmd = req.launch.command();
+    cmd.current_dir(&req.cwd);
+    cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--input-format", "stream-json", "--resume", target]);
+    if let Some(m) = &req.model {
+        cmd.args(["--model", m]);
+    }
+    if let Some(a) = &req.run_as {
+        cmd.args(["--agent", a]);
+    }
+    browser_args(&mut cmd, &req);
+    cmd.args(&req.modes.args);
+    // Only asked, never run: the user's hooks (a resume runs SessionStart
+    // hooks) stay out of it.
+    cmd.args(["--settings", r#"{"disableAllHooks":true}"#]);
+    cmd.env_remove("CLAUDECODE");
+    cmd.args(&req.launch.extra_args);
+    cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start Claude Code: {e}"))?;
+    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        return Err("Couldn't talk to Claude Code.".into());
+    };
+    let ask = |id: &str, request: Value| format!("{}\n", json!({"type": "control_request", "request_id": id, "request": request}));
+    let asked = async {
+        stdin.write_all(ask("larrier_init", json!({"subtype": "initialize"})).as_bytes()).await?;
+        stdin.write_all(ask("larrier_context", json!({"subtype": "get_context_usage"})).as_bytes()).await?;
+        stdin.flush().await
+    };
+    if asked.await.is_err() {
+        let _ = child.kill().await;
+        return Err("Claude Code closed before it could be asked.".into());
+    }
+    let mut lines = BufReader::new(stdout).lines();
+    let answer = async {
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            let r = &v["response"];
+            if v["type"] == "control_response" && r["request_id"] == "larrier_context" {
+                return match s(r, "subtype") {
+                    Some("success") => Ok(r["response"].clone()),
+                    _ => Err(s(r, "error").unwrap_or("Claude Code couldn't say.").to_string()),
+                };
+            }
+        }
+        Err("Claude Code closed without answering.".to_string())
+    };
+    let r = tokio::time::timeout(std::time::Duration::from_secs(90), answer).await.unwrap_or_else(|_| Err("Claude Code took too long to answer.".into()));
+    drop(stdin);
+    let _ = child.kill().await;
+    r
+}
+
 fn browser_args(cmd: &mut tokio::process::Command, req: &TurnRequest) {
     if let Some(b) = &req.browser {
         cmd.arg("--mcp-config").arg(b.mcp_json().to_string());

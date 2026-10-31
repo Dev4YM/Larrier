@@ -151,6 +151,47 @@ fn annotate_script() -> String {
     include_str!("browser_annotate.js").replace("__LARRIER_TOKEN__", annotate_token())
 }
 
+/// Run `js` in tab `id`'s page: its value.
+fn eval(id: u64, js: &str) -> Option<serde_json::Value> {
+    #[cfg(windows)]
+    if chrome() {
+        return crate::browser_chrome::eval(id, js);
+    }
+    use larrier_agents::browser::{view_running, view_target, Cdp};
+    let cdp = Cdp::connect(&view_running()?).ok()?;
+    let target = view_target(&cdp, id)?;
+    let r = cdp.call("Target.attachToTarget", serde_json::json!({"targetId": target, "flatten": true}), None).ok()?;
+    let session = r["sessionId"].as_str()?.to_string();
+    let v = cdp.call("Runtime.evaluate", serde_json::json!({"expression": js, "returnByValue": true}), Some(&session)).ok()?;
+    Some(v["result"]["value"].clone())
+}
+
+/// Hand a page tab (`"active"`: the one shown) to a chat's box as context:
+/// an object in its text carrying the page's address, title and text as
+/// they are now, and a picture of the page attached alongside.
+pub fn to_chat(which: &str, target: Option<String>) {
+    let st = STATE.peek().clone();
+    let id = if which == "active" { st.active } else { which.parse().ok() };
+    let Some(tab) = id.and_then(|id| st.tabs.iter().find(|t| t.id == id)).cloned() else { return };
+    let Some(app) = APP.with(|a| a.get()) else { return };
+    if is_blank(&tab.url) {
+        app.toast("That tab has no page yet.");
+        return;
+    }
+    spawn_forever(async move {
+        let id = tab.id;
+        const PAGE: &str = "(() => ({ url: location.href, title: document.title, text: (document.body ? document.body.innerText : '').slice(0, 40000) }))()";
+        let (page, shot) = tokio::task::spawn_blocking(move || (eval(id, PAGE), capture(id, None))).await.unwrap_or((None, None));
+        let field = |k: &str| page.as_ref().and_then(|p| p[k].as_str()).map(String::from).filter(|s| !s.is_empty());
+        let url = field("url").unwrap_or(tab.url.clone());
+        let title = field("title").unwrap_or(tab.title.clone());
+        let chip = crate::ui::mentions::MentionChip::page(&title, &url, &field("text").unwrap_or_default());
+        let picture = shot.and_then(|s| crate::state::save_data_url(&format!("data:image/jpeg;base64,{s}"), "page.jpg").ok());
+        let mut app = app;
+        app.ui.write().chip_inbox.push((target, chip, picture));
+    });
+}
+
 /// A picture of tab `id`, or of part of it (CSS pixels): base64 JPEG.
 fn capture(id: u64, clip: Option<(f64, f64, f64, f64)>) -> Option<String> {
     #[cfg(windows)]

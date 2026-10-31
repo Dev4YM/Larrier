@@ -686,7 +686,9 @@ pub fn Root() -> Element {
                 }
                 const r = ov.getBoundingClientRect();
                 const scope = ov.parentElement || document;
-                const comp = [...scope.querySelectorAll('.composer')].find(c => inside(c.getBoundingClientRect(), x, y, 28, 40));
+                const page = st && st.id.startsWith('page:');
+                const comp = [...scope.querySelectorAll('.composer')].find(c => inside(c.getBoundingClientRect(), x, y, 28, 40)) || (page ? scope.querySelector('.composer') : null);
+                if (page && !comp) return null;
                 if (comp) {
                   const b = comp.getBoundingClientRect();
                   ov.style.setProperty('--cx', (b.left - r.left - 8) + 'px');
@@ -1050,6 +1052,14 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                 return;
             }
             let target = v["target"].as_str().map(|s| s.to_string()).filter(|s| !s.is_empty());
+            // A browser page tab (or the Browser itself: the page it shows)
+            // goes to the chat's box as context.
+            if let Some(tab) = id.strip_prefix("page:") {
+                if v["zone"].as_str() == Some("context") {
+                    crate::browser_host::to_chat(tab, target);
+                }
+                return;
+            }
             match v["zone"].as_str() {
                 Some("here") => app.open_session(&id),
                 // Onto the tab bar: next to the open chat, never inside it.

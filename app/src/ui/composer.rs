@@ -234,6 +234,39 @@ pub fn Composer(
             at.write().extend(items);
         }
     }));
+    // Objects dropped in for this composer (a dragged browser page), and
+    // their pictures.
+    let chip_len = crate::state::use_ui(|u| u.chip_inbox.len())();
+    let sid_chip = session_id.clone();
+    use_effect(use_reactive!(|chip_len| {
+        if chip_len == 0 {
+            return;
+        }
+        let mut app = app;
+        let mut text = text;
+        let mine: Vec<(MentionChip, Option<larrier_core::Part>)> = {
+            let mut ui = app.ui.write();
+            let (m, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut ui.chip_inbox).into_iter().partition(|(sid, _, _)| *sid == sid_chip);
+            ui.chip_inbox = rest;
+            m.into_iter().map(|(_, c, p)| (c, p)).collect()
+        };
+        let mut add: Vec<String> = Vec::new();
+        for (chip, picture) in mine {
+            let chip = super::mentions::unique(&mentions.read(), chip);
+            add.push(chip.marked());
+            mentions.write().push(chip);
+            if let Some(p) = picture {
+                let mut at = attachments;
+                at.write().push(p);
+            }
+        }
+        if !add.is_empty() {
+            let cur = text.read().clone();
+            let sep = if cur.is_empty() || cur.ends_with(' ') || cur.ends_with('\n') { "" } else { " " };
+            text.set(format!("{cur}{sep}{} ", add.join(" ")));
+            app.ui.write().focus_composer += 1;
+        }
+    }));
     // Text dropped in for this composer (a dragged chat added as context).
     let compose_len = crate::state::use_ui(|u| u.compose_inbox.len())();
     let sid_in = session_id.clone();

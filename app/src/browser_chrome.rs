@@ -65,6 +65,8 @@ pub enum Cmd {
     /// A picture of tab `id`, or of part of it (x, y, width, height in CSS
     /// pixels): base64 JPEG.
     Capture { id: u64, clip: Option<(f64, f64, f64, f64)>, reply: Sender<Option<String>> },
+    /// Run `js` in tab `id`'s page: its value.
+    Eval { id: u64, js: String, reply: Sender<Option<Value>> },
     Quit { reply: Sender<()> },
 }
 
@@ -196,6 +198,14 @@ pub fn capture(id: u64, clip: Option<(f64, f64, f64, f64)>) -> Option<String> {
     let (rtx, rrx) = mpsc::channel();
     tx.send(Cmd::Capture { id, clip, reply: rtx }).ok()?;
     rrx.recv_timeout(Duration::from_secs(4)).ok().flatten()
+}
+
+/// Run `js` in tab `id`'s page: its value.
+pub fn eval(id: u64, js: &str) -> Option<Value> {
+    let tx = SHARED.lock().unwrap().as_ref()?.tx.clone()?;
+    let (rtx, rrx) = mpsc::channel();
+    tx.send(Cmd::Eval { id, js: js.to_string(), reply: rtx }).ok()?;
+    rrx.recv_timeout(Duration::from_secs(5)).ok().flatten()
 }
 
 /// The frame: a plain child window of the app's, over the Browser tab's
@@ -663,6 +673,10 @@ impl Worker {
                 }
                 let shot = self.session(id).and_then(|s| self.cdp.call_for("Page.captureScreenshot", params, Some(&s), Duration::from_secs(3)).ok());
                 let _ = reply.send(shot.and_then(|v| v["data"].as_str().map(String::from)));
+            }
+            Cmd::Eval { id, js, reply } => {
+                let v = self.session(id).and_then(|s| self.cdp.call_for("Runtime.evaluate", json!({"expression": js, "returnByValue": true}), Some(&s), Duration::from_secs(4)).ok());
+                let _ = reply.send(v.map(|v| v["result"]["value"].clone()));
             }
             Cmd::Quit { .. } => {}
         }

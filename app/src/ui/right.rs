@@ -58,11 +58,24 @@ pub fn RightPane(id: String) -> Element {
                                 cls.push_str(" preview");
                             }
                             let kind = t.tab;
+                            // The Browser tab drags into a chat as the page it shows.
+                            let (drag, drag_title) = match kind {
+                                RightTab::Browser => {
+                                    let st = crate::browser_host::STATE();
+                                    match st.active.and_then(|id| st.tabs.iter().find(|t| t.id == id)) {
+                                        Some(p) if !crate::browser_host::is_blank(&p.url) => ("page:active".to_string(), tab_label(p)),
+                                        _ => (String::new(), String::new()),
+                                    }
+                                }
+                                _ => (String::new(), String::new()),
+                            };
                             rsx! {
                                 span {
                                     key: "{ttitle}",
                                     class: "{cls}",
                                     role: "tab",
+                                    "data-drag-session": "{drag}",
+                                    "data-drag-title": "{drag_title}",
                                     title: if t.preview { "{ttitle} · Preview — double-click to keep open" } else { "{ttitle}" },
                                     onclick: move |_| app.ui.write().right_tab = kind,
                                     ondoubleclick: move |_| app.ui.write().keep_panel(kind),
@@ -617,6 +630,8 @@ fn BrowserTab() -> Element {
                         let label = tab_label(&t);
                         rsx! {
                             div { key: "{t.id}", class: if on { "browser-tab on" } else { "browser-tab" }, title: "{t.url}",
+                                "data-drag-session": if host::is_blank(&t.url) { String::new() } else { format!("page:{}", t.id) },
+                                "data-drag-title": "{label}",
                                 onclick: move |_| host::activate(t.id),
                                 if t.loading { super::loaders::Orbit { size: 12 } } else { Icon { i: I::Globe, size: 12 } }
                                 span { class: "t", "{label}" }

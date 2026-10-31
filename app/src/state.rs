@@ -187,6 +187,9 @@ pub struct Ui {
     /// Text to insert into a composer: (session, text); `None` is the new
     /// agent composer.
     pub compose_inbox: Vec<(Option<String>, String)>,
+    /// Objects for a composer's text, with a picture to attach alongside:
+    /// (session, object, picture); `None` is the new agent composer.
+    pub chip_inbox: Vec<(Option<String>, crate::ui::mentions::MentionChip, Option<Part>)>,
     /// Messages taken back from the agent, for their chat's composer to
     /// hold again (text, objects, images and files).
     pub restore_inbox: Vec<(String, Queued)>,
@@ -455,6 +458,7 @@ impl App {
             customize_focus: None,
             interrupted: Vec::new(),
             compose_inbox: Vec::new(),
+            chip_inbox: Vec::new(),
             restore_inbox: Vec::new(),
             unsteering: HashSet::new(),
             tab_ctx: None,

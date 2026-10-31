@@ -807,7 +807,13 @@ pub fn DropZones(target: Option<String>) -> Element {
     }
     let t = target.clone().unwrap_or_default();
     let here = if target.is_some() { "Open here" } else { "Open this chat" };
-    let context = if target.is_some() { "Attach as context" } else { "Start a new agent with it" };
+    let context = if dragged.starts_with("page:") {
+        "Attach the page as context"
+    } else if target.is_some() {
+        "Attach as context"
+    } else {
+        "Start a new agent with it"
+    };
     rsx! {
         div { class: if target.is_some() { "drop-overlay can-split" } else { "drop-overlay" }, "data-drop-target": "{t}",
             div { class: "drop-preview p-left", span { class: "drop-label", Icon { i: I::Columns, size: 14, stroke: 1.6 } "Open side by side" } }

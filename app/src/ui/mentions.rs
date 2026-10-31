@@ -32,6 +32,9 @@ pub enum MentionKind {
     Subagent,
     /// The agent of the user's own a new chat runs as (not sent as text).
     RunAs,
+    /// A page from Larrier's browser (its address, title and text, as it
+    /// was when it was added), sent as a block.
+    Page,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -94,6 +97,14 @@ impl MentionChip {
         MentionChip::new(MentionKind::Subagent, name.to_string(), name.to_string(), title)
     }
 
+    /// A browser page as it is now: its title, address and text.
+    pub fn page(title: &str, url: &str, text: &str) -> MentionChip {
+        let title = if title.trim().is_empty() { url.to_string() } else { title.trim().to_string() };
+        let attr = |s: &str| s.replace('"', "'").replace(['\n', '\r'], " ");
+        let block = format!("<browser_page title=\"{}\" url=\"{}\">\n{}\n</browser_page>", attr(&title), attr(url), text.trim());
+        MentionChip { block: Some(block), ..MentionChip::new(MentionKind::Page, url.to_string(), title.clone(), format!("{title} — {url} — sent as context")) }
+    }
+
     pub fn run_as(name: &str, agent: &AgentKind) -> MentionChip {
         let title = format!("This chat runs as your {name} agent: its instructions, tools and MCP servers");
         MentionChip { agent: Some(agent.clone()), ..MentionChip::new(MentionKind::RunAs, name.to_string(), name.to_string(), title) }
@@ -122,6 +133,7 @@ impl MentionChip {
             MentionKind::Agent => "agent",
             MentionKind::RunAs | MentionKind::Subagent => "run-as",
             MentionKind::GitDiff => "diff",
+            MentionKind::Page => "page",
             _ => "file",
         }
     }
@@ -174,7 +186,7 @@ pub fn to_prompt(chips: &[MentionChip], text: &str) -> String {
         let piece = match s {
             Seg::Text(t) => t.clone(),
             Seg::Chip(c) => {
-                if let Some(b) = c.block.as_ref().filter(|_| c.kind == MentionKind::Pasted || (c.kind == MentionKind::Agent && c.value.is_empty())) {
+                if let Some(b) = c.block.as_ref().filter(|_| matches!(c.kind, MentionKind::Pasted | MentionKind::Page) || (c.kind == MentionKind::Agent && c.value.is_empty())) {
                     blocks.push(b.clone());
                 }
                 match c.kind {
@@ -242,14 +254,14 @@ pub fn unique(chips: &[MentionChip], mut c: MentionChip) -> MentionChip {
 }
 
 /// A sent prompt in pieces, its objects in place: context blocks Larrier
-/// appended (`<agent_context>`, `<git_diff>`, `<pasted_text>`) fold into the
-/// object that asked for them; `@agent:`, `@git:diff`, `@agent-name` and
+/// appended (`<agent_context>`, `<git_diff>`, `<pasted_text>`,
+/// `<browser_page>`) fold into the object that asked for them; `@agent:`, `@git:diff`, `@agent-name` and
 /// `@path` tokens and a leading `/skill` become objects.
 pub fn prompt_segs(text: &str, sessions: &[SessionSummary]) -> Vec<Seg> {
     let mut rest = text.to_string();
     let mut agent_blocks: Vec<MentionChip> = Vec::new();
     let mut tail: Vec<MentionChip> = Vec::new();
-    for (open, close) in [("<agent_context", "</agent_context>"), ("<git_diff", "</git_diff>"), ("<pasted_text", "</pasted_text>")] {
+    for (open, close) in [("<agent_context", "</agent_context>"), ("<git_diff", "</git_diff>"), ("<pasted_text", "</pasted_text>"), ("<browser_page", "</browser_page>")] {
         while let Some(start) = rest.find(open) {
             let after_open = &rest[start..];
             let Some(tag_end) = after_open.find('>') else { break };
@@ -275,6 +287,12 @@ pub fn prompt_segs(text: &str, sessions: &[SessionSummary]) -> Vec<Seg> {
                     agent_blocks.push(MentionChip { agent, block: Some(block), ..MentionChip::new(MentionKind::Agent, String::new(), title, tip) });
                 }
                 "<git_diff" => {}
+                "<browser_page" => {
+                    let url = attr("url").unwrap_or_default();
+                    let title = attr("title").filter(|t| !t.is_empty()).unwrap_or_else(|| url.clone());
+                    let tip = format!("{title} — {url} — sent as context");
+                    tail.push(MentionChip { block: Some(block), ..MentionChip::new(MentionKind::Page, url, title, tip) });
+                }
                 _ => {
                     let name = attr("name").unwrap_or_else(|| "Pasted text".into());
                     tail.push(MentionChip { block: Some(block), ..MentionChip::new(MentionKind::Pasted, name.clone(), name.clone(), name) });
@@ -491,6 +509,26 @@ mod tests {
         let (text, chips) = split_mentions(sent);
         assert_eq!(text, "fix the parser\nthanks");
         assert_eq!(chips.len(), 4);
+    }
+
+    #[test]
+    fn browser_page_is_sent_as_a_block_and_folds_back() {
+        let page = MentionChip::page("Order \"form\"", "http://127.0.0.1:3000/order", "Order form
+Place order");
+        let text = format!("why is {} broken?", page.marked());
+        let sent = to_prompt(&[page], &text);
+        assert_eq!(sent, "why is broken?
+
+<browser_page title=\"Order 'form'\" url=\"http://127.0.0.1:3000/order\">
+Order form
+Place order
+</browser_page>");
+        let segs = prompt_segs(&sent, &[]);
+        let chip = segs.iter().find_map(|s| if let Seg::Chip(c) = s { Some(c.clone()) } else { None }).unwrap();
+        assert_eq!((chip.kind, chip.label.as_str(), chip.value.as_str()), (MentionKind::Page, "Order 'form'", "http://127.0.0.1:3000/order"));
+        // Sent again as it was.
+        let (again, chips) = to_edit(&sent, &[]);
+        assert_eq!(to_prompt(&chips, &again), sent);
     }
 
     #[test]

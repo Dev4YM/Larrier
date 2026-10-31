@@ -1625,6 +1625,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .tok.agent { --tok-bg: color-mix(in srgb, var(--green) 15%, transparent); --tok-fg: color-mix(in srgb, var(--green) 82%, var(--fg)); }
 .tok.run-as { --tok-bg: color-mix(in srgb, var(--violet, #8b5cf6) 14%, transparent); --tok-fg: var(--violet, #7c3aed); }
 .tok.diff { --tok-bg: color-mix(in srgb, var(--amber) 16%, transparent); --tok-fg: color-mix(in srgb, var(--amber) 78%, var(--fg)); }
+.tok.page { --tok-bg: color-mix(in srgb, #0891b2 14%, transparent); --tok-fg: color-mix(in srgb, #0891b2 85%, var(--fg)); }
 .tok-field { position: relative; min-width: 0; }
 .cgrid .tok-field { grid-area: text; width: 100%; }
 .tok-field > textarea.tok-input { display: block; position: relative; z-index: 1; color: transparent !important; caret-color: var(--fg); background: transparent; }

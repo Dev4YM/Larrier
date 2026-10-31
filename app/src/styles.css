@@ -1293,9 +1293,11 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 /* Tools at work: a file being written shimmers, its line counts count up
    smoothly and its preview follows the newest lines. */
 @property --n { syntax: "<integer>"; inherits: false; initial-value: 0; }
-.tool-card-head .stats .cnt { counter-reset: n var(--n); transition: --n .45s cubic-bezier(.2, .8, .2, 1); font-variant-numeric: tabular-nums; }
-.tool-card-head .stats .cnt.add::after { content: "+" counter(n); }
-.tool-card-head .stats .cnt.del::after { content: "-" counter(n); }
+.tool-card-head .stats .cnt, .step .stats .cnt { counter-reset: n var(--n); transition: --n .45s cubic-bezier(.2, .8, .2, 1); font-variant-numeric: tabular-nums; }
+.tool-card-head .stats .cnt.add::after, .step .stats .cnt.add::after { content: "+" counter(n); }
+.tool-card-head .stats .cnt.del::after, .step .stats .cnt.del::after { content: "-" counter(n); }
+/* A tool line's own counts ("Calling docs › patch +12 -3"). */
+.step .stats { display: inline-flex; gap: 4px; flex-shrink: 0; margin-left: 2px; }
 .tool-card.live .tool-card-head .name { background: linear-gradient(90deg, var(--fg-3) 0%, var(--fg) 45%, var(--fg-3) 90%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.8s linear infinite; }
 .tool-card.live { border-color: color-mix(in srgb, var(--accent-c, var(--blue)) 30%, var(--border)); }
 .tool-card.live .preview .pv-line:last-child { animation: pv-in .25s ease-out; }

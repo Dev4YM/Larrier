@@ -1107,6 +1107,92 @@ fn verb_target(t: &ToolCall) -> (&'static str, String) {
     (verb, target)
 }
 
+/// Lines a call changes (+, -): its diffs, or for a tool that writes (an
+/// MCP tool that patches, updates or creates something) what its input adds
+/// and takes away. Counted while the input is still being written.
+fn line_change(t: &ToolCall) -> Option<(u32, u32)> {
+    if !t.diffs.is_empty() {
+        return Some(t.diffs.iter().fold((0, 0), |(a, r), d| (a + d.added, r + d.removed)));
+    }
+    if !matches!(t.kind, ToolKind::Mcp | ToolKind::Other | ToolKind::Edit | ToolKind::Write) {
+        return None;
+    }
+    const WRITES: [&str; 15] = ["write", "edit", "patch", "update", "replace", "create", "insert", "modify", "save", "put", "apply", "set", "upsert", "append", "change"];
+    let name = t.name.to_lowercase();
+    let tool = name.rsplit("__").next().unwrap_or(&name);
+    if !WRITES.iter().any(|w| tool.contains(w)) {
+        return None;
+    }
+    let (mut add, mut del) = (0, 0);
+    count_input(&t.input, false, &mut add, &mut del);
+    (add + del > 0).then_some((add, del))
+}
+
+/// Add up what a write's input changes: old/new pairs and unified diffs at
+/// any depth (a list of edits), and the text it writes (not in a list: a
+/// plan's items have "content" too).
+fn count_input(v: &serde_json::Value, in_list: bool, add: &mut u32, del: &mut u32) {
+    const PAIRS: [(&str, &str); 9] = [
+        ("old_string", "new_string"),
+        ("old_str", "new_str"),
+        ("oldtext", "newtext"),
+        ("old_text", "new_text"),
+        ("old", "new"),
+        ("search", "replace"),
+        ("find", "replace"),
+        ("before", "after"),
+        ("original", "updated"),
+    ];
+    const DIFFS: [&str; 3] = ["patch", "diff", "unified_diff"];
+    const TEXTS: [&str; 14] = ["content", "contents", "new_content", "file_text", "code", "source", "html", "css", "js", "script", "style", "body", "template", "markup"];
+    match v {
+        serde_json::Value::Object(m) => {
+            let get = |k: &str| m.iter().find(|(key, _)| key.to_lowercase() == k).and_then(|(_, v)| v.as_str());
+            let mut used: Vec<String> = Vec::new();
+            for (o, n) in PAIRS {
+                if let (Some(old), Some(new)) = (get(o), get(n)) {
+                    let (a, r) = delta(old, new);
+                    *add += a;
+                    *del += r;
+                    used.extend([o.to_string(), n.to_string()]);
+                }
+            }
+            for (k, val) in m {
+                let key = k.to_lowercase();
+                if used.contains(&key) {
+                    continue;
+                }
+                match val {
+                    serde_json::Value::String(s) if DIFFS.contains(&key.as_str()) && s.lines().any(|l| l.starts_with('+') || l.starts_with('-')) => {
+                        for l in s.lines() {
+                            if l.starts_with('+') && !l.starts_with("+++") {
+                                *add += 1;
+                            } else if l.starts_with('-') && !l.starts_with("---") {
+                                *del += 1;
+                            }
+                        }
+                    }
+                    serde_json::Value::String(s) if !in_list && (TEXTS.contains(&key.as_str()) || DIFFS.contains(&key.as_str())) => *add += s.lines().count() as u32,
+                    serde_json::Value::Object(_) | serde_json::Value::Array(_) => count_input(val, in_list, add, del),
+                    _ => {}
+                }
+            }
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|x| count_input(x, true, add, del)),
+        _ => {}
+    }
+}
+
+/// Added and removed lines from `old` to `new`; past a size where an exact
+/// count would slow the redraws, every line counts.
+fn delta(old: &str, new: &str) -> (u32, u32) {
+    let (a, b) = (old.lines().count(), new.lines().count());
+    if a * b > 250_000 {
+        return (b as u32, a as u32);
+    }
+    larrier_core::lsf::line_delta(old, new)
+}
+
 /// The argument that best describes a call to an unfamiliar tool.
 fn generic_arg(t: &ToolCall) -> String {
     const KEYS: [&str; 14] = ["description", "command", "url", "query", "pattern", "file_path", "path", "name", "title", "prompt", "message", "text", "id", "repo"];
@@ -1257,6 +1343,9 @@ fn Step(tool: ToolCall) -> Element {
     let dur = tool.duration_ms.filter(|d| *d >= 1000).map(|d| format!("{}s", (d + 500) / 1000));
     let skipped = skipped_label(&tool);
     // A call that never ran says so first ("Blocked edit a.rs"), not "Edited".
+    // What it changes, counting up while the agent writes it (an animated
+    // CSS property) and settling when the call ends.
+    let change = if failed || skipped.is_some() { None } else { line_change(&tool) };
     let (verb, target) = match skipped {
         Some(label) => (label, format!("{} {target}", intent(&tool)).trim().to_string()),
         None => (verb, target),
@@ -1267,6 +1356,12 @@ fn Step(tool: ToolCall) -> Element {
             onclick: move |_| if expandable { open.toggle() },
             span { class: "verb", "{verb}" }
             span { class: "target", "{target}" }
+            if let Some((a, r)) = change {
+                span { class: "stats",
+                    if a > 0 || r == 0 { span { class: "add cnt", style: "--n: {a};", "aria-label": "+{a}" } }
+                    if r > 0 { span { class: "del cnt", style: "--n: {r};", "aria-label": "-{r}" } }
+                }
+            }
             if let Some(d) = dur { span { class: "dur", "{d}" } }
             if expandable {
                 span { class: "chev", if open() { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
@@ -1586,6 +1681,39 @@ pub fn human_count(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use larrier_core::{ToolCall, ToolKind};
+    use serde_json::json;
+
+    fn call(name: &str, kind: ToolKind, input: serde_json::Value) -> ToolCall {
+        let mut t = ToolCall::new("t1", name, input);
+        t.kind = kind;
+        t
+    }
+
+    #[test]
+    fn writes_count_their_lines() {
+        // An MCP patch with find / replace pairs in a list.
+        let patch = call("mcp__site-builder__patch", ToolKind::Mcp, json!({"id": 4242, "edits": [{"find": "a\nb", "replace": "a\nc\nd"}, {"find": "x", "replace": ""}]}));
+        assert_eq!(super::line_change(&patch), Some((2, 2)));
+        // One that writes a whole text.
+        let create = call("mcp__docs__create_page", ToolKind::Mcp, json!({"title": "T", "content": "1\n2\n3"}));
+        assert_eq!(super::line_change(&create), Some((3, 0)));
+        // A unified diff.
+        let diff = call("mcp__repo__apply_patch", ToolKind::Mcp, json!({"patch": "--- a\n+++ b\n@@\n-old\n+new\n+more"}));
+        assert_eq!(super::line_change(&diff), Some((2, 1)));
+        // Tools that only read change nothing.
+        let read = call("mcp__docs__get_page", ToolKind::Mcp, json!({"content": "1\n2"}));
+        assert_eq!(super::line_change(&read), None);
+        let search = call("mcp__docs__search", ToolKind::Mcp, json!({"text": "x"}));
+        assert_eq!(super::line_change(&search), None);
+        // A plan's items aren't lines written.
+        let plan = call("mcp__ccd_turn__update_plan", ToolKind::Mcp, json!({"items": [{"content": "Step one", "status": "pending"}]}));
+        assert_eq!(super::line_change(&plan), None);
+        // Fields of a record being updated are.
+        let record = call("mcp__ide__update_record", ToolKind::Mcp, json!({"id": 7, "fields": {"html": "<p>a</p>\n<p>b</p>"}}));
+        assert_eq!(super::line_change(&record), Some((2, 0)));
+    }
+
     #[test]
     fn programs() {
         assert_eq!(super::command_programs("cd repo && git log --oneline | head -5"), "cd, git, head");

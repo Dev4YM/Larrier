@@ -74,6 +74,7 @@ icons! {
     FolderOpen => "folder-open",
     Check => "check",
     Spell => "spell-check",
+    Code => "code-xml",
     BookPlus => "book-plus",
     CircleCheck => "circle-check",
     Circle => "circle",

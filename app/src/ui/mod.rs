@@ -115,6 +115,9 @@ pub fn Root() -> Element {
         }
     });
 
+    // The agents' browser tools reach Larrier's browser tabs through here.
+    use_hook(crate::browser_control::start);
+
     // Bridge: system theme + global keyboard shortcuts from the webview.
     use_future(move || async move {
         let mut ev = document::eval(
@@ -371,33 +374,30 @@ pub fn Root() -> Element {
                 document.execCommand('insertText', false, t.replace(MARKS, ''));
               }, true);
             }
-            // The agents' browser in the Browser tab: clicks, scrolls and
-            // keys on its picture go to the page (scaled to its size).
-            if (!window.__larrierBrowser) {
-              window.__larrierBrowser = true;
-              const W = 1280, H = 800;
-              const at = (e) => { const el = document.getElementById('lb-screen'); const r = el.getBoundingClientRect(); return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height }; };
-              const mods = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
-              const btn = (e) => ['left', 'middle', 'right'][e.button] || 'left';
-              const on = (e) => e.target && e.target.id === 'lb-screen';
-              let moved = 0;
-              document.addEventListener('mousedown', (e) => { if (!on(e)) return; e.preventDefault(); e.target.focus(); const p = at(e); dioxus.send({ t: 'browser', k: 'mouse', type: 'mousePressed', x: p.x, y: p.y, button: btn(e), clicks: e.detail || 1, mods: mods(e) }); }, true);
-              document.addEventListener('mouseup', (e) => { if (!on(e)) return; const p = at(e); dioxus.send({ t: 'browser', k: 'mouse', type: 'mouseReleased', x: p.x, y: p.y, button: btn(e), clicks: e.detail || 1, mods: mods(e) }); }, true);
-              document.addEventListener('mousemove', (e) => { if (!on(e)) return; const now = performance.now(); if (now - moved < 40) return; moved = now; const p = at(e); dioxus.send({ t: 'browser', k: 'mouse', type: 'mouseMoved', x: p.x, y: p.y, button: e.buttons & 1 ? 'left' : 'none', mods: mods(e) }); }, true);
-              document.addEventListener('wheel', (e) => { if (!on(e)) return; e.preventDefault(); const p = at(e); dioxus.send({ t: 'browser', k: 'wheel', x: p.x, y: p.y, dx: e.deltaX, dy: e.deltaY, mods: mods(e) }); }, { capture: true, passive: false });
-              document.addEventListener('contextmenu', (e) => { if (on(e)) e.preventDefault(); }, true);
-              const key = (e, type) => {
-                const text = type === 'keyDown' && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey ? e.key : (type === 'keyDown' && e.key === 'Enter' ? '\r' : '');
-                dioxus.send({ t: 'browser', k: 'key', type: type === 'keyDown' && !text ? 'rawKeyDown' : type, key: e.key, code: e.code, vk: e.keyCode, text, mods: mods(e) });
+            // The Browser tab's page area: where it is, and whether a menu or
+            // dialog of the app's is over it (the page is a native view drawn
+            // above the app, so it steps aside then). Sent when it changes.
+            if (!window.__larrierBrowserArea) {
+              window.__larrierBrowserArea = true;
+              const OVER = '.menu, .ctx-menu, #g-menu, .modal, .palette, .lightbox, .overlay, .menu-backdrop + .menu';
+              let last = '';
+              const tick = () => {
+                const a = document.getElementById('lb-area');
+                let msg = { t: 'browser-area', none: true };
+                if (a && a.isConnected && a.getClientRects().length) {
+                  const r = a.getBoundingClientRect();
+                  let covered = false;
+                  for (const o of document.querySelectorAll(OVER)) {
+                    const q = o.getBoundingClientRect();
+                    if (q.width && q.height && q.right > r.left && q.left < r.right && q.bottom > r.top && q.top < r.bottom && getComputedStyle(o).visibility !== 'hidden') { covered = true; break; }
+                  }
+                  msg = { t: 'browser-area', x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), covered };
+                }
+                const k = JSON.stringify(msg);
+                if (k !== last) { last = k; dioxus.send(msg); }
+                requestAnimationFrame(tick);
               };
-              document.addEventListener('keydown', (e) => {
-                if (!on(e)) return;
-                // Paste goes in as text; everything else as keys.
-                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
-                e.preventDefault(); e.stopPropagation(); key(e, 'keyDown');
-              }, true);
-              document.addEventListener('keyup', (e) => { if (!on(e)) return; e.preventDefault(); e.stopPropagation(); key(e, 'keyUp'); }, true);
-              document.addEventListener('paste', (e) => { if (!on(e)) return; e.preventDefault(); const t = (e.clipboardData && e.clipboardData.getData('text/plain')) || ''; if (t) dioxus.send({ t: 'browser', k: 'text', text: t }); }, true);
+              requestAnimationFrame(tick);
             }
             // Copy buttons of code blocks (in rendered Markdown): the text
             // goes to the system clipboard through the app.
@@ -999,7 +999,15 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
             }
         }
         Some("nav") => app.go(v["d"].as_i64().unwrap_or(0) as isize),
-        Some("browser") => crate::browser_view::send(crate::browser_view::Cmd::Input(v)),
+        Some("browser-area") => {
+            let area = (!v["none"].as_bool().unwrap_or(false)).then(|| crate::browser_host::Area {
+                x: v["x"].as_f64().unwrap_or(0.0),
+                y: v["y"].as_f64().unwrap_or(0.0),
+                w: v["w"].as_f64().unwrap_or(0.0),
+                h: v["h"].as_f64().unwrap_or(0.0),
+            });
+            crate::browser_host::set_area(area, v["covered"].as_bool().unwrap_or(false));
+        }
         Some("drag") => app.drag.set(v["id"].as_str().map(|s| s.to_string())),
         // Projects dragged into a new order; ones not shown keep their place
         // after them.

@@ -3,7 +3,8 @@
 
 mod agent_models;
 mod automations;
-mod browser_view;
+mod browser_control;
+mod browser_host;
 mod highlight;
 mod icons;
 mod install;

@@ -591,30 +591,57 @@ pub fn DiffView(unified: String) -> Element {
 /// user can click, scroll and type in it too.
 #[component]
 fn BrowserTab() -> Element {
-    use crate::browser_view::{send, Cmd, FRAME, VIEW};
-    use_hook(|| send(Cmd::Show(true)));
-    use_drop(|| send(Cmd::Show(false)));
-    let view = VIEW();
-    let frame = FRAME();
-    let mut input = use_signal(|| view.url.clone());
+    use crate::browser_host as host;
+    let st = host::STATE();
+    let active = st.active.and_then(|id| st.tabs.iter().find(|t| t.id == id).cloned());
+    let mut input = use_signal(String::new);
     let mut editing = use_signal(|| false);
     // The address follows the page unless the user is typing one.
-    let shown_url = view.url.clone();
+    let shown_url = active.as_ref().map(|t| t.url.clone()).unwrap_or_default();
     use_effect(use_reactive!(|shown_url| {
         if !*editing.peek() {
             input.set(if shown_url == "about:blank" { String::new() } else { shown_url });
         }
     }));
-    let has_frame = frame.as_deref().is_some_and(|f| !f.is_empty());
-    let (w, h) = larrier_agents::browser::VIEWPORT;
+    let loading = active.as_ref().is_some_and(|t| t.loading);
+    let has_page = active.is_some();
+    let url_now = active.as_ref().map(|t| t.url.clone()).unwrap_or_default();
+    let external = has_page && !url_now.starts_with("about:");
+    let url_open = url_now.clone();
     rsx! {
+        if st.tabs.len() > 1 {
+            div { class: "browser-tabs",
+                for t in st.tabs.clone() {
+                    {
+                        let on = Some(t.id) == st.active;
+                        let label = if !t.title.is_empty() { t.title.clone() } else { page_host(&t.url) };
+                        rsx! {
+                            div { key: "{t.id}", class: if on { "browser-tab on" } else { "browser-tab" }, title: "{t.url}",
+                                onclick: move |_| host::activate(t.id),
+                                if t.loading { super::loaders::Orbit { size: 12 } } else { Icon { i: I::Globe, size: 12 } }
+                                span { class: "t", "{label}" }
+                                button { class: "x", title: "Close tab",
+                                    onclick: move |e| { e.stop_propagation(); host::close_tab(t.id); },
+                                    Icon { i: I::X, size: 10 }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         div { class: "browser-bar",
-            button { class: "icon-btn sm", title: "Back", disabled: !view.live, onclick: move |_| send(Cmd::Back), Icon { i: I::ArrowLeft, size: 13 } }
-            button { class: "icon-btn sm", title: "Forward", disabled: !view.live, onclick: move |_| send(Cmd::Forward), Icon { i: I::ArrowRight, size: 13 } }
-            button { class: "icon-btn sm", title: "Reload", disabled: !view.live, onclick: move |_| send(Cmd::Reload), Icon { i: I::Refresh, size: 13 } }
+            button { class: "icon-btn sm", title: "Back", disabled: !active.as_ref().is_some_and(|t| t.can_back), onclick: move |_| host::back(), Icon { i: I::ArrowLeft, size: 14 } }
+            button { class: "icon-btn sm", title: "Forward", disabled: !active.as_ref().is_some_and(|t| t.can_forward), onclick: move |_| host::forward(), Icon { i: I::ArrowRight, size: 14 } }
+            if loading {
+                button { class: "icon-btn sm", title: "Stop", onclick: move |_| host::stop(), Icon { i: I::X, size: 14 } }
+            } else {
+                button { class: "icon-btn sm", title: "Reload", disabled: !has_page, onclick: move |_| host::reload(), Icon { i: I::Refresh, size: 13 } }
+            }
             input { class: "url-input",
                 placeholder: "Search or enter an address",
                 value: "{input}",
+                spellcheck: "false",
                 onfocus: move |_| {
                     editing.set(true);
                     // The whole address, ready to be replaced (as browsers do).
@@ -624,39 +651,55 @@ fn BrowserTab() -> Element {
                 oninput: move |e| input.set(e.value()),
                 onkeydown: move |e| {
                     if e.key() == Key::Enter && !input().trim().is_empty() {
-                        send(Cmd::Navigate(input().trim().to_string()));
+                        host::navigate(input().trim());
                         editing.set(false);
+                        document::eval("document.querySelector('.browser-bar .url-input')?.blur()");
+                    }
+                    if e.key() == Key::Escape {
+                        input.set(if url_now == "about:blank" { String::new() } else { url_now.clone() });
+                        document::eval("document.querySelector('.browser-bar .url-input')?.blur()");
                     }
                 },
             }
-            button { class: "icon-btn sm", title: "Open in your browser", disabled: view.url.is_empty() || view.url == "about:blank",
-                onclick: move |_| { let _ = open::that(VIEW.peek().url.clone()); },
+            button { class: "icon-btn sm", title: "New tab",
+                onclick: move |_| {
+                    host::new_tab("about:blank");
+                    document::eval("setTimeout(() => document.querySelector('.browser-bar .url-input')?.focus(), 30)");
+                },
+                Icon { i: I::Plus, size: 14 }
+            }
+            button { class: "icon-btn sm", title: "Developer tools", disabled: !has_page, onclick: move |_| host::devtools(), Icon { i: I::Code, size: 13 } }
+            button { class: "icon-btn sm", title: "Open in your browser", disabled: !external,
+                onclick: move |_| { let _ = open::that(url_open.clone()); },
                 Icon { i: I::External, size: 13 }
             }
+            if loading { div { class: "browser-progress" } }
         }
-        div { class: "browser-stage",
-            if has_frame {
-                img { id: "lb-screen", class: "browser-screen", tabindex: "0", draggable: "false",
-                    style: "aspect-ratio: {w} / {h};",
-                    alt: "{view.title}",
-                    src: "data:image/jpeg;base64,{frame.clone().unwrap_or_default()}",
-                }
-            } else {
+        // The page itself is a native view laid over this area.
+        div { id: "lb-area", class: "browser-area",
+            // The page's picture while a menu or dialog is over it.
+            if let Some(shot) = host::SNAPSHOT() {
+                img { class: "browser-snap", src: "data:image/jpeg;base64,{shot}", draggable: "false" }
+            }
+            if !has_page {
                 div { class: "browser-empty",
                     Icon { i: I::Globe, size: 22 }
-                    if view.starting {
-                        div { class: "t", "Starting the browser…" }
-                    } else if let Some(e) = view.error.clone() {
+                    if let Some(e) = st.error.clone() {
                         div { class: "t", "The browser couldn't start" }
                         div { class: "d", "{e}" }
                     } else {
                         div { class: "t", "Larrier's browser" }
-                        div { class: "d", "Agents browse here with their browser tools, and you watch live. Type an address above to open a page; you can click and type in it too." }
+                        div { class: "d", "Type an address above. Agents browse here with their browser tools, in the same pages you see." }
                     }
                 }
             }
         }
     }
+}
+
+/// A page's host name, for a tab without a title yet.
+fn page_host(url: &str) -> String {
+    url.split("://").nth(1).unwrap_or(url).split('/').next().unwrap_or(url).to_string()
 }
 
 /// Latest diff per file from the agent's own tool calls.

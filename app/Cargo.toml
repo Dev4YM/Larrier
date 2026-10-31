@@ -41,7 +41,7 @@ sha2.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 # Already built for the webview: Windows' spell checker for the right-click menu.
-windows = { version = "0.61", features = ["Win32_Globalization", "Win32_System_Com"] }
+windows = { version = "0.61", features = ["Win32_Globalization", "Win32_System_Com", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
 [build-dependencies]
 winresource = "0.1"

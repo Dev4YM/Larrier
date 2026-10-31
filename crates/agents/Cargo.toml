@@ -25,6 +25,8 @@ similar.workspace = true
 base64 = "0.22"
 toml = "0.9"
 tungstenite = "0.28"
+# GIFs of the browser (gif_creator); already built for the app.
+image = "0.25"
 
 [dev-dependencies]
 tempfile = "3"

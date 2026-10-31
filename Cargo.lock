@@ -2994,6 +2994,7 @@ dependencies = [
  "chrono",
  "dirs",
  "futures",
+ "image",
  "larrier-core",
  "larrier-formats",
  "reqwest",

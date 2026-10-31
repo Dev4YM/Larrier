@@ -202,19 +202,35 @@ struct RailInfo {
     tasks: Vec<(String, bool)>,
 }
 
-fn rail_info(s: &Session) -> RailInfo {
-    use larrier_core::{PlanStatus, Role};
-    let model_raw = s.model.clone().or_else(|| s.messages.iter().rev().find_map(|m| m.model.clone()));
-    // Context in use at the latest call, as the agent reported it (a reply
-    // spanning several calls sums their tokens, so its usage cannot tell).
-    let context = s.messages.iter().rev().find_map(|m| m.usage.as_ref().and_then(|u| u.context_tokens.map(|c| (c, u.context_window)))).or(s.usage.context_tokens.map(|c| (c, s.usage.context_window))).map(|(used, window)| {
-        (used, window.or_else(|| model_raw.as_deref().and_then(larrier_core::models::lookup).and_then(|m| m.context)))
-    });
-    let cost = s.usage.cost_usd.or_else(|| {
-        let price = larrier_core::models::price(model_raw.as_deref()?)?;
+/// The model a chat runs on: as picked, else as its replies say.
+fn model_of(s: &Session) -> Option<String> {
+    s.model.clone().or_else(|| s.messages.iter().rev().find_map(|m| m.model.clone()))
+}
+
+/// The context in use at the latest call, as the agent reported it (a reply
+/// spanning several calls sums their tokens, so its usage cannot tell), and
+/// the window (the model's known size when the agent didn't say).
+pub fn context_of(s: &Session) -> Option<(u64, Option<u64>)> {
+    let model = model_of(s);
+    s.messages.iter().rev().find_map(|m| m.usage.as_ref().and_then(|u| u.context_tokens.map(|c| (c, u.context_window)))).or(s.usage.context_tokens.map(|c| (c, s.usage.context_window))).map(|(used, window)| {
+        (used, window.or_else(|| model.as_deref().and_then(larrier_core::models::lookup).and_then(|m| m.context)))
+    })
+}
+
+/// What a chat cost: as the agent reported it, else from the model's price.
+pub fn cost_of(s: &Session) -> Option<f64> {
+    s.usage.cost_usd.or_else(|| {
+        let price = larrier_core::models::price(model_of(s).as_deref()?)?;
         let u = &s.usage;
         Some(price.cost(u.input_tokens, u.output_tokens + u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens)).filter(|c| *c > 0.0)
-    });
+    })
+}
+
+fn rail_info(s: &Session) -> RailInfo {
+    use larrier_core::{PlanStatus, Role};
+    let model_raw = model_of(s);
+    let context = context_of(s);
+    let cost = cost_of(s);
     // The newest to-do list, from a plan part or the call that wrote it.
     let plan = s
         .messages

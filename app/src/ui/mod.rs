@@ -10,6 +10,7 @@ mod files;
 mod home;
 pub mod loaders;
 pub mod mentions;
+mod meters;
 mod menubar;
 mod agent_models;
 mod models;
@@ -1602,7 +1603,8 @@ pub fn place_js(id: &str, prefer_up: bool, align_right: bool) -> String {
   const top = up ? Math.max(pad, a.top - gap - h) : Math.min(a.bottom + gap, vh - pad - h);
   let left = {align_right} ? a.right - mw : a.left;
   left = Math.max(pad, Math.min(left, vw - mw - pad));
-  m.style.left = left + 'px'; m.style.top = top + 'px'; m.style.maxHeight = Math.min(cap, room) + 'px';
+  m.style.left = left + 'px'; m.style.maxHeight = Math.min(cap, room) + 'px';
+  if (up) {{ m.style.top = 'auto'; m.style.bottom = (vh - (a.top - gap)) + 'px'; }} else {{ m.style.top = top + 'px'; }}
   m.style.transformOrigin = (up ? 'bottom ' : 'top ') + ({align_right} ? 'right' : 'left');
   m.classList.toggle('flip-up', up);
   m.style.visibility = 'visible'; m.classList.add('in');

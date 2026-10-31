@@ -555,7 +555,19 @@ pub fn refresh_quotas(app: App, force: bool) {
     *QUOTA_BUSY.write() = true;
     dioxus::core::spawn_forever(async move {
         let r = tokio::task::spawn_blocking(move || crate::quota::fetch_all(&cfg, &agents, force)).await;
-        if let Ok(list) = r {
+        if let Ok(mut list) = r {
+            // A check that failed (rate-limited, offline) keeps the limits
+            // known before it, saying so.
+            if let Some(before) = QUOTAS.peek().as_ref() {
+                for q in list.iter_mut().filter(|q| q.windows.is_empty()) {
+                    let Some(why) = q.note.clone() else { continue };
+                    if let Some(old) = before.list.iter().find(|o| o.agent == q.agent && o.account_id == q.account_id && !o.windows.is_empty()) {
+                        q.windows = old.windows.clone();
+                        q.as_of = old.as_of.or(Some(before.at));
+                        q.note = Some(format!("{} Showing the limits from {}.", why.trim_end_matches('.'), q.as_of.map(|t| t.with_timezone(&Local).format("%-I:%M %p").to_string()).unwrap_or_default()));
+                    }
+                }
+            }
             *QUOTAS.write() = Some(QuotaState { at: Utc::now(), list });
         }
         *QUOTA_BUSY.write() = false;
@@ -583,80 +595,13 @@ pub fn observe_limit(agent: &AgentKind, account_id: Option<&str>, window: &str, 
     q.as_of = Some(Utc::now());
 }
 
-fn short_window(name: &str) -> String {
-    match name {
-        "5-hour" => "5h".into(),
-        "Weekly" => "wk".into(),
-        "Daily" => "day".into(),
-        n => n.strip_prefix("Weekly · ").map(|m| m.to_lowercase()).unwrap_or_else(|| n.to_lowercase()),
-    }
-}
-
-fn severity(pct: f64) -> &'static str {
+pub fn severity(pct: f64) -> &'static str {
     if pct >= 90.0 {
         "crit"
     } else if pct >= 75.0 {
         "warn"
     } else {
         ""
-    }
-}
-
-/// Compact plan-limit indicator for the composer footer: a tiny ring and
-/// "5h 42% · wk 18%", with the full breakdown in the tooltip. Reads the
-/// shared cache; refreshes it in the background at most every few minutes.
-#[component]
-pub fn QuotaChip(agent: AgentKind, account_id: Option<String>) -> Element {
-    let app = use_app();
-    use_hook(move || refresh_quotas(app, false));
-    let target = account_id.clone().or_else(|| app.config.peek().default_account(&agent).map(|a| a.id.clone()));
-    let state = QUOTAS.read();
-    let Some(state) = state.as_ref() else { return rsx! {} };
-    let q = state
-        .list
-        .iter()
-        .find(|q| q.agent == agent && q.account_id == target)
-        .or_else(|| state.list.iter().find(|q| q.agent == agent && q.account_id.is_none()));
-    let Some(q) = q else { return rsx! {} };
-    let wins: Vec<&Window> = q.windows.iter().filter(|w| w.detail.is_none()).collect();
-    if wins.is_empty() {
-        return rsx! {};
-    }
-    let shown: Vec<&Window> = wins.iter().take(2).copied().collect();
-    let text = shown.iter().map(|w| format!("{} {:.0}%", short_window(&w.name), w.used_pct)).collect::<Vec<_>>().join(" · ");
-    let peak = wins.iter().map(|w| w.used_pct).fold(0.0, f64::max);
-    let mut tip = format!("{} plan limits", q.agent.display_name());
-    if let Some(p) = &q.plan {
-        tip.push_str(&format!(" · {p}"));
-    }
-    for w in &wins {
-        tip.push_str(&format!("\n{}: {:.0}% used", w.name, w.used_pct));
-        if let Some(r) = w.resets_at {
-            tip.push_str(&format!(" · resets {}", fmt_reset(r)));
-        }
-    }
-    let color = match severity(peak) {
-        "crit" => "var(--red)",
-        "warn" => "var(--amber)",
-        _ => "var(--fg-2)",
-    };
-    let circ = 2.0 * std::f64::consts::PI * 6.0;
-    let dash = (peak.clamp(0.0, 100.0) / 100.0 * circ).max(0.01);
-    let dasharray = format!("{dash:.2} {circ:.2}");
-    rsx! {
-        span {
-            class: "quota-chip",
-            title: "{tip}",
-            style: "display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; color: var(--fg-3); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: default;",
-            svg { width: "13", height: "13", view_box: "0 0 16 16", style: "flex-shrink: 0;",
-                circle { cx: "8", cy: "8", r: "6", fill: "none", stroke: "var(--fg-4)", stroke_width: "2" }
-                circle {
-                    cx: "8", cy: "8", r: "6", fill: "none", stroke: "{color}", stroke_width: "2",
-                    stroke_linecap: "round", stroke_dasharray: "{dasharray}", transform: "rotate(-90 8 8)",
-                }
-            }
-            "{text}"
-        }
     }
 }
 

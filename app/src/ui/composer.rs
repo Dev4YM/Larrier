@@ -179,6 +179,10 @@ struct SessInfo {
     effort: Option<String>,
     worktree: bool,
     usage: larrier_core::Usage,
+    /// Context in use and the window, as last reported.
+    context: Option<(u64, Option<u64>)>,
+    cost: Option<f64>,
+    messages: usize,
     cwd: Option<String>,
     account: Option<String>,
     run_as: Option<String>,
@@ -363,6 +367,9 @@ pub fn Composer(
             effort: s.effort.clone(),
             worktree: matches!(s.environment, larrier_core::Environment::Worktree { .. }),
             usage: s.usage.clone(),
+            context: super::chat::context_of(s),
+            cost: super::chat::cost_of(s),
+            messages: s.messages.len(),
             cwd: s.cwd(),
             account: s.account_id.clone(),
             run_as: s.run_as.clone(),
@@ -1141,14 +1148,19 @@ pub fn Composer(
                     }
                     EnvPicker { open: env_menu, worktree, is_repo, session: true, label: env_text.to_string() }
                     div { class: "grow" }
-                    if let Some(u) = usage.filter(|u| u.total_tokens() > 0) {
-                        ChatUsage { usage: u }
+                    super::meters::PlanRing {
+                        agent: agent.clone(),
+                        account_id: sess.read().as_ref().and_then(|s| s.account.clone()),
+                        usage: usage.clone(),
+                        cost: sess.read().as_ref().and_then(|s| s.cost),
                     }
-                    super::usage::QuotaChip { agent: agent.clone(), account_id: sess.read().as_ref().and_then(|s| s.account.clone()) }
-                    if running {
-                        span { class: "c-working", title: "Working", super::loaders::Orbit { size: 15 } }
-                    } else {
-                        span { class: "ring", title: "Idle" }
+                    if let Some(id) = session_id.clone() {
+                        super::meters::ContextRing {
+                            session_id: id,
+                            agent: agent.clone(),
+                            context: sess.read().as_ref().and_then(|s| s.context),
+                            messages: sess.read().as_ref().map(|s| s.messages).unwrap_or(0),
+                        }
                     }
                 }
             }
@@ -1461,35 +1473,6 @@ fn ModelPicker(
                 }
                 span { class: "mp-keys", "↑↓ ↵" }
             }
-        }
-    }
-}
-
-/// This chat's token use, compact, with the breakdown on hover.
-#[component]
-fn ChatUsage(usage: larrier_core::Usage) -> Element {
-    use super::transcript::human_count;
-    let u = &usage;
-    let mut tip = format!(
-        "This chat\nInput {} · Output {}\nCache read {} · Cache write {}",
-        human_count(u.input_tokens),
-        human_count(u.output_tokens),
-        human_count(u.cache_read_tokens),
-        human_count(u.cache_write_tokens)
-    );
-    if u.reasoning_tokens > 0 {
-        tip.push_str(&format!("\nReasoning {}", human_count(u.reasoning_tokens)));
-    }
-    if let Some(c) = u.cost_usd {
-        tip.push_str(&format!("\nCost ${c:.2}"));
-    }
-    let fresh = u.input_tokens + u.output_tokens;
-    rsx! {
-        span { class: "chat-usage", title: "{tip}",
-            Icon { i: I::Cpu, size: 12, stroke: 1.5 }
-            span { class: "num", "{human_count(fresh)}" }
-            span { class: "dim", "+{human_count(u.cache_read_tokens + u.cache_write_tokens)} cache" }
-            if let Some(c) = u.cost_usd { span { class: "num", "${c:.2}" } }
         }
     }
 }

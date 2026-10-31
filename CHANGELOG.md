@@ -5,6 +5,12 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.16 — 2026-10-31
+
+### New
+
+- Larrier's browser is a real browser, with Claude in Chrome's tools for agents
+- Annotate mode in the browser: point at elements and tell the agent about them
 ## 0.1.15 — 2026-10-31
 
 ### New

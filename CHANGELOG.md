@@ -5,6 +5,15 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.15 — 2026-10-31
+
+### New
+
+- Take back a message sent into a running turn
+
+### Fixed
+
+- Only Larrier's own loaders: the Cursor-style dots are gone
 ## 0.1.14 — 2026-10-31
 
 ### New

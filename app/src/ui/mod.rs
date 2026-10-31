@@ -216,9 +216,20 @@ pub fn Root() -> Element {
                 // like the field's own.
                 const dpr = window.devicePixelRatio || 1;
                 const fs = parseFloat(cs.fontSize) || 14;
-                const h = q.height || fs * 1.3;
+                // As tall as the text, but no taller than a line set shorter
+                // than it (the field's own cursor is cut to the line too).
+                const full = q.height || fs * 1.3;
+                const lh = parseFloat(cs.lineHeight);
+                const h = lh > 0 && lh < full ? lh : full;
+                const cut = (full - h) / 2;
                 const x = Math.floor((r.left + el.clientLeft + q.left - m.left - el.scrollLeft) * dpr) / dpr;
-                const y = Math.round((r.top + el.clientTop + q.top - m.top - el.scrollTop) * dpr) / dpr;
+                // A one-line field centres its line in its height.
+                let mid = 0;
+                if (el.tagName === 'INPUT') {
+                  const pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
+                  mid = Math.max(0, (el.clientHeight - pt - pb - (m.height - pt - pb)) / 2);
+                }
+                const y = Math.round((r.top + el.clientTop + q.top - m.top - el.scrollTop + mid + cut) * dpr) / dpr;
                 if (x < r.left - 1 || x > r.right + 1 || y < r.top - 1 || y + h > r.bottom + 2) { hide(); last = null; return; }
                 const glide = !snapNext && !!last && last.el === el && last.box === box && last.y === y && Math.abs(last.x - x) <= fs * 6;
                 snapNext = false;

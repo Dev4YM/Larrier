@@ -1634,6 +1634,16 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .queue-row .t .tok { box-shadow: none; padding: 0 2px; }
 .spell-fix .fix { font-weight: 600; }
 
+/* Changes: long file names wrap; a diff wider than the pane scrolls
+   sideways in its own block, never the pane. */
+.diff-list { overflow-x: hidden; min-width: 0; }
+.diff-file { min-width: 0; }
+.diff-file-head { height: auto; min-height: 32px; padding: 6px 12px; align-items: flex-start; line-height: 20px; }
+.diff-file-head > span:not(.path), .diff-file-head .actions { flex-shrink: 0; display: inline-flex; align-items: center; height: 20px; }
+.diff-file-head .path { flex: 1 1 auto; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; overflow: visible; }
+.diff-body { max-width: 100%; }
+.rp-note { display: flex; align-items: center; gap: 6px; padding: 12px 16px 2px; font-size: 12px; color: var(--fg-3); }
+
 /* Loaders (ui/loaders.rs): Dots for a tool at work, Seal Stamp for a
    subagent in the background, Ink Orbit for a chat at work and loading. */
 .ink-loader { display: inline-block; flex-shrink: 0; vertical-align: middle; overflow: visible; }

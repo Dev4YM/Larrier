@@ -217,12 +217,24 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
     let gs = git_state.read().clone().flatten();
 
     let Some(cwd) = cwd else {
+        if agent_diffs.is_empty() {
+            return rsx! {
+                div { class: "rp-empty",
+                    Icon { i: I::Folder, size: 22 }
+                    "This agent has no workspace folder."
+                }
+            };
+        }
+        // No folder to compare with git: the edits the agent made.
         return rsx! {
-            div { class: "rp-empty",
-                Icon { i: I::Folder, size: 22 }
-                "This agent has no workspace folder."
-                if !agent_diffs.is_empty() { AgentDiffList { diffs: agent_diffs.clone() } }
+            div { class: "rp-note", Icon { i: I::Folder, size: 13 } "No workspace folder: these are the edits the agent made." }
+            div { class: "files-summary",
+                Icon { i: I::List, size: 13 }
+                "{agent_diffs.len()} Files Edited by Agent"
+                span { class: "add", "+{agent_diffs.iter().map(|d| d.added).sum::<u32>()}" }
+                span { class: "del", "-{agent_diffs.iter().map(|d| d.removed).sum::<u32>()}" }
             }
+            div { class: "diff-list", AgentDiffList { diffs: agent_diffs.clone() } }
         };
     };
 
@@ -506,7 +518,12 @@ fn AgentDiff(d: FileDiff) -> Element {
         div { class: "diff-file",
             div { class: "diff-file-head", onclick: move |_| open.toggle(),
                 span { class: "faint", if open() { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
-                span { class: "path", "{d.path}" }
+                span { class: "path", title: "{d.path}",
+                    {
+                        let (dir, name) = split_path(&d.path);
+                        rsx! { if !dir.is_empty() { span { class: "dir", "{dir}/" } } "{name}" }
+                    }
+                }
                 div { class: "actions",
                     span { class: "add", style: "font-size: 11px;", "+{d.added}" }
                     span { class: "del", style: "font-size: 11px;", "-{d.removed}" }

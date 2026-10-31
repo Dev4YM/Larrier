@@ -193,7 +193,7 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
             (super::chat::change_key(s), s.title.clone(), wt, s.workspace.as_ref().map(|w| w.path.clone()))
         })
     });
-    let running = app.is_running(&id);
+    let running = app.generating(&id);
     let ck = meta().map(|m| m.0).unwrap_or(0);
     let cwd2 = cwd.clone();
     // Re-read git when the agent changed files, finished, or on refresh.

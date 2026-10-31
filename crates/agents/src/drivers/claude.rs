@@ -247,7 +247,11 @@ pub struct ClaudeLive {
     background: usize,
     /// The reply is done and background tasks still run: the turn goes on
     /// until they end (Claude reports back on them), or the user stops it.
+    /// Claude is idle meanwhile and takes new messages.
     waiting: bool,
+    /// The stop under way is the reply's alone (`TurnCommand::Interrupt`):
+    /// background work keeps running after it.
+    reply_only: bool,
     /// Background work ended while waiting and Claude hasn't reported back:
     /// past this, the turn ends anyway.
     linger: Option<std::time::Instant>,
@@ -442,11 +446,14 @@ impl ClaudeLive {
             return;
         }
         // Background commands still run: keep Claude going so they finish
-        // (closing it would kill them) and it hears when they do.
-        if !stopped && ok && self.background > 0 {
+        // (closing it would kill them) and it hears when they do; stopping
+        // just the reply leaves them running too.
+        if self.background > 0 && (if stopped { self.reply_only } else { ok }) {
             self.waiting = true;
             self.linger = None;
-            sink.send(AgentEvent::Idle);
+            self.stop_at = None;
+            self.reply_only = false;
+            sink.send(AgentEvent::Waiting);
             return;
         }
         self.inner.done = true;
@@ -461,6 +468,12 @@ impl super::process::Interactive for ClaudeLive {
             self.inner.handle(line, sink);
             return;
         };
+        // Replying again after waiting (to a message, or about finished
+        // background work): a stop now is the reply's.
+        if self.waiting && matches!(s(&v, "type"), Some("assistant" | "stream_event")) && v["parent_tool_use_id"].is_null() {
+            self.waiting = false;
+            self.linger = None;
+        }
         match s(&v, "type").unwrap_or("") {
             "control_request" => self.on_request(&v, sink),
             "control_cancel_request" => {
@@ -489,6 +502,8 @@ impl super::process::Interactive for ClaudeLive {
                 if uuid.is_some() && uuid == self.prompt.as_deref() {
                     self.prompt = None;
                 } else if let Some((text, parts, _)) = uuid.and_then(|u| self.steers.remove(u)) {
+                    self.waiting = false;
+                    self.linger = None;
                     sink.send(AgentEvent::Steered { text, attachments: parts });
                 }
             }
@@ -516,13 +531,23 @@ impl super::process::Interactive for ClaudeLive {
 
     fn command(&mut self, cmd: TurnCommand, sink: &EventSink) {
         match cmd {
-            TurnCommand::Cancel => {
-                // Only background work was left: stopping ends it with Claude.
+            TurnCommand::Cancel | TurnCommand::Interrupt => {
+                let all = matches!(cmd, TurnCommand::Cancel);
+                // Only background work was left: there's no reply to stop,
+                // and stopping everything ends it with Claude.
                 if self.waiting && !self.finished {
-                    self.inner.done = true;
-                    self.finished = true;
-                    sink.done(false, Some("cancelled".into()));
+                    if all {
+                        self.inner.done = true;
+                        self.finished = true;
+                        sink.done(false, Some("cancelled".into()));
+                    }
                     return;
+                }
+                // Stopping everything wins over stopping just the reply.
+                if all {
+                    self.reply_only = false;
+                } else if self.stop_at.is_none() {
+                    self.reply_only = true;
                 }
                 if self.stop_at.is_none() && !self.finished {
                     self.host_requests += 1;
@@ -1505,8 +1530,12 @@ mod tests {
             r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"STARTED","session_id":"s1","total_cost_usd":0.01}"#,
         ]);
         assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Done { .. })), "{ev:?}");
-        assert!(matches!(ev.last(), Some(AgentEvent::Idle)));
+        assert!(matches!(ev.last(), Some(AgentEvent::Waiting)));
         assert!(!p.finished() && p.waiting);
+        // Nothing is being written: stopping the reply does nothing.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        p.command(TurnCommand::Interrupt, &EventSink::new(tx));
+        assert!(rx.try_recv().is_err() && p.take_output().is_empty() && p.waiting);
         let ev = feed(&mut p, &[
             r#"{"type":"system","subtype":"task_notification","task_id":"b9","status":"completed"}"#,
             r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#,
@@ -1526,6 +1555,46 @@ mod tests {
         q.command(TurnCommand::Cancel, &EventSink::new(tx));
         assert!(matches!(rx.try_recv(), Ok(AgentEvent::Done { ok: false, .. })));
         assert!(q.finished());
+    }
+
+    /// While waiting on background work Claude takes a new message as a
+    /// turn of its own; stopping that reply leaves the background work
+    /// running, and stopping everything ends it.
+    #[test]
+    fn a_message_while_background_work_runs() {
+        let bg = r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b9","task_type":"local_bash","description":"npm run dev"}]}"#;
+        let end = r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"s1"}"#;
+        let stopped = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"s1"}"#;
+        let mut p = ClaudeLive::default();
+        feed(&mut p, &[bg, end]);
+        assert!(p.waiting);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        p.command(TurnCommand::Steer { text: "next".into(), attachments: Vec::new(), now: false, key: 1 }, &EventSink::new(tx));
+        let uuid = serde_json::from_str::<Value>(&p.take_output()[0]).unwrap()["uuid"].as_str().unwrap().to_string();
+        let taken = json!({"type": "user", "isReplay": true, "uuid": uuid, "message": {"role": "user", "content": "next"}}).to_string();
+        let ev = feed(&mut p, &[taken.as_str()]);
+        assert!(matches!(ev.last(), Some(AgentEvent::Steered { text, .. }) if text == "next"));
+        assert!(!p.waiting, "replying again");
+        // Stop the reply: an interrupt, then waiting again.
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        p.command(TurnCommand::Interrupt, &EventSink::new(tx));
+        assert_eq!(serde_json::from_str::<Value>(&p.take_output()[0]).unwrap()["request"]["subtype"], "interrupt");
+        let ev = feed(&mut p, &[stopped]);
+        assert!(matches!(ev.last(), Some(AgentEvent::Waiting)), "{ev:?}");
+        assert!(p.waiting && !p.finished() && p.stop_deadline().is_none());
+        // Claude reports back on its own: a stop then is the reply's too.
+        feed(&mut p, &[r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m3"}},"parent_tool_use_id":null}"#]);
+        assert!(!p.waiting);
+        // Stop everything mid-reply: the turn ends when the reply has.
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        p.command(TurnCommand::Cancel, &EventSink::new(tx));
+        let ev = feed(&mut p, &[stopped]);
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })), "{ev:?}");
+        assert!(p.finished());
+        // A background subagent writing isn't the agent replying.
+        let mut q = ClaudeLive::default();
+        feed(&mut q, &[bg, end, r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m4"}},"parent_tool_use_id":"agent_1"}"#]);
+        assert!(q.waiting);
     }
 
     /// Real run (Claude Code 2.1.310): `echo hi > a.txt` in Manual mode,

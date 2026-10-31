@@ -775,7 +775,7 @@ impl Interactive for CodexLive {
 
     fn command(&mut self, cmd: TurnCommand, sink: &EventSink) {
         match cmd {
-            TurnCommand::Cancel => {
+            TurnCommand::Cancel | TurnCommand::Interrupt => {
                 if self.finished || self.stop_at.is_some() {
                     return;
                 }

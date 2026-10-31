@@ -404,7 +404,8 @@ pub fn Composer(
             (d.agent.clone(), d.model.clone(), d.mode.clone(), d.worktree, None)
         }
     };
-    let running = session_id.as_ref().map(|id| app.is_running(id)).unwrap_or(false);
+    // Writing its reply; only background work left counts as finished.
+    let running = session_id.as_ref().map(|id| app.generating(id)).unwrap_or(false);
     let permission = match &session_id {
         Some(_) => sess.read().as_ref().and_then(|s| s.permission.clone()),
         None => app.draft.read().permission.clone(),
@@ -679,7 +680,7 @@ pub fn Composer(
             return;
         }
         match (&sid, how) {
-            (Some(id), Some(h)) if app.is_running(id) => app.send_while_busy(id, t, a, h),
+            (Some(id), Some(h)) if app.generating(id) => app.send_while_busy(id, t, a, h),
             _ => app.send(sid, t, a),
         }
     };
@@ -1087,7 +1088,7 @@ pub fn Composer(
                         }
                     } else if running {
                         button { class: "send-btn stop c-send", title: "Stop (Ctrl+.)",
-                            onclick: move |_| if let Some(id) = &sid_stop { app.stop(id) },
+                            onclick: move |_| if let Some(id) = &sid_stop { app.stop_reply(id) },
                             Icon { i: I::Stop, size: 10 }
                         }
                     } else {

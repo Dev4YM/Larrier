@@ -105,7 +105,7 @@ where
                 _ => err_done = true,
             },
             cmd = control.recv() => match cmd {
-                Some(TurnCommand::Cancel) | None => {
+                Some(TurnCommand::Cancel | TurnCommand::Interrupt) | None => {
                     cancelled = true;
                     let _ = child.start_kill();
                     break;
@@ -199,9 +199,9 @@ pub async fn run_interactive<P: Interactive>(
                 _ => err_done = true,
             },
             cmd = control.recv(), if !killed => match cmd {
-                Some(TurnCommand::Cancel) => {
+                Some(c @ (TurnCommand::Cancel | TurnCommand::Interrupt)) => {
                     cancelled = true;
-                    parser.command(TurnCommand::Cancel, sink);
+                    parser.command(c, sink);
                 }
                 Some(c) => parser.command(c, sink),
                 // The app let go of the turn: nobody can answer any more.

@@ -294,7 +294,7 @@ impl Acp {
 
     fn on_control(&mut self, cmd: Option<TurnCommand>) {
         match cmd {
-            Some(TurnCommand::Cancel) | None => {
+            Some(TurnCommand::Cancel | TurnCommand::Interrupt) | None => {
                 if self.cancelled {
                     return;
                 }

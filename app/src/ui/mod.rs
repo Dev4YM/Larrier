@@ -1026,7 +1026,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                 ("i", true) => app.sync_imports(false),
                 (".", _) => {
                     if let Some(id) = app.current_id() {
-                        app.stop(&id);
+                        app.stop_reply(&id);
                     }
                 }
                 _ => {}

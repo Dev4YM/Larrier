@@ -246,7 +246,7 @@ impl TurnRecorder {
                 }
                 true
             }
-            AgentEvent::Idle => {
+            AgentEvent::Idle | AgentEvent::Waiting => {
                 self.text_break = true;
                 false
             }
@@ -418,7 +418,7 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
             }
             return;
         }
-        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::PermissionClosed { .. } | AgentEvent::Steered { .. } | AgentEvent::Unsteered { .. } | AgentEvent::Mode { .. } | AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Idle | AgentEvent::Done { .. } => return,
+        AgentEvent::NativeSession { .. } | AgentEvent::Permission { .. } | AgentEvent::PermissionClosed { .. } | AgentEvent::Steered { .. } | AgentEvent::Unsteered { .. } | AgentEvent::Mode { .. } | AgentEvent::Log { .. } | AgentEvent::RateLimit { .. } | AgentEvent::Idle | AgentEvent::Waiting | AgentEvent::Done { .. } => return,
         _ => {}
     }
     let parts: usize = msgs.iter().map(|m| m.parts.len()).sum();

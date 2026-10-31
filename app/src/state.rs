@@ -563,6 +563,12 @@ impl App {
         self.running.read().contains_key(id)
     }
 
+    /// The agent is writing its reply: running, and not only waiting on
+    /// background work it started.
+    pub fn generating(&self, id: &str) -> bool {
+        self.is_running(id) && !self.idle.read().contains(id)
+    }
+
     /// Mid-turn in the agent's own app (a terminal CLI, Claude's or Cursor's
     /// app), not run by Larrier: Larrier can't reach that process, and
     /// running the agent here at the same time would fork the conversation.
@@ -1034,6 +1040,10 @@ impl App {
         }
         let id = match session_id {
             Some(id) => {
+                if self.is_running(&id) && !self.generating(&id) {
+                    self.send_into_turn(&id, Queued { id: rand_id(), text, attachments });
+                    return;
+                }
                 if self.is_running(&id) {
                     let how = self.config.read().settings.busy_send;
                     self.send_while_busy(&id, text, attachments, how);
@@ -1142,19 +1152,30 @@ impl App {
                 // Whether the agent is writing (false) or finished its reply
                 // with background work still running (true).
                 let mut idle = None;
+                // The reply's turn ended with only background work left:
+                // the agent takes the next queued message now.
+                let mut resting = false;
                 {
                     let mut s = sig.write();
                     let s = &mut *s;
                     for e in &batch {
                         match e {
                             AgentEvent::Idle => idle = Some(true),
+                            AgentEvent::Waiting => {
+                                idle = Some(true);
+                                resting = true;
+                            }
                             AgentEvent::TextDelta { .. }
                             | AgentEvent::Text { .. }
                             | AgentEvent::ReasoningDelta { .. }
                             | AgentEvent::Reasoning { .. }
                             | AgentEvent::ToolStart { .. }
                             | AgentEvent::Plan { .. }
-                            | AgentEvent::Error { .. } => idle = Some(false),
+                            | AgentEvent::Steered { .. }
+                            | AgentEvent::Error { .. } => {
+                                idle = Some(false);
+                                resting = false;
+                            }
                             _ => {}
                         }
                         match e {
@@ -1234,6 +1255,13 @@ impl App {
                 if done {
                     break;
                 }
+                // After the user's own stop the queue waits, as when a turn
+                // ends.
+                if resting && app.stopping.write().remove(&id) != Some(false) {
+                    if let Some(n) = app.take_queued(&id) {
+                        app.send_into_turn(&id, n);
+                    }
+                }
                 if let Some(sum) = snapshot {
                     let mut list = app.sessions.write();
                     if let Some(i) = list.iter().position(|x| x.id == sum.id) {
@@ -1285,15 +1313,7 @@ impl App {
                 return;
             }
             // Send the next queued follow-up, if any.
-            let next = {
-                let mut q = app.queue.write();
-                let n = q.get_mut(&id).and_then(|v| if v.is_empty() { None } else { Some(v.remove(0)) });
-                if q.get(&id).map(|v| v.is_empty()).unwrap_or(false) {
-                    q.remove(&id);
-                }
-                n
-            };
-            if let Some(n) = next {
+            if let Some(n) = app.take_queued(&id) {
                 app.send(Some(id.clone()), n.text, n.attachments);
                 return;
             }
@@ -1308,10 +1328,44 @@ impl App {
         });
     }
 
+    /// The first queued follow-up, taken out of the queue.
+    fn take_queued(mut self, id: &str) -> Option<Queued> {
+        let mut q = self.queue.write();
+        let n = q.get_mut(id).and_then(|v| if v.is_empty() { None } else { Some(v.remove(0)) });
+        if q.get(id).map(|v| v.is_empty()).unwrap_or(false) {
+            q.remove(id);
+        }
+        n
+    }
+
+    /// A message for a turn whose reply is done while its background work
+    /// runs: the agent takes it now, as a turn of its own in that process
+    /// (a new process would leave the work behind).
+    fn send_into_turn(mut self, id: &str, item: Queued) {
+        if let Some(c) = self.running.read().get(id) {
+            c.steer(item.text.clone(), item.attachments.clone(), false, item.id);
+        }
+        self.steering.write().entry(id.to_string()).or_default().push(item);
+        self.idle.write().remove(id);
+    }
+
+    /// Stop the agent and everything it runs.
     pub fn stop(mut self, id: &str) {
         if let Some(c) = self.running.read().get(id) {
             self.stopping.write().entry(id.to_string()).or_insert(false);
             c.cancel();
+        }
+    }
+
+    /// Stop the agent's reply; background work it runs keeps going where
+    /// the agent can keep it (Claude Code).
+    pub fn stop_reply(mut self, id: &str) {
+        if !self.generating(id) {
+            return;
+        }
+        if let Some(c) = self.running.read().get(id) {
+            self.stopping.write().entry(id.to_string()).or_insert(false);
+            c.interrupt();
         }
     }
 
@@ -1384,7 +1438,7 @@ impl App {
         let item = self.queue.peek().get(id).and_then(|v| v.iter().find(|x| x.id == qid).cloned());
         let Some(item) = item else { return };
         self.queue_remove(id, qid);
-        if self.is_running(id) {
+        if self.generating(id) {
             self.send_while_busy(id, item.text, item.attachments, how);
         } else {
             self.send(Some(id.to_string()), item.text, item.attachments);

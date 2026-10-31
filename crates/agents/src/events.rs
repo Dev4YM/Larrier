@@ -78,6 +78,11 @@ pub enum AgentEvent {
     /// (subagents, commands) still runs and may bring it back. Not part of
     /// the transcript; content events after it mean it is replying again.
     Idle,
+    /// The reply's turn ended, but background work still runs in the
+    /// agent's process, which stays open for it: the agent takes a new
+    /// message now (`TurnCommand::Steer`), as another turn in that process.
+    /// Content events after it mean it is replying again.
+    Waiting,
     /// Diagnostic output from the agent process (not shown inline).
     Log { line: String },
     /// Turn finished. `ok == false` when the agent failed or was cancelled.
@@ -147,7 +152,11 @@ pub struct PermissionOption {
 /// Commands sent into a running turn.
 #[derive(Clone, Debug)]
 pub enum TurnCommand {
+    /// Stop the agent and everything it runs.
     Cancel,
+    /// Stop the reply only: background work keeps running where the agent
+    /// can keep it (Claude Code); elsewhere the same as `Cancel`.
+    Interrupt,
     Permission { request_id: String, reply: Reply },
     /// A message for the running turn: folded in where the agent can take
     /// it (`now`: the agent stops what it is doing and answers it first).
@@ -192,6 +201,9 @@ impl TurnControl {
     }
     pub fn cancel(&self) {
         let _ = self.tx.send(TurnCommand::Cancel);
+    }
+    pub fn interrupt(&self) {
+        let _ = self.tx.send(TurnCommand::Interrupt);
     }
     pub fn respond(&self, request_id: impl Into<String>, reply: Reply) {
         let _ = self.tx.send(TurnCommand::Permission { request_id: request_id.into(), reply });

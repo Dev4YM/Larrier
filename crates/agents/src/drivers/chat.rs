@@ -34,7 +34,7 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         tokio::select! {
             r = &mut fut => break Some(r),
             cmd = control.recv() => match cmd {
-                Some(TurnCommand::Cancel) | None => break None,
+                Some(TurnCommand::Cancel | TurnCommand::Interrupt) | None => break None,
                 Some(_) => {}
             },
         }

@@ -140,6 +140,7 @@ fn entries(menu: &str) -> Vec<Entry> {
             Some(("Cut", "Ctrl+X", Cmd::Edit("cut"))),
             Some(("Copy", "Ctrl+C", Cmd::Edit("copy"))),
             Some(("Paste", "Ctrl+V", Cmd::Edit("paste"))),
+            Some(("Paste as Text", "Ctrl+Shift+V", Cmd::Edit("paste"))),
             Some(("Select All", "Ctrl+A", Cmd::Edit("selectAll"))),
             None,
             Some(("Search Agents…", "Ctrl+K", Cmd::Palette)),

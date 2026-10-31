@@ -603,6 +603,14 @@ pub fn Root() -> Element {
               }
               if (e.altKey && (k === 'arrowleft' || k === 'arrowright')) { e.preventDefault(); dioxus.send({ t: 'nav', d: k === 'arrowleft' ? -1 : 1 }); return; }
               if (!mod) return;
+              // Ctrl+Shift+V in a message box: the clipboard as plain text,
+              // never made an attachment however long.
+              if (e.shiftKey && k === 'v' && e.target && e.target.closest && e.target.closest('.composer, .user-msg.editing')) {
+                e.preventDefault();
+                window.__larrierCtx = null;
+                dioxus.send({ t: 'paste-plain' });
+                return;
+              }
               if (['k','n','b','j',',','l','p','r','w','e','g','i','.','/','=','+','-','0','tab'].includes(k)) {
                 e.preventDefault();
                 dioxus.send({ t: 'key', k, shift: e.shiftKey, alt: e.altKey });

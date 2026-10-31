@@ -844,12 +844,13 @@ fn Shortcuts() -> Element {
         ("Toggle sidebar", &["Ctrl", "B"]),
         ("Toggle review panel", &["Ctrl", "J"]),
         ("Focus composer", &["Ctrl", "L"]),
-        ("Stop agent", &["Ctrl", "."]),
+        ("Stop the reply", &["Ctrl", "."]),
         ("Settings", &["Ctrl", ","]),
         ("Import sessions", &["Ctrl", "Shift", "I"]),
         ("Files", &["Ctrl", "Shift", "E"]),
         ("Send", &["Enter"]),
         ("New line", &["Shift", "Enter"]),
+        ("Paste long text as text, not a file", &["Ctrl", "Shift", "V"]),
         ("Close overlay", &["Esc"]),
     ];
     rsx! {

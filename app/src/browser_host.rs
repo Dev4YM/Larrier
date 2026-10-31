@@ -10,6 +10,7 @@
 //! tab isn't shown or a menu or dialog opens over them.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use dioxus::core::spawn_forever;
@@ -21,6 +22,8 @@ use dioxus::prelude::*;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tab {
     pub id: u64,
+    /// The chat whose browser it's in.
+    pub owner: String,
     pub url: String,
     pub title: String,
     pub loading: bool,
@@ -31,9 +34,37 @@ pub struct Tab {
 /// What the Browser tab shows.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
+    /// Every chat's tabs.
     pub tabs: Vec<Tab>,
+    /// The tab shown (one of `owner`'s).
     pub active: Option<u64>,
     pub error: Option<String>,
+    /// The chat whose browser is shown: each chat has tabs of its own.
+    pub owner: String,
+    /// The tab each other chat last showed.
+    pub last: HashMap<String, u64>,
+}
+
+impl State {
+    /// The tabs of the chat shown.
+    pub fn mine(&self) -> Vec<Tab> {
+        self.tabs.iter().filter(|t| t.owner == self.owner).cloned().collect()
+    }
+
+    /// The tab `owner`'s browser shows (or would, when shown).
+    pub fn active_of(&self, owner: &str) -> Option<u64> {
+        if owner == self.owner {
+            return self.active;
+        }
+        self.last.get(owner).copied().filter(|id| self.tabs.iter().any(|t| t.id == *id))
+    }
+
+    /// The tab to show after `gone` (at index `i`) left `owner`'s browser.
+    fn next_after(&self, owner: &str, i: Option<usize>) -> Option<u64> {
+        let left: Vec<&Tab> = self.tabs.iter().filter(|t| t.owner == owner).collect();
+        let before = i.map(|i| self.tabs[..i.min(self.tabs.len())].iter().filter(|t| t.owner == owner).count()).unwrap_or(left.len());
+        left.get(before.min(left.len().saturating_sub(1))).map(|t| t.id)
+    }
 }
 
 pub static STATE: GlobalSignal<State> = Signal::global(State::default);
@@ -68,7 +99,9 @@ pub(crate) enum Ev {
     Url { id: u64, url: String },
     /// The tab's page closed by itself (the page closed it, Chrome quit).
     Gone { id: u64 },
-    Open { url: String },
+    /// A page opened another (a link to a new window): a tab in the same
+    /// chat's browser.
+    Open { url: String, from: Option<u64> },
     Failed { id: u64, error: String },
     Nav { id: u64, back: bool, forward: bool },
     /// A message from the page's annotate script.
@@ -270,14 +303,16 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                             }
                         }
                         Ev::Gone { id } => close_tab(id),
-                        Ev::Open { url } => {
-                            new_tab(&url);
+                        Ev::Open { url, from } => {
+                            let owner = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| t.owner.clone()));
+                            new_tab_in(owner.as_deref(), &url);
                         }
                         Ev::Failed { id, error } => {
                             let mut st = STATE.write();
                             st.tabs.retain(|t| t.id != id);
                             if st.active == Some(id) {
-                                st.active = st.tabs.last().map(|t| t.id);
+                                let owner = st.owner.clone();
+                                st.active = st.next_after(&owner, None);
                             }
                             st.error = Some(error);
                             let active = st.active;
@@ -329,22 +364,36 @@ fn place(h: &Host) {
     }
 }
 
-/// Open a page in a new tab and show it. The tab is listed at once; its
-/// view is built a moment later (see `build_pending`).
+/// Open a page in a new tab of the chat shown and show it.
 pub fn new_tab(url: &str) -> Option<u64> {
+    new_tab_in(None, url)
+}
+
+/// Open a page in a new tab of `owner`'s browser (`None`: the chat shown),
+/// shown if that's the browser shown. The tab is listed at once; its view
+/// is built a moment later (see `build_pending`).
+pub fn new_tab_in(owner: Option<&str>, url: &str) -> Option<u64> {
     let url = normalize(url);
     // Started here, inside the UI's runtime (the builder isn't).
     events();
+    let owner = owner.map(String::from).unwrap_or_else(|| STATE.peek().owner.clone());
+    let shown = owner == STATE.peek().owner;
     let id = with_host(|h| {
         let id = h.next;
         h.next += 1;
-        h.active = Some(id);
+        if shown {
+            h.active = Some(id);
+        }
         id
     })?;
     {
         let mut st = STATE.write();
-        st.tabs.push(Tab { id, url: url.clone(), loading: true, ..Default::default() });
-        st.active = Some(id);
+        st.tabs.push(Tab { id, owner: owner.clone(), url: url.clone(), loading: true, ..Default::default() });
+        if shown {
+            st.active = Some(id);
+        } else {
+            st.last.insert(owner, id);
+        }
         st.error = None;
     }
     #[cfg(windows)]
@@ -424,7 +473,7 @@ fn build_pending() {
             })
             // Links that open a window open a tab here instead.
             .with_new_window_req_handler(move |url, _| {
-                let _ = t3.send(Ev::Open { url });
+                let _ = t3.send(Ev::Open { url, from: Some(id) });
                 NewWindowResponse::Deny
             })
             .build_as_child(&*window);
@@ -443,10 +492,38 @@ fn build_pending() {
     }
 }
 
+/// Show tab `id` in its chat's browser (on screen if that's the one shown).
 pub fn activate(id: u64) {
-    STATE.write().active = Some(id);
+    let mut st = STATE.write();
+    let Some(owner) = st.tabs.iter().find(|t| t.id == id).map(|t| t.owner.clone()) else { return };
+    if owner != st.owner {
+        st.last.insert(owner, id);
+        return;
+    }
+    st.active = Some(id);
+    drop(st);
     with_host(|h| {
         h.active = Some(id);
+        place(h);
+    });
+}
+
+/// Show chat `owner`'s browser: its tabs, and the one it last showed.
+pub fn set_owner(owner: &str) {
+    let mut st = STATE.write();
+    if st.owner == owner {
+        return;
+    }
+    let prev = std::mem::replace(&mut st.owner, owner.to_string());
+    if let Some(a) = st.active {
+        st.last.insert(prev, a);
+    }
+    let active = st.last.remove(owner).filter(|id| st.tabs.iter().any(|t| t.id == *id)).or_else(|| st.tabs.iter().rev().find(|t| t.owner == owner).map(|t| t.id));
+    st.active = active;
+    drop(st);
+    *ANNOTATING.write() = false;
+    with_host(|h| {
+        h.active = active;
         place(h);
     });
 }
@@ -455,9 +532,17 @@ pub fn close_tab(id: u64) {
     PENDING.with(|p| p.borrow_mut().retain(|(t, _)| *t != id));
     let mut st = STATE.write();
     let i = st.tabs.iter().position(|t| t.id == id);
+    let owner = i.map(|i| st.tabs[i].owner.clone());
     st.tabs.retain(|t| t.id != id);
     if st.active == Some(id) {
-        st.active = i.and_then(|i| st.tabs.get(i.min(st.tabs.len().saturating_sub(1)))).map(|t| t.id);
+        let o = st.owner.clone();
+        st.active = st.next_after(&o, i);
+    }
+    if let Some(o) = owner.filter(|o| st.last.get(o) == Some(&id)) {
+        match st.next_after(&o, i) {
+            Some(n) => st.last.insert(o, n),
+            None => st.last.remove(&o),
+        };
     }
     let active = st.active;
     drop(st);

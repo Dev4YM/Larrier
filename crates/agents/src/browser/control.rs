@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+/// Names the chat an agent's browser tools work for (its tabs only).
+pub const OWNER_ENV: &str = "LARRIER_BROWSER_OWNER";
+
 pub fn file() -> PathBuf {
     super::view_dir().join("larrier-control")
 }
@@ -23,6 +26,10 @@ pub fn request(mut cmd: Value) -> Result<Value, String> {
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|_| "Larrier isn't running, so its browser isn't either.".to_string())?;
     let _ = s.set_read_timeout(Some(Duration::from_secs(30)));
     cmd["token"] = json!(token);
+    // The chat whose browser this agent works in.
+    if let Ok(owner) = std::env::var(OWNER_ENV) {
+        cmd["owner"] = json!(owner);
+    }
     s.write_all(format!("{cmd}\n").as_bytes()).map_err(|e| e.to_string())?;
     let mut line = String::new();
     BufReader::new(s).read_line(&mut line).map_err(|e| e.to_string())?;

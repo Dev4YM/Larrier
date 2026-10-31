@@ -167,7 +167,11 @@ fn ChatColumn(id: String, input_id: &'static str) -> Element {
     rsx! {
         Transcript { key: "t-{id}", id: id.clone() }
         AboveComposer { id: id.clone() }
-        Composer { session_id: Some(id.clone()), input_id }
+        // Its own box per chat (a list of one, so the key is honored):
+        // what was typed in each stays with it.
+        for k in [id.clone()] {
+            Composer { key: "c-{k}", session_id: Some(k.clone()), input_id }
+        }
     }
 }
 

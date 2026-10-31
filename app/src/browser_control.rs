@@ -68,19 +68,23 @@ fn target_of(id: u64) -> Option<String> {
     None
 }
 
-/// One request, on the UI thread.
+/// One request, on the UI thread. An agent's tools work in its chat's
+/// browser (`owner`); without one, the browser shown.
 fn answer(req: &Value) -> Value {
     let st = host::STATE.peek().clone();
+    let owner = req["owner"].as_str().map(String::from).unwrap_or_else(|| st.owner.clone());
+    let active = st.active_of(&owner);
+    let tabs: Vec<&host::Tab> = st.tabs.iter().filter(|t| t.owner == owner).collect();
     match req["cmd"].as_str().unwrap_or("") {
-        "tabs" => json!({"tabs": st.tabs.iter().map(|t| json!({"id": t.id, "url": t.url, "title": t.title, "active": Some(t.id) == st.active, "target": target_of(t.id)})).collect::<Vec<_>>()}),
-        "new_tab" => match host::new_tab(req["url"].as_str().unwrap_or("about:blank")) {
+        "tabs" => json!({"tabs": tabs.iter().map(|t| json!({"id": t.id, "url": t.url, "title": t.title, "active": Some(t.id) == active, "target": target_of(t.id)})).collect::<Vec<_>>()}),
+        "new_tab" => match host::new_tab_in(Some(&owner), req["url"].as_str().unwrap_or("about:blank")) {
             Some(id) => json!({"id": id}),
             None => json!({"error": st.error.unwrap_or_else(|| "Larrier couldn't open a tab".into())}),
         },
         // A tab to work in, if there's none yet.
         "ensure" => {
-            if st.tabs.is_empty() {
-                host::new_tab("about:blank");
+            if tabs.is_empty() {
+                host::new_tab_in(Some(&owner), "about:blank");
             }
             json!({"ok": true})
         }

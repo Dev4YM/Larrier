@@ -287,7 +287,7 @@ struct Worker {
     /// Pages opened inside a seated window (a link opening a tab, Ctrl+T),
     /// with when and where: once their address is known they leave it for
     /// a tab of their own.
-    strays: HashMap<String, (Instant, String)>,
+    strays: HashMap<String, (Instant, String, Option<u64>)>,
     /// When the tabs' titles and addresses were last read whole.
     synced: Instant,
 }
@@ -735,9 +735,9 @@ impl Worker {
                     // In one of the seated windows (a tab of its own soon),
                     // or a window of its own (a sign-in popup: left to be).
                     let window = self.cdp.call("Browser.getWindowForTarget", json!({"targetId": t}), None).ok().and_then(|v| v["windowId"].as_i64());
-                    let seated = window.is_some() && self.tabs.values().any(|x| x.window_id == window);
-                    if seated {
-                        self.strays.insert(t.to_string(), (Instant::now(), i["url"].as_str().unwrap_or("").to_string()));
+                    let from = window.and_then(|_| self.tabs.iter().find(|(_, x)| x.window_id == window).map(|(id, _)| *id));
+                    if let Some(from) = from {
+                        self.strays.insert(t.to_string(), (Instant::now(), i["url"].as_str().unwrap_or("").to_string(), Some(from)));
                     } else {
                         self.known.insert(t.to_string());
                     }
@@ -756,9 +756,9 @@ impl Worker {
             }
         }
         // Strays whose address is known (or that waited long enough) leave.
-        let ready: Vec<(String, String)> =
-            self.strays.iter().filter(|(_, (since, url))| !unsettled(url) || since.elapsed() > Duration::from_millis(1500)).map(|(t, (_, u))| (t.clone(), u.clone())).collect();
-        for (t, url) in ready {
+        let ready: Vec<(String, String, Option<u64>)> =
+            self.strays.iter().filter(|(_, (since, url, _))| !unsettled(url) || since.elapsed() > Duration::from_millis(1500)).map(|(t, (_, u, f))| (t.clone(), u.clone(), *f)).collect();
+        for (t, url, from) in ready {
             self.strays.remove(&t);
             self.known.insert(t.clone());
             // Docked DevTools is part of its window.
@@ -766,7 +766,7 @@ impl Worker {
                 continue;
             }
             let _ = self.cdp.call("Target.closeTarget", json!({"targetId": t}), None);
-            let _ = self.events.send(Ev::Open { url: if unsettled(&url) { "chrome://newtab/".into() } else { url } });
+            let _ = self.events.send(Ev::Open { url: if unsettled(&url) { "chrome://newtab/".into() } else { url }, from });
         }
         // Every tab's title and address, read whole now and then: a page
         // that loaded before Larrier attached sends no news of its own.

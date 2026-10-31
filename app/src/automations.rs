@@ -139,10 +139,12 @@ fn launch(mut app: App, a: &Automation) -> Option<String> {
     // Everything `send` touches that belongs to the user.
     let prev_view = app.view.read().clone();
     let prev_draft = app.draft.read().clone();
-    let (prev_history, prev_pos, prev_quote) = {
-        let mut ui = app.ui.write();
-        (ui.history.clone(), ui.hist_pos, ui.quote.take())
+    let (prev_history, prev_pos) = {
+        let ui = app.ui.peek();
+        (ui.history.clone(), ui.hist_pos)
     };
+    // Passing through the new chat isn't leaving a draft behind.
+    let prev_row = crate::keep::HOME_ROW.peek().clone();
 
     {
         let mut d = app.draft.write();
@@ -166,9 +168,11 @@ fn launch(mut app: App, a: &Automation) -> Option<String> {
         let mut ui = app.ui.write();
         ui.history = prev_history;
         ui.hist_pos = prev_pos;
-        ui.quote = prev_quote;
     }
-    app.view.set(prev_view);
+    app.set_view(prev_view);
+    if *crate::keep::HOME_ROW.peek() != prev_row {
+        *crate::keep::HOME_ROW.write() = prev_row;
+    }
 
     if let Some(id) = &started {
         app.rename(id, format!("⟳ {}", a.name));

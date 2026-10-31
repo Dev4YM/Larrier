@@ -40,6 +40,17 @@ pub fn Root() -> Element {
     crate::notify::track_window();
     crate::notify::use_tray(move || app.new_agent());
 
+    // Each chat's side panel, kept as it changes (see `App::set_view`).
+    let panel = use_ui(|u| (u.right_open, u.right_tab, u.right_tabs.clone()));
+    use_effect(move || {
+        let (open, tab, tabs) = panel();
+        if let Some(id) = app.view.read().session_id() {
+            crate::keep::set_panel(id, crate::keep::Panel { open, tab, tabs });
+        }
+    });
+    // The new agent screen's picks, kept with its message.
+    use_effect(move || crate::keep::set_draft(&app.draft.read()));
+
     use_hook(move || {
         let stale = crate::notify::interrupted_sessions();
         if !stale.is_empty() {

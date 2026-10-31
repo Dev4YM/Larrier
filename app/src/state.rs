@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use dioxus::prelude::*;
 use dioxus::core::spawn_forever;
+use serde::{Deserialize, Serialize};
 use larrier_agents::{
     engine::TurnRecorder, events::PermissionRequest, git, AgentEvent, Detected, Reply, TurnControl, TurnHandle,
 };
@@ -108,7 +109,7 @@ impl SettingsTab {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum RightTab {
     /// Launcher tiles (Changes / Browser / Terminal / File).
     Home,
@@ -122,7 +123,7 @@ pub enum RightTab {
 
 /// A tool tab in the side panel. Like chat tabs, a newly opened tool is a
 /// preview (italic) that the next one replaces until it is double-clicked.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct PanelTab {
     pub tab: RightTab,
     pub preview: bool,
@@ -333,7 +334,7 @@ pub struct Toast {
 }
 
 /// Composer selections for the next new agent.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Draft {
     pub agent: AgentKind,
     pub model: Option<String>,
@@ -427,6 +428,8 @@ impl App {
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
             worktree: cfg.settings.use_worktrees,
         };
+        // A message left on the new agent screen comes back with its picks.
+        let draft = crate::keep::load().unwrap_or(draft);
         let ui = Ui {
             sidebar_open: true,
             right_open: cfg.settings.right_panel_open,
@@ -713,6 +716,32 @@ impl App {
             }
             ui.hist_pos = ui.history.len() - 1;
         }
+        self.set_view(v);
+    }
+
+    /// Show `v`. Each chat has a side panel and browser tabs of its own,
+    /// swapped in with it; leaving the new agent screen with a message in
+    /// it lists that message in the sidebar as a draft.
+    pub fn set_view(mut self, v: View) {
+        let (old, was_home) = {
+            let cur = self.view.peek();
+            (cur.session_id().map(String::from), *cur == View::Home)
+        };
+        let new = v.session_id().map(String::from);
+        if old != new {
+            if let Some(o) = &old {
+                crate::keep::set_panel(o, crate::keep::Panel::of(&self.ui.peek()));
+            }
+            if let Some(n) = &new {
+                let open = self.config.peek().settings.right_panel_open;
+                let panel = crate::keep::panel(n).unwrap_or_else(|| crate::keep::Panel::fresh(open));
+                panel.apply(&mut self.ui.write());
+                crate::browser_host::set_owner(n);
+            }
+        }
+        if was_home && v != View::Home {
+            crate::keep::list_home();
+        }
         self.view.set(v);
     }
 
@@ -754,7 +783,7 @@ impl App {
             self.ensure_tab(&target.1, false);
         }
         self.ui.write().hist_pos = target.0;
-        self.view.set(target.1);
+        self.set_view(target.1);
     }
 
     // ------------------------------------------------------------- editing prompts
@@ -1669,7 +1698,7 @@ impl App {
         self.toast(format!("Marked {n} session{} as read", if n == 1 { "" } else { "s" }));
     }
 
-    pub fn toggle_archive(mut self, id: &str) {
+    pub fn toggle_archive(self, id: &str) {
         let mut archived = false;
         self.update_session(id, |s| {
             s.archived = !s.archived;
@@ -1679,12 +1708,12 @@ impl App {
             let cur = self.current_id().as_deref() == Some(id);
             self.forget_tabs(id);
             if cur {
-                self.view.set(View::Home);
+                self.set_view(View::Home);
             }
         }
     }
 
-    pub fn delete(mut self, id: &str) {
+    pub fn delete(self, id: &str) {
         self.stop(id);
         // Clean up a worktree we created.
         if let Some(s) = self.peek_session(id, |s| s.clone()).or_else(|| store().load(id).ok()) {
@@ -1692,6 +1721,7 @@ impl App {
                 let _ = git::remove_worktree(&PathBuf::from(&ws.path), &PathBuf::from(path));
             }
         }
+        crate::keep::forget(id);
         if let Err(e) = store().delete(id) {
             self.toast_err(format!("Delete failed: {e}"));
         }
@@ -2176,6 +2206,7 @@ pub fn save_async(s: Session) {
 
 /// Wait (briefly) until every queued save is on disk — used when closing.
 pub fn flush_saves() {
+    crate::keep::flush();
     let (ack_tx, ack_rx) = mpsc::channel();
     if let Ok(tx) = saver().lock() {
         if tx.send(SaveMsg::Flush(ack_tx)).is_err() {

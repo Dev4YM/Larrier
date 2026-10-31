@@ -621,10 +621,12 @@ fn BrowserTab() -> Element {
     let url_now = active.as_ref().map(|t| t.url.clone()).unwrap_or_default();
     let external = has_page && (url_now.starts_with("http://") || url_now.starts_with("https://"));
     let url_open = url_now.clone();
+    // This chat's tabs (each chat has a browser of its own).
+    let mine = st.mine();
     rsx! {
-        if st.tabs.len() > 1 {
+        if mine.len() > 1 {
             div { class: "browser-tabs",
-                for t in st.tabs.clone() {
+                for t in mine {
                     {
                         let on = Some(t.id) == st.active;
                         let label = tab_label(&t);

@@ -42,6 +42,12 @@ pub fn server() -> Option<Server> {
 }
 
 impl Server {
+    /// The tools for one chat: they see and open only its tabs.
+    pub fn for_chat(mut self, session_id: &str) -> Server {
+        self.env.push((control::OWNER_ENV.into(), session_id.to_string()));
+        self
+    }
+
     /// Claude Code's `--mcp-config` (and Cursor's mcp.json) shape.
     pub fn mcp_json(&self) -> Value {
         let env: serde_json::Map<String, Value> = self.env.iter().map(|(k, v)| (k.clone(), json!(v))).collect();

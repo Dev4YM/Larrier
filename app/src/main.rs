@@ -9,6 +9,7 @@ mod browser_host;
 mod highlight;
 mod icons;
 mod install;
+mod keep;
 mod live;
 mod logo;
 mod logos;

@@ -198,8 +198,15 @@ pub fn Composer(
     #[props(default = "composer-input")] input_id: &'static str,
 ) -> Element {
     let mut app = use_app();
-    let mut text = use_signal(String::new);
-    let attachments: Signal<Vec<Part>> = use_signal(Vec::new);
+    // What was typed here last time (this chat's, or the new agent
+    // screen's), saved as it changes; the box is keyed by its chat.
+    let keep_key = crate::keep::key(session_id.as_deref());
+    let kept = use_hook({
+        let k = keep_key.clone();
+        move || crate::keep::input(&k)
+    });
+    let mut text = use_signal(|| kept.text.clone());
+    let attachments: Signal<Vec<Part>> = use_signal(|| kept.attachments.clone());
     // The queue panel: open or folded, the row being dragged and where it
     // would land, and the queued message being edited with the draft it
     // set aside.
@@ -210,7 +217,16 @@ pub fn Composer(
     let mut send_menu = use_signal(|| false);
     // Files, folders, chats, the diff, skills and subagents the text refers
     // to: each sits in the text as a marked token (see `mentions`).
-    let mut mentions: Signal<Vec<MentionChip>> = use_signal(Vec::new);
+    let mut mentions: Signal<Vec<MentionChip>> = use_signal(|| kept.mentions.clone());
+    // While a queued message is being edited, the message set aside is
+    // what's kept.
+    use_effect(move || {
+        let input = match &*q_edit.read() {
+            Some((_, t, a, m)) => crate::keep::Input::new(t.clone(), a.clone(), m.clone()),
+            None => crate::keep::Input::new(text.read().clone(), attachments.read().clone(), mentions.read().clone()),
+        };
+        crate::keep::set_input(&keep_key, input);
+    });
     let plus_menu = use_signal(|| false);
     let mut model_menu = use_signal(|| false);
     let env_menu = use_signal(|| false);

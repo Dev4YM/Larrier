@@ -30,7 +30,7 @@ fn tab_icon(t: SettingsTab) -> I {
 /// Settings navigation — takes the sidebar's place, like Cursor.
 #[component]
 pub fn SettingsNav() -> Element {
-    let mut app = use_app();
+    let app = use_app();
     let tab = match &*app.view.read() {
         View::Settings(t) => *t,
         _ => SettingsTab::General,
@@ -60,7 +60,7 @@ pub fn SettingsNav() -> Element {
                         button {
                             key: "{t.label()}",
                             class: if t == tab { "nav-row on" } else { "nav-row" },
-                            onclick: move |_| app.view.set(View::Settings(t)),
+                            onclick: move |_| app.set_view(View::Settings(t)),
                             span { class: "ic", Icon { i: tab_icon(t), size: 16, stroke: 1.5 } }
                             "{t.label()}"
                         }

@@ -668,6 +668,12 @@ fn BrowserTab() -> Element {
                 },
                 Icon { i: I::Plus, size: 14 }
             }
+            button { class: if host::ANNOTATING() { "icon-btn sm annotate on" } else { "icon-btn sm annotate" },
+                title: if host::ANNOTATING() { "Stop annotating (Esc)" } else { "Annotate: point at elements, click one (Shift+click for more), write what to do, Enter attaches it to the chat" },
+                disabled: !has_page,
+                onclick: move |_| host::annotate(!host::ANNOTATING()),
+                Icon { i: I::Annotate, size: 14 }
+            }
             button { class: "icon-btn sm", title: "Developer tools", disabled: !has_page, onclick: move |_| host::devtools(), Icon { i: I::Code, size: 13 } }
             button { class: "icon-btn sm", title: "Open in your browser", disabled: !external,
                 onclick: move |_| { let _ = open::that(url_open.clone()); },

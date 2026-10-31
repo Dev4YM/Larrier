@@ -1690,3 +1690,4 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .app.no-motion .browser-progress::before { animation: none; left: 0; width: 100%; opacity: .5; }
 .browser-area { flex: 1; min-height: 0; position: relative; background: var(--pane); }
 .browser-snap { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top left; pointer-events: none; user-select: none; }
+.browser-bar .annotate.on { color: var(--accent-c, var(--blue)); background: color-mix(in srgb, var(--accent-c, var(--blue)) 14%, transparent); }

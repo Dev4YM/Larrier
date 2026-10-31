@@ -75,6 +75,7 @@ icons! {
     Check => "check",
     Spell => "spell-check",
     Code => "code-xml",
+    Annotate => "square-dashed-mouse-pointer",
     BookPlus => "book-plus",
     CircleCheck => "circle-check",
     Circle => "circle",

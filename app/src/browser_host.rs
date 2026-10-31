@@ -40,7 +40,15 @@ pub static STATE: GlobalSignal<State> = Signal::global(State::default);
 /// A picture of the page, shown in its place while it steps aside for a
 /// menu or dialog of the app's (base64 JPEG).
 pub static SNAPSHOT: GlobalSignal<Option<String>> = Signal::global(|| None);
+/// Annotate mode is on in the tab shown.
+pub static ANNOTATING: GlobalSignal<bool> = Signal::global(|| false);
 
+/// Pages hear from Larrier's own annotate script only with this (each run's
+/// own), so a page can't post as it.
+fn annotate_token() -> &'static str {
+    static TOKEN: OnceLock<String> = OnceLock::new();
+    TOKEN.get_or_init(|| uuid::Uuid::new_v4().simple().to_string())
+}
 
 /// Where the Browser tab's page area is (CSS px = logical px), if shown.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,6 +66,8 @@ enum Ev {
     Open { url: String },
     Failed { id: u64, error: String },
     Nav { id: u64, back: bool, forward: bool },
+    /// A message from the page's annotate script.
+    Annotate { id: u64, body: String },
     /// The picture to cover with is ready (or couldn't be taken): step aside.
     Covered { gen: u64, shot: Option<String> },
 }
@@ -86,6 +96,13 @@ thread_local! {
     /// handler), never inside the UI's own event handling.
     static PENDING: RefCell<Vec<(u64, String)>> = const { RefCell::new(Vec::new()) };
     static BUILDER: RefCell<Option<std::sync::Arc<dioxus::desktop::tao::window::Window>>> = const { RefCell::new(None) };
+    /// The app's state, for what the views hand to it (set by the root).
+    static APP: std::cell::Cell<Option<crate::state::App>> = const { std::cell::Cell::new(None) };
+}
+
+/// Called once by the root component.
+pub fn set_app(app: crate::state::App) {
+    APP.with(|a| a.set(Some(app)));
 }
 
 static EVENTS: OnceLock<tokio::sync::mpsc::UnboundedSender<Ev>> = OnceLock::new();
@@ -111,6 +128,10 @@ fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                                     t.url = url;
                                 }
                             }
+                            // A new page starts without annotate mode.
+                            if started && st.active == Some(id) {
+                                *ANNOTATING.write() = false;
+                            }
                             // Where back and forward lead, once it has loaded.
                             if !started {
                                 let tx = events();
@@ -121,6 +142,7 @@ fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                                 });
                             }
                         }
+                        Ev::Annotate { id, body } => annotated(id, &body),
                         Ev::Nav { id, back, forward } => {
                             let mut st = STATE.write();
                             if let Some(t) = st.tabs.iter_mut().find(|t| t.id == id) {
@@ -264,7 +286,7 @@ fn build_pending() {
         };
         let mut ctx = ctx;
         let tx = events();
-        let (t1, t2, t3) = (tx.clone(), tx.clone(), tx);
+        let (t1, t2, t3, t4) = (tx.clone(), tx.clone(), tx.clone(), tx);
         let made = WebViewBuilder::new_with_web_context(&mut ctx)
             .with_url(&url)
             .with_bounds(bounds(area, false))
@@ -275,6 +297,10 @@ fn build_pending() {
             .with_additional_browser_args("--remote-debugging-port=0 --disable-blink-features=AutomationControlled --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
             // Which Larrier tab a page is in, for the agents' tools.
             .with_initialization_script(format!("Object.defineProperty(window, '__larrierTab', {{ value: {id} }});"))
+            .with_initialization_script(include_str!("browser_annotate.js").replace("__LARRIER_TOKEN__", annotate_token()))
+            .with_ipc_handler(move |req| {
+                let _ = t4.send(Ev::Annotate { id, body: req.body().clone() });
+            })
             .with_on_page_load_handler(move |ev, url| {
                 let _ = t1.send(Ev::Load { id, started: matches!(ev, PageLoadEvent::Started), url });
             })
@@ -361,6 +387,68 @@ pub fn stop() {
 
 pub fn devtools() {
     active_view(|v| v.open_devtools());
+}
+
+/// Turn annotate mode on or off in the tab shown.
+pub fn annotate(on: bool) {
+    *ANNOTATING.write() = on;
+    active_view(|v| {
+        let _ = v.evaluate_script(&format!("window.__larrierAnnotate && window.__larrierAnnotate({on})"));
+        if on {
+            let _ = v.focus();
+        }
+    });
+}
+
+/// What the annotate script said: it was turned off, or the user picked
+/// elements and wrote a note. Each element goes to the chat's box as a
+/// picture and its details, the note as the text.
+fn annotated(id: u64, body: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else { return };
+    if v["larrier"].as_str() != Some(annotate_token()) {
+        return;
+    }
+    match v["kind"].as_str() {
+        Some("off") => *ANNOTATING.write() = false,
+        Some("attach") => {
+            *ANNOTATING.write() = false;
+            let items: Vec<serde_json::Value> = v["items"].as_array().cloned().unwrap_or_default();
+            let (url, title, note) = (v["url"].as_str().unwrap_or("").to_string(), v["title"].as_str().unwrap_or("").to_string(), v["note"].as_str().unwrap_or("").trim().to_string());
+            let Some(mut app) = APP.with(|a| a.get()) else { return };
+            spawn_forever(async move {
+                // Pictures of the elements, a little room around each.
+                let clips: Vec<(f64, f64, f64, f64)> = items.iter().map(|i| {
+                    let r = &i["rect"];
+                    let (x, y, w, h) = (r["x"].as_f64().unwrap_or(0.0), r["y"].as_f64().unwrap_or(0.0), r["w"].as_f64().unwrap_or(1.0), r["h"].as_f64().unwrap_or(1.0));
+                    (x - 8.0, y - 8.0, w + 16.0, h + 16.0)
+                }).collect();
+                let shots = tokio::task::spawn_blocking(move || clips.into_iter().map(|c| larrier_agents::browser::view_capture(id, Some(c))).collect::<Vec<_>>()).await.unwrap_or_default();
+                let mut parts = Vec::new();
+                for (n, item) in items.iter().enumerate() {
+                    if let Some(Some(jpeg)) = shots.get(n) {
+                        if let Ok(p) = crate::state::save_data_url(&format!("data:image/jpeg;base64,{jpeg}"), "element.jpg") {
+                            parts.push(p);
+                        }
+                    }
+                    let short = item["short"].as_str().unwrap_or("element");
+                    let mut details = format!("Element on {} ({url})\n{short}\nSelector: {}", if title.is_empty() { "the page" } else { &title }, item["selector"].as_str().unwrap_or(""));
+                    if let Some(t) = item["text"].as_str().filter(|t| !t.is_empty()) {
+                        details.push_str(&format!("\nText: {t}"));
+                    }
+                    details.push_str(&format!("\nHTML:\n{}", item["html"].as_str().unwrap_or("")));
+                    parts.push(larrier_core::Part::File { path: format!("Element · {}", short.chars().take(60).collect::<String>()), mime: Some("text/plain".into()), text: Some(details) });
+                }
+                let session = app.current_id();
+                let mut ui = app.ui.write();
+                ui.attach_inbox.extend(parts);
+                if !note.is_empty() {
+                    ui.compose_inbox.push((session, note));
+                }
+                ui.focus_composer += 1;
+            });
+        }
+        _ => {}
+    }
 }
 
 /// The tab's page area moved, appeared (`Some`) or went away (`None`), or a

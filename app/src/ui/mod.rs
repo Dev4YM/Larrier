@@ -116,7 +116,10 @@ pub fn Root() -> Element {
     });
 
     // The agents' browser tools reach Larrier's browser tabs through here.
-    use_hook(crate::browser_control::start);
+    use_hook(move || {
+        crate::browser_host::set_app(app);
+        crate::browser_control::start();
+    });
 
     // Bridge: system theme + global keyboard shortcuts from the webview.
     use_future(move || async move {

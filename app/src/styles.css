@@ -685,8 +685,6 @@ select.input { cursor: pointer; padding-right: 4px; }
 .below-composer .grow { flex: 1; }
 .env-chip { height: 26px; font-size: 13px; color: var(--fg-2); padding: 0 8px; gap: 6px; }
 .ring { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--fg-4); margin: 0 4px; }
-.quote-chip { display: flex; align-items: flex-start; gap: 6px; margin: 8px 12px 0; padding: 6px 8px; border-radius: 10px; background: var(--blue-bg); color: var(--blue); font-size: 12px; line-height: 17px; }
-.quote-chip .tx { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .files-bar { margin: 0; border-bottom: 1px solid var(--border); padding: 0 8px 0 16px; height: 34px; }
 .composer .attachments { padding: 8px 12px 0; }
 
@@ -1629,6 +1627,17 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .tok.run-as { --tok-bg: color-mix(in srgb, var(--violet, #8b5cf6) 14%, transparent); --tok-fg: var(--violet, #7c3aed); }
 .tok.diff { --tok-bg: color-mix(in srgb, var(--amber) 16%, transparent); --tok-fg: color-mix(in srgb, var(--amber) 78%, var(--fg)); }
 .tok.page { --tok-bg: color-mix(in srgb, #0891b2 14%, transparent); --tok-fg: color-mix(in srgb, #0891b2 85%, var(--fg)); }
+.tok.quote { --tok-bg: color-mix(in srgb, var(--fg-3) 16%, transparent); --tok-fg: var(--fg-2); }
+/* The Quote button over text selected in an agent's reply. */
+.quote-pop { position: fixed; z-index: 400; display: none; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border-radius: 8px;
+  background: var(--menu-bg, var(--card)); color: var(--fg); border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(0, 0, 0, .14), 0 1px 3px rgba(0, 0, 0, .08);
+  font-size: 12px; font-weight: 500; white-space: nowrap; animation: quote-pop-in .14s ease-out; }
+.quote-pop:hover { background: var(--hover); }
+.quote-pop svg { color: var(--fg-2); }
+@keyframes quote-pop-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+/* An agent's words read as text: the text cursor over them. */
+.a-text { cursor: text; }
+.a-text a, .a-text button, .a-text summary { cursor: pointer; }
 .tok-field { position: relative; min-width: 0; }
 .cgrid .tok-field { grid-area: text; width: 100%; }
 .tok-field > textarea.tok-input { display: block; position: relative; z-index: 1; color: transparent !important; caret-color: var(--fg); background: transparent; }

@@ -164,8 +164,6 @@ pub struct Ui {
     pub ctx: Option<CtxMenu>,
     /// Larrier's own right-click menu for everything else.
     pub gctx: Option<GlobalCtx>,
-    /// Selected text quoted into the next prompt.
-    pub quote: Option<String>,
     /// Back / forward navigation.
     pub history: Vec<View>,
     pub hist_pos: usize,
@@ -449,7 +447,6 @@ impl App {
             maximized: false,
             ctx: None,
             gctx: None,
-            quote: None,
             history: vec![View::Home],
             hist_pos: 0,
             repo_open: cfg.settings.sidebar_opened.iter().cloned().collect(),
@@ -1097,18 +1094,6 @@ impl App {
             },
         };
 
-        let quote = self.ui.write().quote.take();
-        let text = match quote {
-            Some(q) if !q.trim().is_empty() => {
-                let quoted: String = q.trim().lines().map(|l| format!("> {l}\n")).collect();
-                // A leading "/skill" must stay first for the agent to run it.
-                match text.strip_prefix('/').and_then(|rest| rest.split_once(char::is_whitespace)) {
-                    Some((skill, rest)) if !skill.is_empty() => format!("/{skill}\n{quoted}\n{}", rest.trim_start()),
-                    _ => format!("{quoted}\n{text}"),
-                }
-            }
-            _ => text,
-        };
         let mut msg = Message::user_text(text);
         msg.parts.extend(attachments);
         let Some((agent, model, account)) = self.mutate_session(&id, |s| {

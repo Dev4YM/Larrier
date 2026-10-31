@@ -688,18 +688,17 @@ pub fn GlobalMenu() -> Element {
                 if has_sel {
                     {item("Copy", I::Copy, "Ctrl+C", true, Box::new(move || app.copy_text(&s3)))}
                     if in_agent {
-                        {item("Quote in Follow-up", I::Quote, "", true, Box::new(move || {
+                        {item("Quote", I::Quote, "", true, Box::new(move || {
                             let mut app = app;
-                            let mut ui = app.ui.write();
-                            ui.quote = Some(s4.trim().to_string());
-                            ui.focus_composer += 1;
+                            let id = app.current_id();
+                            app.ui.write().chip_inbox.push((id, super::mentions::MentionChip::quote(&s4), None));
                         }))}
                     }
                     {item("Ask a New Agent", I::SquarePen, "", true, Box::new({
                         let q = sel.clone();
                         move || {
                             let mut app = app;
-                            app.ui.write().quote = Some(q.trim().to_string());
+                            app.ui.write().chip_inbox.push((None, super::mentions::MentionChip::quote(&q), None));
                             app.new_agent();
                         }
                     }))}

@@ -243,7 +243,6 @@ pub fn Composer(
     let mut measure_seq = use_signal(|| 0u64);
 
     let primary = input_id == "composer-input";
-    let quote_memo = crate::state::use_ui(|u| u.quote.clone());
     // Pick up attachments produced elsewhere (paste, drop, menus).
     let inbox_len = crate::state::use_ui(|u| u.attach_inbox.len())();
     use_effect(use_reactive!(|inbox_len| {
@@ -469,10 +468,9 @@ pub fn Composer(
     let atts = attachments.read().clone();
     let chips_now = mentions.read().clone();
     let can_send = !elsewhere && (!text.read().trim().is_empty() || !atts.is_empty());
-    let quote = quote_memo();
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();
-    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || quote.is_some();
+    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty();
     // The harness's logo: "Cursor Agent · Opus 5.5" is Cursor, whoever made the model.
     let model_logo_svg = agent_logo(&agent);
     let (model_text, effort_text) = model_display(&app, &agent, &model, &effort);
@@ -909,13 +907,6 @@ pub fn Composer(
                 div { class: "drop-zone", "Drop files or images to attach" }
             }
             div { class: format!("composer{}{}", if tall { " tall" } else { "" }, if home { " home-c" } else { "" }),
-                if let Some(q) = quote {
-                    div { class: "quote-chip",
-                        Icon { i: I::Quote, size: 13 }
-                        span { class: "tx", "{q}" }
-                        button { class: "icon-btn sm", onclick: move |_| app.ui.write().quote = None, Icon { i: I::X, size: 11 } }
-                    }
-                }
                 if !atts.is_empty() {
                     div { class: "thumb-row",
                         for (i, a) in atts.iter().enumerate() {

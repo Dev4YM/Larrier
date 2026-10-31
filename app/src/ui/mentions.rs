@@ -14,7 +14,7 @@ use larrier_core::{AgentKind, SessionSummary};
 pub const OPEN: char = '\u{2063}';
 pub const CLOSE: char = '\u{2064}';
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum MentionKind {
     /// Another agent's conversation, passed as context.
     Agent,
@@ -35,9 +35,14 @@ pub enum MentionKind {
     /// A page from Larrier's browser (its address, title and text, as it
     /// was when it was added), sent as a block.
     Page,
+    /// Text quoted from an agent's reply, sent in place as a quote block.
+    Quote,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+/// Where a quote sits while the text around it is tidied.
+const QUOTE_MARK: (char, char) = ('\u{E000}', '\u{E001}');
+
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MentionChip {
     pub kind: MentionKind,
     /// What is sent: session id (agent), path (file / folder), name (skill,
@@ -105,6 +110,14 @@ impl MentionChip {
         MentionChip { block: Some(block), ..MentionChip::new(MentionKind::Page, url.to_string(), title.clone(), format!("{title} — {url} — sent as context")) }
     }
 
+    /// Text quoted from an agent's reply.
+    pub fn quote(text: &str) -> MentionChip {
+        let text = text.trim();
+        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let label = if flat.chars().count() > 32 { format!("{}…", flat.chars().take(31).collect::<String>().trim_end()) } else { flat };
+        MentionChip { block: Some(format!("<quote>\n{text}\n</quote>")), ..MentionChip::new(MentionKind::Quote, text.to_string(), label, text.to_string()) }
+    }
+
     pub fn run_as(name: &str, agent: &AgentKind) -> MentionChip {
         let title = format!("This chat runs as your {name} agent: its instructions, tools and MCP servers");
         MentionChip { agent: Some(agent.clone()), ..MentionChip::new(MentionKind::RunAs, name.to_string(), name.to_string(), title) }
@@ -118,6 +131,7 @@ impl MentionChip {
         match self.kind {
             MentionKind::Skill | MentionKind::Command => format!("/{}", label.trim_start_matches('/')),
             MentionKind::Folder => format!("@{}/", label.trim_end_matches('/')),
+            MentionKind::Quote => format!("“{}”", label.trim_end_matches('…').trim_end().to_string() + if label.ends_with('…') { "…" } else { "" }),
             _ => format!("@{label}"),
         }
     }
@@ -134,6 +148,7 @@ impl MentionChip {
             MentionKind::RunAs | MentionKind::Subagent => "run-as",
             MentionKind::GitDiff => "diff",
             MentionKind::Page => "page",
+            MentionKind::Quote => "quote",
             _ => "file",
         }
     }
@@ -182,6 +197,7 @@ pub fn to_prompt(chips: &[MentionChip], text: &str) -> String {
     let mut head = String::new();
     let mut body = String::new();
     let mut blocks: Vec<String> = Vec::new();
+    let mut quotes: Vec<String> = Vec::new();
     for (i, s) in segs.iter().enumerate() {
         let piece = match s {
             Seg::Text(t) => t.clone(),
@@ -195,6 +211,11 @@ pub fn to_prompt(chips: &[MentionChip], text: &str) -> String {
                     MentionKind::Agent if !c.value.is_empty() => format!("@agent:{}", &c.value[c.value.len().saturating_sub(8)..]),
                     MentionKind::GitDiff => "@git:diff".into(),
                     MentionKind::Subagent => format!("@agent-{}", c.value),
+                    // In place, once the text around it is tidied.
+                    MentionKind::Quote => {
+                        quotes.push(c.block.clone().unwrap_or_else(|| format!("<quote>\n{}\n</quote>", c.value)));
+                        format!(" {}{}{} ", QUOTE_MARK.0, quotes.len() - 1, QUOTE_MARK.1)
+                    }
                     _ => String::new(),
                 }
             }
@@ -213,6 +234,21 @@ pub fn to_prompt(chips: &[MentionChip], text: &str) -> String {
         (false, true) => head,
         (false, false) => format!("{head} {body}"),
     };
+    if !quotes.is_empty() {
+        for (i, q) in quotes.iter().enumerate() {
+            let mark = format!("{}{i}{}", QUOTE_MARK.0, QUOTE_MARK.1);
+            out = out.replace(&format!(" {mark}"), &mark).replace(&format!("{mark} "), &mark);
+            out = out.replace(&mark, &format!("\n{q}\n"));
+        }
+        // Each quote on lines of its own, right against the text around it.
+        while out.contains("\n\n<quote>") {
+            out = out.replace("\n\n<quote>", "\n<quote>");
+        }
+        while out.contains("</quote>\n\n") {
+            out = out.replace("</quote>\n\n", "</quote>\n");
+        }
+        out = out.trim().to_string();
+    }
     for b in blocks {
         out.push_str("\n\n");
         out.push_str(&b);
@@ -261,6 +297,17 @@ pub fn prompt_segs(text: &str, sessions: &[SessionSummary]) -> Vec<Seg> {
     let mut rest = text.to_string();
     let mut agent_blocks: Vec<MentionChip> = Vec::new();
     let mut tail: Vec<MentionChip> = Vec::new();
+    // Quotes fold back where they were.
+    let mut quotes: Vec<MentionChip> = Vec::new();
+    while let Some(start) = rest.find("<quote>") {
+        let inner_at = start + "<quote>".len();
+        let (inner_end, end) = match rest[inner_at..].find("</quote>") {
+            Some(i) => (inner_at + i, inner_at + i + "</quote>".len()),
+            None => (rest.len(), rest.len()),
+        };
+        quotes.push(MentionChip::quote(&rest[inner_at..inner_end]));
+        rest.replace_range(start..end, &format!(" {}{}{} ", QUOTE_MARK.0, quotes.len() - 1, QUOTE_MARK.1));
+    }
     for (open, close) in [("<agent_context", "</agent_context>"), ("<git_diff", "</git_diff>"), ("<pasted_text", "</pasted_text>"), ("<browser_page", "</browser_page>")] {
         while let Some(start) = rest.find(open) {
             let after_open = &rest[start..];
@@ -326,7 +373,10 @@ pub fn prompt_segs(text: &str, sessions: &[SessionSummary]) -> Vec<Seg> {
         first_word = false;
         i = j;
         let mut trailing = "";
-        let chip = if let Some(id) = word.strip_prefix("@agent:") {
+        let quote = word.strip_prefix(QUOTE_MARK.0).and_then(|w| w.strip_suffix(QUOTE_MARK.1)).and_then(|n| n.parse::<usize>().ok()).and_then(|n| quotes.get(n));
+        let chip = if let Some(q) = quote {
+            Some(q.clone())
+        } else if let Some(id) = word.strip_prefix("@agent:") {
             let mut c = match blocks.next() {
                 Some(b) => b,
                 None => MentionChip::new(MentionKind::Agent, String::new(), "Agent chat".into(), format!("Agent chat {id}")),
@@ -527,6 +577,22 @@ Place order
         let chip = segs.iter().find_map(|s| if let Seg::Chip(c) = s { Some(c.clone()) } else { None }).unwrap();
         assert_eq!((chip.kind, chip.label.as_str(), chip.value.as_str()), (MentionKind::Page, "Order 'form'", "http://127.0.0.1:3000/order"));
         // Sent again as it was.
+        let (again, chips) = to_edit(&sent, &[]);
+        assert_eq!(to_prompt(&chips, &again), sent);
+    }
+
+    #[test]
+    fn quotes_are_sent_in_place_and_fold_back() {
+        let a = MentionChip::quote("Both work on Local.\n  Checking what production still lacks.");
+        let b = MentionChip::quote("fn main() {\n    println!(\"hi\");\n}");
+        assert_eq!(a.token(), "“Both work on Local. Checking wh…”");
+        let text = format!("{} why?\n{} and this", a.marked(), b.marked());
+        let sent = to_prompt(&[a.clone(), b.clone()], &text);
+        assert_eq!(sent, "<quote>\nBoth work on Local.\n  Checking what production still lacks.\n</quote>\nwhy?\n<quote>\nfn main() {\n    println!(\"hi\");\n}\n</quote>\nand this");
+        let segs = prompt_segs(&sent, &[]);
+        let kinds: Vec<String> = segs.iter().map(|s| match s { Seg::Chip(c) => format!("{:?}", c.kind), Seg::Text(t) => t.trim().to_string() }).filter(|s| !s.is_empty()).collect();
+        assert_eq!(kinds, ["Quote", "why?", "Quote", "and this"]);
+        // Edited and sent again as it was.
         let (again, chips) = to_edit(&sent, &[]);
         assert_eq!(to_prompt(&chips, &again), sent);
     }

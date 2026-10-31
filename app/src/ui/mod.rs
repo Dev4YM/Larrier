@@ -608,6 +608,47 @@ pub fn Root() -> Element {
                 dioxus.send({ t: 'key', k, shift: e.shiftKey, alt: e.altKey });
               }
             }, true);
+            // A Quote button over text selected in an agent's reply: the
+            // quote goes into the message box as an object.
+            (() => {
+              let pop = null;
+              const hide = () => { if (pop) pop.style.display = 'none'; };
+              const inAgent = (n) => { const el = n && (n.nodeType === 1 ? n : n.parentElement); return !!(el && el.closest && el.closest('.a-text') && !el.closest('.composer')); };
+              const show = () => {
+                const sel = window.getSelection();
+                if (!sel || sel.isCollapsed || !sel.rangeCount || !String(sel).trim()) return hide();
+                if (!inAgent(sel.anchorNode) && !inAgent(sel.focusNode)) return hide();
+                const r = sel.getRangeAt(0).getBoundingClientRect();
+                if (!r || (!r.width && !r.height)) return hide();
+                if (!pop) {
+                  pop = document.createElement('button');
+                  pop.className = 'quote-pop';
+                  pop.title = 'Quote it in your message';
+                  pop.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href=#lucide-message-square-quote></use></svg><span>Quote</span>';
+                  // Pressing it keeps the selection.
+                  pop.addEventListener('mousedown', (e) => e.preventDefault());
+                  pop.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const t = String(window.getSelection() || '').trim();
+                    if (t) dioxus.send({ t: 'quote', text: t });
+                    hide();
+                    window.getSelection()?.removeAllRanges();
+                  });
+                  document.body.appendChild(pop);
+                }
+                pop.style.display = 'flex';
+                const w = pop.offsetWidth || 76, h = pop.offsetHeight || 28;
+                const x = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
+                const y = r.top - h - 8 >= 8 ? r.top - h - 8 : r.bottom + 8;
+                pop.style.left = x + 'px';
+                pop.style.top = y + 'px';
+              };
+              document.addEventListener('mouseup', (e) => { if (pop && pop.contains(e.target)) return; setTimeout(show, 0); });
+              document.addEventListener('keyup', (e) => { if (e.shiftKey || e.key === 'Shift') setTimeout(show, 0); });
+              document.addEventListener('mousedown', (e) => { if (pop && !pop.contains(e.target)) hide(); });
+              document.addEventListener('scroll', hide, true);
+              document.addEventListener('selectionchange', () => { const s = window.getSelection(); if (!s || s.isCollapsed) hide(); });
+            })();
             // Paste images / files / long text into the composer.
             document.addEventListener('paste', (e) => {
               const t = e.target;
@@ -1116,6 +1157,18 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                 mime: Some("text/plain".into()),
                 text: Some(text),
             });
+            // Said once a run: how to paste it as text instead.
+            static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                app.toast("Long text was attached as a file. Ctrl+Shift+V pastes it as text.");
+            }
+        }
+        Some("paste-plain") => menubar::paste_into_focused(),
+        // The Quote button over agent text: an object in the chat's box.
+        Some("quote") => {
+            if let (Some(t), Some(id)) = (v["text"].as_str(), app.current_id()) {
+                app.ui.write().chip_inbox.push((Some(id), mentions::MentionChip::quote(t), None));
+            }
         }
         Some("size") => {
             let w = v["w"].as_f64().unwrap_or(1400.0);

@@ -1507,12 +1507,14 @@ pub fn short_path(p: &str) -> String {
 }
 
 pub fn title_from_prompt(prompt: &str) -> String {
+    // Larrier's context tokens (`@agent:<id>`, `@git:diff`) aren't words.
+    let word = |w: &&str| !w.starts_with("@agent:") && *w != "@git:diff";
     let line = prompt
         .lines()
         .map(|l| l.trim())
-        .find(|l| !l.is_empty() && !l.starts_with('<'))
+        .find(|l| !l.starts_with('<') && l.split_whitespace().any(|w| word(&w)))
         .unwrap_or("New Agent");
-    let words: Vec<&str> = line.split_whitespace().take(8).collect();
+    let words: Vec<&str> = line.split_whitespace().filter(word).take(8).collect();
     let mut t = words.join(" ");
     t = t.trim_end_matches(['.', ',', ':', ';']).to_string();
     let mut c = t.chars();

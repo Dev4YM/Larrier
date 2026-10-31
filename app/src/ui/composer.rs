@@ -9,7 +9,7 @@ use dioxus::prelude::*;
 use larrier_agents::harness::{HarnessItem, ItemKind};
 use larrier_core::{lsf::short_path, AgentKind, BusySend, Part, Protocol};
 
-use super::mentions::{MentionChip, MentionChipView};
+use super::mentions::MentionChip;
 use super::{Dropdown, MenuItem};
 use crate::icons::{Icon, I};
 use crate::logos::{agent_logo, model_logo, Logo};
@@ -202,9 +202,10 @@ pub fn Composer(
     let mut queue_open = use_signal(|| true);
     let mut q_drag = use_signal(|| None::<usize>);
     let mut q_over = use_signal(|| None::<usize>);
-    let q_edit = use_signal(|| None::<(u64, String, Vec<Part>)>);
+    let q_edit = use_signal(|| None::<(u64, String, Vec<Part>, Vec<MentionChip>)>);
     let mut send_menu = use_signal(|| false);
-    // Files, folders, chats, the diff and skills the prompt refers to, as chips.
+    // Files, folders, chats, the diff, skills and subagents the text refers
+    // to: each sits in the text as a marked token (see `mentions`).
     let mut mentions: Signal<Vec<MentionChip>> = use_signal(Vec::new);
     let plus_menu = use_signal(|| false);
     let mut model_menu = use_signal(|| false);
@@ -249,7 +250,7 @@ pub fn Composer(
             m.into_iter().map(|(_, t)| t).collect()
         };
         if !mine.is_empty() {
-            let mut loose: Vec<String> = Vec::new();
+            let mut add: Vec<String> = Vec::new();
             for t in mine {
                 let found = t
                     .trim()
@@ -257,17 +258,20 @@ pub fn Composer(
                     .and_then(|short| app.sessions.read().iter().find(|s| s.id.ends_with(short)).map(MentionChip::agent));
                 match found {
                     Some(chip) => {
-                        if !mentions.read().iter().any(|c| c.value == chip.value) {
+                        let have = mentions.read().iter().find(|c| c.kind == chip.kind && c.value == chip.value).cloned();
+                        let chip = have.unwrap_or_else(|| super::mentions::unique(&mentions.read(), chip));
+                        if !text.read().contains(&chip.marked()) {
+                            add.push(chip.marked());
                             mentions.write().push(chip);
                         }
                     }
-                    None => loose.push(t),
+                    None => add.push(t),
                 }
             }
-            if !loose.is_empty() {
+            if !add.is_empty() {
                 let cur = text.read().clone();
                 let sep = if cur.is_empty() || cur.ends_with(' ') || cur.ends_with('\n') { "" } else { " " };
-                text.set(format!("{cur}{sep}{} ", loose.join(" ")));
+                text.set(format!("{cur}{sep}{} ", add.join(" ")));
             }
             document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 30)"));
         }
@@ -342,6 +346,21 @@ pub fn Composer(
         Some(_) => sess.read().as_ref().map(|s| (s.run_as.clone(), s.fresh)).unwrap_or((None, false)),
         None => (app.draft.read().run_as.clone().filter(|_| agent == AgentKind::ClaudeCode), true),
     };
+    // The agent to run as sits in the text as an object until the chat starts.
+    let run_as_key = run_as.clone().filter(|_| fresh);
+    let agent_ra = agent.clone();
+    use_effect(use_reactive!(|run_as_key| {
+        let (mut text, mut mentions) = (text, mentions);
+        let Some(name) = run_as_key else { return };
+        let chip = MentionChip::run_as(&name, &agent_ra);
+        if text.peek().contains(&chip.marked()) {
+            return;
+        }
+        let rest = text.peek().clone();
+        mentions.write().retain(|c| c.kind != super::mentions::MentionKind::RunAs);
+        text.set(format!("{} {}", chip.marked(), rest.trim_start()));
+        mentions.write().push(chip);
+    }));
     // The agent's own modes, e.g. Claude Code Auto / Manual / Plan …
     let groups = mode_view(&app, &agent, [mode.clone(), permission.clone()]);
     let plan_id = plan_option(&agent);
@@ -359,11 +378,11 @@ pub fn Composer(
     };
     let atts = attachments.read().clone();
     let chips_now = mentions.read().clone();
-    let can_send = !elsewhere && (!text.read().trim().is_empty() || !atts.is_empty() || !chips_now.is_empty());
+    let can_send = !elsewhere && (!text.read().trim().is_empty() || !atts.is_empty());
     let quote = quote_memo();
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();
-    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || !chips_now.is_empty() || quote.is_some();
+    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty() || quote.is_some();
     // The harness's logo: "Cursor Agent · Opus 5.5" is Cursor, whoever made the model.
     let model_logo_svg = agent_logo(&agent);
     let (model_text, effort_text) = model_display(&app, &agent, &model, &effort);
@@ -425,34 +444,42 @@ pub fn Composer(
             None => app.draft.write().run_as = name,
         }
     };
-    // Apply a suggestion: the typed `@…` / `/…` becomes a chip, or a
-    // Larrier command runs.
+    // Apply a suggestion: the typed `@…` / `/…` becomes an object in the
+    // text, or a Larrier command runs.
     let apply = move |sg: Sugg, sid: Option<String>| {
         let mut text = text;
-        let mut mentions = mentions;
+        let mentions = mentions;
+        // The text without the `@…` / `/…` being typed.
+        let typed_cut = |t: &str| t.rfind(|c: char| c.is_whitespace() || c == super::mentions::CLOSE).map(|i| i + t[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1)).unwrap_or(0);
+        let put = move |chip: MentionChip| {
+            let (mut text, mut mentions) = (text, mentions);
+            let t = text.read().clone();
+            let cut = typed_cut(&t);
+            let have = mentions.read().iter().find(|c| c.kind == chip.kind && c.value == chip.value).cloned();
+            let chip = have.unwrap_or_else(|| super::mentions::unique(&mentions.read(), chip));
+            text.set(format!("{}{} ", &t[..cut], chip.marked()));
+            // Objects whose tokens are gone from the text are dropped.
+            let now = text.read().clone();
+            mentions.write().retain(|c| now.contains(&c.marked()));
+            if !mentions.read().iter().any(|c| c.kind == chip.kind && c.value == chip.value) {
+                mentions.write().push(chip);
+            }
+        };
         match sg.act {
-            SuggAct::Chip(chip) => {
-                let t = text.read().clone();
-                let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
-                text.set(t[..cut].to_string());
-                if !mentions.read().iter().any(|c| c.kind == chip.kind && c.value == chip.value) {
-                    mentions.write().push(chip);
-                }
-            }
+            SuggAct::Chip(chip) => put(chip),
             SuggAct::Larrier(cmd) => run_slash(cmd, sid),
-            SuggAct::Text(s) => {
-                let t = text.read().clone();
-                let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
-                text.set(format!("{}{s} ", &t[..cut]));
-            }
-            SuggAct::RunAs(name) => {
-                let t = text.read().clone();
-                let cut = t.rfind(|c: char| c.is_whitespace()).map(|i| i + 1).unwrap_or(0);
-                text.set(t[..cut].to_string());
+            SuggAct::RunAs(name, kind) => {
+                // One agent to run as: picking another replaces it.
+                let old: Vec<MentionChip> = mentions.read().iter().filter(|c| c.kind == super::mentions::MentionKind::RunAs).cloned().collect();
+                for c in old {
+                    let t = text.read().replace(&format!("{} ", c.marked()), "").replace(&c.marked(), "");
+                    text.set(t);
+                }
+                put(MentionChip::run_as(&name, &kind));
                 set_run_as(Some(name), sid);
             }
         }
-        document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
+        document::eval(&format!("setTimeout(() => {{ const el = document.getElementById('{input_id}'); if (el) {{ el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }} }}, 10)"));
     };
     // Choose agent (+ model). On an existing session this ports it. Cursor
     // stores the model's default variant; an effort the new model doesn't
@@ -535,28 +562,29 @@ pub fn Composer(
         let typed = text.read().clone();
         let a = at.read().clone();
         let chips = mentions.read().clone();
-        if typed.trim().is_empty() && a.is_empty() && chips.is_empty() {
-            return;
-        }
         let cwd = match &sid {
             Some(id) => app.peek_session(id, |s| s.cwd()).flatten(),
             None => app.draft.read().workspace.clone(),
         };
-        // Chips become what the agent reads: a leading /skill, @paths, and
+        // Objects become what the agent reads: a leading /skill, @paths, and
         // context blocks for chats and the diff.
-        let raw = super::mentions::to_prompt(&chips, &typed);
-        let t = expand_mentions(&app, &raw, cwd.as_deref());
+        let t = super::mentions::expand(&app, &chips, &typed, cwd.as_deref());
+        // Only the agent to run as: nothing to send yet.
+        if t.trim().is_empty() && a.is_empty() {
+            return;
+        }
         text.set(String::new());
         at.set(Vec::new());
         mentions.set(Vec::new());
         let editing = q_edit.read().clone();
-        if let Some((qid, draft, draft_atts)) = editing {
+        if let Some((qid, draft, draft_atts, draft_chips)) = editing {
             q_edit.set(None);
             if let Some(id) = &sid {
                 app.queue_update(id, qid, t, a);
             }
             text.set(draft);
             at.set(draft_atts);
+            mentions.set(draft_chips);
             return;
         }
         let agents = multi.read().clone();
@@ -586,24 +614,29 @@ pub fn Composer(
     let cancel_edit = move || {
         let mut q_edit = q_edit;
         let editing = q_edit.read().clone();
-        if let Some((_, draft, draft_atts)) = editing {
-            let (mut text, mut at) = (text, attachments);
+        if let Some((_, draft, draft_atts, draft_chips)) = editing {
+            let (mut text, mut at, mut mentions) = (text, attachments, mentions);
             q_edit.set(None);
             text.set(draft);
             at.set(draft_atts);
+            mentions.set(draft_chips);
         }
     };
     // Load a queued message into the box to edit; what was typed waits.
     let start_edit = move |q: crate::state::Queued| {
-        let (mut text, mut at, mut q_edit) = (text, attachments, q_edit);
-        let kept = q_edit.read().clone().map(|(_, d, da)| (d, da)).unwrap_or_else(|| (text.read().clone(), at.read().clone()));
-        q_edit.set(Some((q.id, kept.0, kept.1)));
-        text.set(q.text.clone());
+        let (mut text, mut at, mut q_edit, mut mentions) = (text, attachments, q_edit, mentions);
+        let kept = q_edit.read().clone().map(|(_, d, da, dc)| (d, da, dc)).unwrap_or_else(|| (text.read().clone(), at.read().clone(), mentions.read().clone()));
+        q_edit.set(Some((q.id, kept.0, kept.1, kept.2)));
+        // Its objects back as objects, not the text the agent reads.
+        let (t, chips) = super::mentions::to_edit(&q.text, &app.sessions.peek());
+        text.set(t);
+        mentions.set(chips);
         at.set(q.attachments.clone());
         document::eval(&format!("setTimeout(() => {{ const el = document.getElementById('{input_id}'); if (el) {{ el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }} }}, 30)"));
     };
     let sid_send = session_id.clone();
     let sid_key = session_id.clone();
+    let sid_input = session_id.clone();
     let first_group = groups.first().cloned();
     let suggs_k = suggs.clone();
     let sid_stop = session_id.clone();
@@ -749,7 +782,9 @@ pub fn Composer(
                                         span { class: "grip", Icon { i: I::Grip, size: 12 } }
                                         if let Some(src) = thumb { img { class: "q-thumb", src: "{src}" } }
                                         else if files > 0 { span { class: "q-file", Icon { i: I::Paperclip, size: 12 } } }
-                                        span { class: "t", dir: "auto", title: "{q.text}", "{q.text}" }
+                                        span { class: "t", dir: "auto", title: "{super::mentions::split_mentions(&q.text).0}",
+                                            super::mentions::PromptText { text: q.text.clone() }
+                                        }
                                         div { class: "q-acts",
                                             if running {
                                                 button { class: "q-steer", title: "Send it into the running turn",
@@ -791,31 +826,8 @@ pub fn Composer(
                         button { class: "icon-btn sm", onclick: move |_| app.ui.write().quote = None, Icon { i: I::X, size: 11 } }
                     }
                 }
-                // Who the chat runs as is picked here before it starts; after
-                // that the session rail says it.
-                if !atts.is_empty() || !chips_now.is_empty() || (fresh && run_as.is_some()) {
+                if !atts.is_empty() {
                     div { class: "thumb-row",
-                        if let Some(name) = run_as.clone().filter(|_| fresh) {
-                            span { class: "mention-chip run-as",
-                                title: if fresh { format!("This chat runs as your {name} agent: its instructions, tools and MCP servers") } else { format!("This chat runs as your {name} agent") },
-                                span { class: "ic", Icon { i: I::Orbit, size: 12, stroke: 1.6 } }
-                                span { class: "nm", "{name}" }
-                                if fresh {
-                                    button { class: "x", title: "Run as {agent.display_name()} itself",
-                                        onclick: {
-                                            let sid = session_id.clone();
-                                            move |e: MouseEvent| { e.stop_propagation(); set_run_as(None, sid.clone()); }
-                                        },
-                                        Icon { i: I::X, size: 10 }
-                                    }
-                                }
-                            }
-                        }
-                        for (i, c) in chips_now.iter().cloned().enumerate() {
-                            MentionChipView { key: "m{i}-{c.value}", chip: c,
-                                onremove: move |_| { if i < mentions.read().len() { mentions.write().remove(i); } },
-                            }
-                        }
                         for (i, a) in atts.iter().enumerate() {
                             match a {
                                 Part::Image { .. } => rsx! {
@@ -853,9 +865,14 @@ pub fn Composer(
                             }
                         }
                     }
+                    // The text box over a colored copy of its text: objects
+                    // (@file, /command, @chat...) show as pills in place.
+                    div { class: "tok-field c-text-wrap",
+                    super::mentions::TokenBackdrop { text: text(), chips: chips_now.clone() }
                     textarea {
                         id: "{input_id}",
-                        class: "c-text",
+                        class: "c-text tok-input",
+                        dir: "auto",
                         rows: if home { "3" } else { "1" },
                         placeholder: "{placeholder}",
                         value: "{text}",
@@ -864,6 +881,12 @@ pub fn Composer(
                             let v = e.value();
                             if v.is_empty() {
                                 overflow.set(false);
+                            }
+                            // Deleting the agent to run as runs the chat as the agent itself.
+                            let gone = mentions.read().iter().any(|c| c.kind == super::mentions::MentionKind::RunAs && !v.contains(&c.marked()));
+                            if gone {
+                                mentions.write().retain(|c| c.kind != super::mentions::MentionKind::RunAs);
+                                set_run_as(None, sid_input.clone());
                             }
                             text.set(v);
                             // Measure against the one-line width so the layout
@@ -889,14 +912,6 @@ pub fn Composer(
                             });
                         },
                         onkeydown: move |e| {
-                            // Backspace in an empty box removes the last chip.
-                            if e.key() == Key::Backspace && text.read().is_empty() {
-                                let n = mentions.read().len();
-                                if n > 0 {
-                                    mentions.write().truncate(n - 1);
-                                }
-                                return;
-                            }
                             if !suggs_k.is_empty() {
                                 match e.key() {
                                     Key::ArrowDown => { e.prevent_default(); hl.set((hl_i + 1) % suggs_k.len()); return; }
@@ -933,6 +948,7 @@ pub fn Composer(
                                 }
                             }
                         },
+                    }
                     }
                     // Shown only when a group is off its default (side by side
                     // in the one grid cell).
@@ -1542,15 +1558,12 @@ fn EnvPicker(open: Signal<bool>, worktree: bool, is_repo: bool, session: bool, l
 
 #[derive(Clone, PartialEq)]
 enum SuggAct {
-    /// Turn the token being typed into this chip.
+    /// Turn the token being typed into this object.
     Chip(MentionChip),
     /// Run a Larrier command.
     Larrier(&'static str),
-    /// Replace the token being typed with this text (an agent's own
-    /// syntax, like Claude Code's `@agent-Explore`).
-    Text(String),
     /// Run the new chat as this agent of the agent's own.
-    RunAs(String),
+    RunAs(String, AgentKind),
 }
 
 #[derive(Clone, PartialEq)]
@@ -1637,12 +1650,13 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
                 let own: Vec<Sugg> = subs
                     .iter()
                     .filter(|(n, _)| !matches!(n.as_str(), "general-purpose" | "Explore" | "Plan" | "statusline-setup" | "claude-code-guide" | "claude"))
-                    .map(|(name, desc)| Sugg { group: "Run as", icon: I::Orbit, logo, label: name.clone(), sub: desc.chars().take(80).collect(), act: SuggAct::RunAs(name.clone()) })
+                    .map(|(name, desc)| Sugg { group: "Run as", icon: I::Orbit, logo, label: name.clone(), sub: desc.chars().take(80).collect(), act: SuggAct::RunAs(name.clone(), agent.clone()) })
                     .collect();
                 out.splice(0..0, own);
             }
             for (name, desc) in subs {
-                out.push(Sugg { group: "Subagents", icon: I::Orbit, logo, label: format!("@agent-{name}"), sub: desc.chars().take(80).collect(), act: SuggAct::Text(format!("@agent-{name}")) });
+                let sub: String = desc.chars().take(80).collect();
+                out.push(Sugg { group: "Subagents", icon: I::Orbit, logo, label: format!("@agent-{name}"), sub: sub.clone(), act: SuggAct::Chip(MentionChip::subagent(&name, &sub)) });
             }
         }
         if "git".starts_with(&ql) || ql.starts_with("git") || "diff".starts_with(&ql) {
@@ -1702,34 +1716,6 @@ fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &Agen
     out
 }
 
-/// Expand `@agent:<id>` and `@git:diff` into context the agent can read.
-fn expand_mentions(app: &App, text: &str, cwd: Option<&str>) -> String {
-    let mut extra = String::new();
-    for tok in text.split_whitespace() {
-        if let Some(short) = tok.strip_prefix("@agent:") {
-            let found = app.sessions.read().iter().find(|s| s.id.ends_with(short)).map(|s| s.id.clone());
-            if let Some(id) = found {
-                if let Ok(s) = crate::state::store().load(&id) {
-                    let ctx = s.handoff_context(0, 24_000);
-                    extra.push_str(&format!("\n\n<agent_context title=\"{}\" agent=\"{}\">\n{}\n</agent_context>", s.title, s.agent.display_name(), ctx.trim()));
-                }
-            }
-        } else if tok == "@git:diff" {
-            if let Some(dir) = cwd {
-                let out = std::process::Command::new("git").args(["diff", "HEAD", "--no-color"]).current_dir(dir).output();
-                if let Ok(o) = out {
-                    let d = String::from_utf8_lossy(&o.stdout).to_string();
-                    let d: String = d.chars().take(60_000).collect();
-                    if !d.trim().is_empty() {
-                        extra.push_str(&format!("\n\n<git_diff>\n{d}\n</git_diff>"));
-                    }
-                }
-            }
-        }
-    }
-    format!("{text}{extra}")
-}
-
 const SLASH: &[(&str, &str)] = &[
     ("/plan", "Switch to Plan mode"),
     ("/agent", "Switch to Agent mode"),
@@ -1750,15 +1736,32 @@ fn mention_query(text: &str) -> Option<String> {
     if text.ends_with(char::is_whitespace) {
         return None;
     }
-    let token = text.rsplit(char::is_whitespace).next()?;
+    let token = text.rsplit(|c: char| c.is_whitespace() || c == super::mentions::CLOSE).next()?;
     let q = token.strip_prefix('@')?;
     (!q.contains('@')).then(|| q.to_string())
 }
 
-/// `/command` typed as the whole prompt.
+/// `/command` typed first (after any objects).
 fn slash_query(text: &str) -> Option<String> {
-    let t = text.strip_prefix('/')?;
-    (!t.contains(char::is_whitespace)).then(|| t.to_string())
+    let token = text.rsplit(|c: char| c.is_whitespace() || c == super::mentions::CLOSE).next()?;
+    let before = &text[..text.len() - token.len()];
+    let t = token.strip_prefix('/')?;
+    strip_tokens(before).trim().is_empty().then(|| t.to_string())
+}
+
+/// The text without its objects' tokens.
+fn strip_tokens(text: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for c in text.chars() {
+        match c {
+            super::mentions::OPEN => inside = true,
+            super::mentions::CLOSE => inside = false,
+            _ if !inside => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".next", "dist", "build", "__pycache__", ".venv", "venv", ".idea", ".turbo", ".cache", "vendor"];

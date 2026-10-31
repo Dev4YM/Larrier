@@ -356,9 +356,9 @@ pub fn Transcript(id: String) -> Element {
                                     }
                                 }
                             }
-                            "{q.text}"
+                            super::mentions::PromptText { text: q.text.clone() }
                         }
-                        div { class: "pending-note", super::Spinner { size: 10 } "Sending into this turn…" }
+                        div { class: "pending-note", super::loaders::Dots { size: 10 } "Sending into this turn…" }
                     }
                 }
                 if let Some(req) = permission {
@@ -564,9 +564,9 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
         return rsx! { div { class: "notice task-note", id: "m-{msg.id}", Icon { i: I::Bot, size: 12, stroke: 1.5 } "{note}" } };
     }
     let (quote, body) = split_quote(&text);
-    // Mentioned chats, files and skills show as chips, not as the raw tokens
-    // and context blocks that were sent to the agent.
-    let (body, chips) = super::mentions::split_mentions(&body);
+    // Mentioned chats, files and skills show as objects in place, not as the
+    // raw tokens and context blocks that were sent to the agent.
+    let plain = super::mentions::split_mentions(&body).0;
     let mid = msg.id.clone();
     let mut attachments: Vec<String> = msg
         .parts
@@ -586,7 +586,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
             _ => {}
         }
     }
-    let short = body.lines().count() <= 4 && body.len() < 360;
+    let short = plain.lines().count() <= 4 && plain.len() < 360;
     let text2 = text.clone();
     let (sid_e, mid_e) = (session_id.clone(), mid.clone());
     if editing() {
@@ -597,10 +597,12 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
             format!("{} · {}", s.agent.display_name(), m)
         });
         let resend = move |sid: &str, mid: &str| {
-            let (t, a) = {
+            let (t, a, chips) = {
                 let e = app.editing.peek();
-                (e.draft.clone(), e.attachments.clone())
+                (e.draft.clone(), e.attachments.clone(), e.mentions.clone())
             };
+            let cwd = app.peek_session(sid, |s| s.cwd()).flatten();
+            let t = super::mentions::expand(&app, &chips, &t, cwd.as_deref());
             app.set_edit(None);
             app.edit_and_resend(sid, mid, t, a);
         };
@@ -620,9 +622,12 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                             }
                         }
                     }
+                    div { class: "tok-field",
+                    super::mentions::TokenBackdrop { text: st.draft.clone(), chips: st.mentions.clone() }
                     textarea {
                         id: "edit-{msg.id}",
-                        class: "edit-input",
+                        class: "edit-input tok-input",
+                        dir: "auto",
                         value: "{st.draft}",
                         autofocus: true,
                         oninput: move |e| app.editing.write().draft = e.value(),
@@ -640,6 +645,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                                 resend(&sid_e, &mid_e);
                             }
                         },
+                    }
                     }
                     if st.attachments.iter().any(|a| matches!(a, Part::File { .. })) {
                         div { class: "attach-row",
@@ -726,13 +732,10 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                         }
                     }
                 }
-                if !chips.is_empty() {
-                    super::mentions::MentionChips { chips: chips.clone() }
-                }
                 if let Some(q) = quote {
                     span { class: "q", Icon { i: I::Quote, size: 13 } "\u{201c}{q}\u{201d} " }
                 }
-                "{body}"
+                super::mentions::PromptText { text: body.clone() }
                 if !attachments.is_empty() {
                     div { class: "attach-row",
                         for a in attachments {

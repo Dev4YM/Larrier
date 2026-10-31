@@ -1135,18 +1135,6 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .mode-row .mo-check { width: 16px; flex-shrink: 0; display: flex; justify-content: center; color: var(--blue); padding-top: 2px; }
 .mode-row .mo-num { width: 12px; flex-shrink: 0; text-align: right; font-size: 11.5px; color: var(--fg-3); padding-top: 2px; font-variant-numeric: tabular-nums; }
 
-/* Running indicator: an accent arc sweeping around a faint ring. */
-.spin { display: inline-block; flex-shrink: 0; vertical-align: middle; color: var(--accent-c, var(--blue)); transform-origin: 50% 50%; animation: spin-turn 1.25s linear infinite; }
-.spin-track { stroke: currentColor; opacity: .16; }
-.spin-arc { stroke: currentColor; stroke-dasharray: 22 78; animation: spin-sweep 1.5s ease-in-out infinite; }
-@keyframes spin-turn { to { transform: rotate(360deg); } }
-@keyframes spin-sweep {
-  0% { stroke-dasharray: 8 92; stroke-dashoffset: 0; }
-  50% { stroke-dasharray: 52 48; stroke-dashoffset: -16; }
-  100% { stroke-dasharray: 8 92; stroke-dashoffset: -100; }
-}
-.app.no-motion .spin { animation: spin-turn 2.4s linear infinite !important; }
-.app.no-motion .spin-arc { animation: none !important; stroke-dasharray: 30 70; }
 
 /* Unread chats: the dot (or a badge on the agent logo) in the accent color. */
 .chat-row.unread .bullet .pt { width: 7px; height: 7px; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c, var(--blue)) 18%, transparent); }
@@ -1626,6 +1614,23 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .l-caret.blink { animation: caret-blink 1.06s steps(1) infinite; }
 @keyframes caret-blink { 50% { opacity: 0; } }
 .l-caret-on { caret-color: transparent !important; }
+
+/* Objects in text (@file, /command, @chat, @agent): colored pills in the
+   text itself. Text boxes draw theirs from a copy of the text behind the
+   box (its own text is invisible), so a pill takes no room of its own. */
+.tok { --tok-bg: var(--chip); --tok-fg: var(--fg); background: var(--tok-bg); color: var(--tok-fg); border-radius: 5px;
+  box-shadow: -2px 0 0 var(--tok-bg), 2px 0 0 var(--tok-bg); cursor: default; }
+.tok.skill { --tok-bg: color-mix(in srgb, var(--accent-c, var(--blue)) 14%, transparent); --tok-fg: var(--accent-c, var(--blue)); }
+.tok.agent { --tok-bg: color-mix(in srgb, var(--green) 15%, transparent); --tok-fg: color-mix(in srgb, var(--green) 82%, var(--fg)); }
+.tok.run-as { --tok-bg: color-mix(in srgb, var(--violet, #8b5cf6) 14%, transparent); --tok-fg: var(--violet, #7c3aed); }
+.tok.diff { --tok-bg: color-mix(in srgb, var(--amber) 16%, transparent); --tok-fg: color-mix(in srgb, var(--amber) 78%, var(--fg)); }
+.tok-field { position: relative; min-width: 0; }
+.cgrid .tok-field { grid-area: text; width: 100%; }
+.tok-field > textarea.tok-input { position: relative; z-index: 1; color: transparent !important; caret-color: var(--fg); background: transparent; }
+.tok-input::selection { color: transparent; background: color-mix(in srgb, var(--blue) 26%, transparent); }
+.tok-back { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; overflow: hidden; box-sizing: border-box; border-style: solid; border-color: transparent;
+  white-space: pre-wrap; overflow-wrap: break-word; color: var(--fg); user-select: none; }
+.queue-row .t .tok { box-shadow: none; padding: 0 2px; }
 
 /* Loaders (ui/loaders.rs): Dots for a tool at work, Seal Stamp for a
    subagent in the background, Ink Orbit for a chat at work and loading. */

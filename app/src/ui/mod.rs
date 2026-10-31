@@ -261,6 +261,116 @@ pub fn Root() -> Element {
               document.addEventListener('transitionrun', () => { if (el) follow(500); }, true);
               document.addEventListener('animationstart', () => { if (el) follow(500); }, true);
             }
+            // Objects in text boxes (see mentions.rs): a token between two
+            // invisible marks, drawn as a pill by a copy of the text behind
+            // the box. One Backspace or Delete takes it whole, the cursor
+            // never lands inside one, and copies leave the marks out.
+            if (!window.__larrierTok) {
+              window.__larrierTok = true;
+              const O = '⁣', C = '⁤', MARKS = /[⁣⁤]/g;
+              const isTok = (el) => !!el && el.tagName === 'TEXTAREA' && el.classList.contains('tok-input');
+              const backOf = (el) => el.parentElement && el.parentElement.querySelector(':scope > .tok-back');
+              const COPY = ['fontStyle','fontVariant','fontWeight','fontStretch','fontSize','lineHeight','fontFamily','fontKerning','fontFeatureSettings','letterSpacing','wordSpacing',
+                'textAlign','textIndent','tabSize','direction','unicodeBidi','wordBreak','overflowWrap','paddingTop','paddingRight','paddingBottom','paddingLeft',
+                'borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth'];
+              // Lay the copy out exactly like the box (its width without a scrollbar).
+              const sync = (el) => {
+                const b = backOf(el);
+                if (!b) return;
+                const cs = getComputedStyle(el);
+                for (const p of COPY) b.style[p] = cs[p];
+                b.style.left = el.offsetLeft + 'px';
+                b.style.top = el.offsetTop + 'px';
+                b.style.width = (el.clientWidth + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0)) + 'px';
+                b.style.height = el.offsetHeight + 'px';
+                b.scrollTop = el.scrollTop;
+                b.scrollLeft = el.scrollLeft;
+              };
+              const later = (el) => requestAnimationFrame(() => sync(el));
+              const ro = new ResizeObserver((es) => es.forEach(e => sync(e.target)));
+              const init = (el) => {
+                if (el.dataset.tok) return;
+                el.dataset.tok = '1';
+                ro.observe(el);
+                const b = backOf(el);
+                // The copy's text changes after the box's (when the app re-renders).
+                if (b) new MutationObserver(() => sync(el)).observe(b, { childList: true, subtree: true, characterData: true });
+                sync(el);
+              };
+              const scan = () => document.querySelectorAll('textarea.tok-input:not([data-tok])').forEach(init);
+              setInterval(scan, 700);
+              document.addEventListener('focusin', (e) => { if (isTok(e.target)) { init(e.target); later(e.target); } });
+              document.addEventListener('input', (e) => { if (isTok(e.target)) later(e.target); }, true);
+              document.addEventListener('scroll', (e) => { if (isTok(e.target)) sync(e.target); }, true);
+              // The object around position i, as [start, end), if i is inside one.
+              const inside = (v, i) => {
+                const o = v.lastIndexOf(O, i - 1);
+                if (o < 0 || v.lastIndexOf(C, i - 1) > o) return null;
+                const c = v.indexOf(C, o);
+                return c >= i ? [o, c + 1] : null;
+              };
+              document.addEventListener('keydown', (e) => {
+                const el = e.target;
+                if (!isTok(el) || e.isComposing || (e.key !== 'Backspace' && e.key !== 'Delete')) return;
+                const v = el.value, s = el.selectionStart, en = el.selectionEnd;
+                let r = null;
+                if (s !== en) {
+                  const a = inside(v, s), b = inside(v, en);
+                  if (a || b) r = [a ? a[0] : s, b ? b[1] : en];
+                } else if (e.key === 'Backspace' && v[s - 1] === C) {
+                  r = [v.lastIndexOf(O, s - 1), s];
+                } else if (e.key === 'Delete' && v[s] === O) {
+                  r = [s, v.indexOf(C, s) + 1];
+                } else {
+                  r = inside(v, s);
+                }
+                if (!r || r[0] < 0 || r[1] <= r[0]) return;
+                e.preventDefault();
+                // The space it was put in with goes too.
+                if (v[r[1]] === ' ' && (r[0] === 0 || /\s/.test(v[r[0] - 1]))) r[1]++;
+                el.setSelectionRange(r[0], r[1]);
+                document.execCommand('delete');
+              }, true);
+              // The cursor steps over an object; a selection takes it whole.
+              const lastAt = new WeakMap();
+              document.addEventListener('selectionchange', () => {
+                const el = document.activeElement;
+                if (!isTok(el)) return;
+                const v = el.value, s = el.selectionStart, en = el.selectionEnd;
+                const prev = lastAt.has(el) ? lastAt.get(el) : s;
+                if (v.indexOf(O) >= 0) {
+                  if (s === en) {
+                    const t = inside(v, s);
+                    if (t) {
+                      const to = prev <= t[0] ? t[1] : prev >= t[1] ? t[0] : (s - t[0] <= t[1] - s ? t[0] : t[1]);
+                      el.setSelectionRange(to, to);
+                    }
+                  } else {
+                    const a = inside(v, s), b = inside(v, en);
+                    if (a || b) el.setSelectionRange(a ? a[0] : s, b ? b[1] : en, el.selectionDirection);
+                  }
+                }
+                lastAt.set(el, el.selectionStart);
+              });
+              const marked = (el) => /[⁣⁤]/.test(el.value.slice(el.selectionStart, el.selectionEnd));
+              for (const kind of ['copy', 'cut']) {
+                document.addEventListener(kind, (e) => {
+                  const el = document.activeElement;
+                  if (!isTok(el) || !marked(el)) return;
+                  e.preventDefault();
+                  e.clipboardData.setData('text/plain', el.value.slice(el.selectionStart, el.selectionEnd).replace(MARKS, ''));
+                  if (kind === 'cut') document.execCommand('delete');
+                }, true);
+              }
+              document.addEventListener('paste', (e) => {
+                const el = e.target;
+                const t = e.clipboardData && e.clipboardData.getData('text/plain');
+                if (!isTok(el) || !t || !MARKS.test(t)) return;
+                MARKS.lastIndex = 0;
+                e.preventDefault();
+                document.execCommand('insertText', false, t.replace(MARKS, ''));
+              }, true);
+            }
             // The agents' browser in the Browser tab: clicks, scrolls and
             // keys on its picture go to the page (scaled to its size).
             if (!window.__larrierBrowser) {
@@ -1324,17 +1434,6 @@ pub fn glyph_color(hex: &str, dark: bool) -> String {
     }
 }
 
-/// The running indicator: an accent arc that sweeps and breathes around a
-/// faint ring. With Reduce Motion it only turns, slowly.
-#[component]
-pub fn Spinner(#[props(default = 14)] size: u32) -> Element {
-    rsx! {
-        svg { class: "spin", width: "{size}", height: "{size}", view_box: "0 0 16 16", role: "img", "aria-label": "Running",
-            circle { class: "spin-track", cx: "8", cy: "8", r: "6", fill: "none", stroke_width: "2" }
-            circle { class: "spin-arc", cx: "8", cy: "8", r: "6", fill: "none", stroke_width: "2", stroke_linecap: "round", "pathLength": "100" }
-        }
-    }
-}
 
 /// Children that open and close by growing and shrinking (and fading).
 /// They stay mounted until the close has played out, then leave the page.

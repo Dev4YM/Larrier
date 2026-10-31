@@ -245,6 +245,8 @@ pub struct EditState {
     pub msg: Option<String>,
     pub original: String,
     pub draft: String,
+    /// The objects (@file, /skill, @chat...) the draft's text holds.
+    pub mentions: Vec<crate::ui::mentions::MentionChip>,
     /// The prompt's images and files, as they will be resent.
     pub attachments: Vec<Part>,
     pub original_attachments: Vec<Part>,
@@ -752,7 +754,11 @@ impl App {
     /// Switch editing without asking.
     pub fn set_edit(mut self, target: Option<EditTarget>) {
         self.editing.set(match target {
-            Some((id, text, atts)) => EditState { msg: Some(id), original: text.clone(), draft: text, attachments: atts.clone(), original_attachments: atts, confirm: None },
+            Some((id, text, atts)) => {
+                // Its objects come back as objects, not the text the agent read.
+                let (draft, mentions) = crate::ui::mentions::to_edit(&text, &self.sessions.peek());
+                EditState { msg: Some(id), original: draft.clone(), draft, mentions, attachments: atts.clone(), original_attachments: atts, confirm: None }
+            }
             None => EditState::default(),
         });
     }
@@ -1889,7 +1895,9 @@ impl App {
 
     /// Copy text to the system clipboard.
     pub fn copy_text(self, text: &str) {
-        match arboard::Clipboard::new().and_then(|mut c| c.set_text(text.to_string())) {
+        // Objects' invisible marks (see ui::mentions) stay in the text box.
+        let text: String = text.chars().filter(|c| !matches!(*c, crate::ui::mentions::OPEN | crate::ui::mentions::CLOSE)).collect();
+        match arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
             Ok(()) => {}
             Err(e) => self.toast_err(format!("Copy failed: {e}")),
         }

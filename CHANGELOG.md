@@ -5,6 +5,11 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.19 — 2026-10-31
+
+### Fixed
+
+- A tab opened from a link gets its page's name
 ## 0.1.18 — 2026-10-31
 
 ### New

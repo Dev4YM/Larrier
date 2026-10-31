@@ -1625,9 +1625,9 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .tok.diff { --tok-bg: color-mix(in srgb, var(--amber) 16%, transparent); --tok-fg: color-mix(in srgb, var(--amber) 78%, var(--fg)); }
 .tok-field { position: relative; min-width: 0; }
 .cgrid .tok-field { grid-area: text; width: 100%; }
-.tok-field > textarea.tok-input { position: relative; z-index: 1; color: transparent !important; caret-color: var(--fg); background: transparent; }
+.tok-field > textarea.tok-input { display: block; position: relative; z-index: 1; color: transparent !important; caret-color: var(--fg); background: transparent; }
 .tok-input::selection { color: transparent; background: color-mix(in srgb, var(--blue) 26%, transparent); }
-.tok-back { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; overflow: hidden; box-sizing: border-box; border-style: solid; border-color: transparent;
+.tok-back { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; overflow: hidden; box-sizing: border-box; border: 0 solid transparent; margin: 0;
   white-space: pre-wrap; overflow-wrap: break-word; color: var(--fg); user-select: none; }
 .queue-row .t .tok { box-shadow: none; padding: 0 2px; }
 .spell-fix .fix { font-weight: 600; }

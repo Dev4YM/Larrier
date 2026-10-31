@@ -291,6 +291,7 @@ pub fn Root() -> Element {
                 b.style.height = el.offsetHeight + 'px';
                 b.scrollTop = el.scrollTop;
                 b.scrollLeft = el.scrollLeft;
+                b.dataset.synced = '1';
               };
               const later = (el) => requestAnimationFrame(() => sync(el));
               const ro = new ResizeObserver((es) => es.forEach(e => sync(e.target)));
@@ -303,7 +304,14 @@ pub fn Root() -> Element {
                 if (b) new MutationObserver(() => sync(el)).observe(b, { childList: true, subtree: true, characterData: true });
                 sync(el);
               };
-              const scan = () => document.querySelectorAll('textarea.tok-input:not([data-tok])').forEach(init);
+              // Styled the moment it appears (before it's painted): a new box,
+              // or a new copy behind one (an edit card opening).
+              const scan = () => document.querySelectorAll('textarea.tok-input').forEach((el) => {
+                if (!el.dataset.tok) init(el);
+                const b = backOf(el);
+                if (b && !b.dataset.synced) sync(el);
+              });
+              new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
               setInterval(scan, 700);
               document.addEventListener('focusin', (e) => { if (isTok(e.target)) { init(e.target); later(e.target); } });
               document.addEventListener('input', (e) => { if (isTok(e.target)) later(e.target); }, true);

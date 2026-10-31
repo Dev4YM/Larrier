@@ -605,6 +605,9 @@ select.input { cursor: pointer; padding-right: 4px; }
 .chat-row .more { position: absolute; right: 6px; display: none; }
 .chat-row:hover .more { display: flex; }
 .chat-row:hover .tm { visibility: hidden; }
+/* The new agent draft: gray, marked [Draft]. */
+.chat-row.draft .t, .chat-row.draft .bullet { color: var(--fg-3); }
+.chat-row.draft .bullet .pt { background: transparent; border: 1px dashed var(--fg-4); }
 .chat-sub { font-size: 11px; color: var(--fg-3); padding: 0 10px 4px 36px; margin-top: -4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .show-more { padding: 6px 10px 6px 36px; font-size: 12px; color: var(--fg-3); width: 100%; text-align: left; }
 .side-profile { display: flex; align-items: center; gap: 10px; padding: 10px 12px 12px 14px; flex-shrink: 0; }

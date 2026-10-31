@@ -13,6 +13,7 @@ use dioxus::html::input_data::MouseButton;
 
 use super::{AgentGlyph, Dropdown, MenuItem};
 use crate::icons::{Icon, I};
+use crate::keep::DRAFT_ID;
 use crate::state::{project_key, rel_time, use_app, use_ui, user_name, CtxMenu, SettingsTab, View, HOME_KEY};
 
 const PAGE: usize = 5;
@@ -38,6 +39,20 @@ fn sort_items(items: &mut [SessionSummary], sort: SidebarSort) {
         SidebarSort::Created => items.sort_by(|a, b| b.created_at.cmp(&a.created_at)),
         SidebarSort::Name => items.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase())),
     }
+    // The new agent draft heads its project.
+    items.sort_by_key(|s| s.id != DRAFT_ID);
+}
+
+/// The new agent draft as a sidebar row: in the project it would start in.
+fn draft_row(row: &crate::keep::HomeRow, d: &crate::state::Draft) -> SessionSummary {
+    let ws = d.workspace.clone().map(larrier_core::WorkspaceRef::from_path);
+    let mut s = larrier_core::Session::new(d.agent.clone(), ws).summary();
+    s.id = DRAFT_ID.to_string();
+    s.title = row.title.clone();
+    s.created_at = row.at;
+    s.updated_at = row.at;
+    s.active_at = Some(row.at);
+    s
 }
 
 /// Group by agent instead of repository.
@@ -169,7 +184,14 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
             })
             .collect()
     };
-    let rest: Vec<SessionSummary> = filtered.clone();
+    let mut rest: Vec<SessionSummary> = filtered.clone();
+    // A message left on the new agent screen, as a draft.
+    if let Some(row) = crate::keep::HOME_ROW() {
+        let d = draft_row(&row, &app.draft.read());
+        if query.is_empty() || d.title.to_lowercase().contains(&query) {
+            rest.insert(0, d);
+        }
+    }
     let (pinned, repos) = if group == SidebarGroup::Agent {
         let pinned: Vec<SessionSummary> = rest.iter().filter(|s| s.pinned).cloned().collect();
         (pinned, build_agent_groups(&rest, sort))
@@ -289,7 +311,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                             name: r.name.clone(),
                             path: r.path.clone(),
                             items: r.items.clone(),
-                            default_open: ctx.searching || selected_repo.as_deref() == Some(r.key.as_str()) || (!r.home && i < 3 && (chrono::Utc::now() - r.latest).num_days() < OPEN_IF_ACTIVE_WITHIN_DAYS),
+                            default_open: ctx.searching || selected_repo.as_deref() == Some(r.key.as_str()) || r.items.iter().any(|s| s.id == DRAFT_ID) || (!r.home && i < 3 && (chrono::Utc::now() - r.latest).num_days() < OPEN_IF_ACTIVE_WITHIN_DAYS),
                             ctx: ctx.clone(),
                             home: r.home,
                             agent: r.agent.clone(),
@@ -375,7 +397,7 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
     let user_choice = use_ui(move |u| if u.repo_open.contains(&rk) { Some(true) } else if u.repo_closed.contains(&rk) { Some(false) } else { None })();
     let open = user_choice.unwrap_or(default_open);
     let k = rkey.clone();
-    let count = items.len();
+    let count = items.iter().filter(|s| s.id != DRAFT_ID).count();
     let title = path.clone().unwrap_or_else(|| if agent.is_some() { name.clone() } else { "Chats without a project".into() });
     let drag = if draggable { rkey.clone() } else { String::new() };
     rsx! {
@@ -428,7 +450,7 @@ fn AgentSub(pkey: String, agent: AgentKind, items: Vec<SessionSummary>, ctx: Sid
     let key = format!("{pkey}|{}", agent.id());
     let k2 = key.clone();
     let open = !use_ui(move |u| u.repo_closed.contains(&k2))();
-    let count = items.len();
+    let count = items.iter().filter(|s| s.id != DRAFT_ID).count();
     rsx! {
         div { class: "agent-sub",
             div { class: if open { "agent-sub-row open" } else { "agent-sub-row" }, role: "button",
@@ -461,8 +483,47 @@ fn Rows(items: Vec<SessionSummary>, ctx: SideCtx) -> Element {
     }
 }
 
+/// The new agent draft: gray, marked [Draft]; it opens the new agent screen
+/// with the message as it was left.
+#[component]
+fn DraftRow(s: SessionSummary, logo: bool) -> Element {
+    let mut app = use_app();
+    let here = *app.view.read() == View::Home;
+    let tip = format!("Draft · {}\n{}", s.agent.display_name(), s.title);
+    rsx! {
+        div {
+            class: if here { "chat-row draft selected" } else { "chat-row draft" },
+            role: "button",
+            title: "{tip}",
+            onclick: move |_| app.new_agent(),
+            oncontextmenu: move |e| e.prevent_default(),
+            span { class: "bullet",
+                if logo { AgentGlyph { kind: s.agent.clone() } } else { span { class: "pt" } }
+            }
+            span { class: "t", dir: "auto",
+                span { class: "draft-tag", "[Draft] " }
+                "{s.title}"
+            }
+            if !here {
+                div { class: "more",
+                    button { class: "icon-btn sm", style: "background: var(--selected);", title: "Discard the draft",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            crate::keep::discard_home();
+                        },
+                        Icon { i: I::X, size: 13 }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
+    if s.id == DRAFT_ID {
+        return rsx! { DraftRow { s, logo } };
+    }
     let mut app = use_app();
     let running = ctx.running.contains(&s.id);
     let selected = ctx.selected.as_deref() == Some(s.id.as_str());

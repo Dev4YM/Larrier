@@ -5,6 +5,15 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.18 — 2026-10-31
+
+### New
+
+- Google Chrome runs the Browser tab
+- New tabs open on New Tab
+- Drag a page into a chat as context
+- Ask Claude Code what a chat's context is made of
+- Two rings under the chat's box, plan usage and context
 ## 0.1.17 — 2026-10-31
 
 ### Fixed

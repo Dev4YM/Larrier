@@ -73,6 +73,8 @@ icons! {
     Folder => "folder",
     FolderOpen => "folder-open",
     Check => "check",
+    Spell => "spell-check",
+    BookPlus => "book-plus",
     CircleCheck => "circle-check",
     Circle => "circle",
     ArrowUp => "arrow-up",

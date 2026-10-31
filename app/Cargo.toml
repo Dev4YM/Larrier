@@ -39,5 +39,9 @@ notify-rust = "4"
 base64 = "0.22"
 sha2.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# Already built for the webview: Windows' spell checker for the right-click menu.
+windows = { version = "0.61", features = ["Win32_Globalization", "Win32_System_Com"] }
+
 [build-dependencies]
 winresource = "0.1"

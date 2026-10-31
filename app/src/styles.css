@@ -1632,6 +1632,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .tok-back { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; overflow: hidden; box-sizing: border-box; border-style: solid; border-color: transparent;
   white-space: pre-wrap; overflow-wrap: break-word; color: var(--fg); user-select: none; }
 .queue-row .t .tok { box-shadow: none; padding: 0 2px; }
+.spell-fix .fix { font-weight: 600; }
 
 /* Loaders (ui/loaders.rs): Dots for a tool at work, Seal Stamp for a
    subagent in the background, Ink Orbit for a chat at work and loading. */

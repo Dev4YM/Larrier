@@ -297,6 +297,17 @@ pub struct GlobalCtx {
     pub code: Option<String>,
     pub path: Option<String>,
     pub image: Option<String>,
+    /// A misspelled word right-clicked in a text box.
+    pub spell: Option<Misspelling>,
+}
+
+/// A misspelled word in a text box: where it is and what it might be.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Misspelling {
+    pub word: String,
+    pub start: usize,
+    pub end: usize,
+    pub suggestions: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Debug)]

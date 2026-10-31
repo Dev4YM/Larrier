@@ -14,6 +14,7 @@ mod markdown;
 mod models_sync;
 mod notify;
 mod quota;
+mod spell;
 mod state;
 mod ui;
 mod update;

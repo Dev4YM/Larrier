@@ -626,9 +626,15 @@ pub fn Root() -> Element {
               const a = t.closest('a[href]');
               const pre = t.closest('pre');
               const pathEl = t.closest('[data-path]');
+              // The webview selects a misspelled word when it's right-clicked:
+              // the menu offers its corrections.
+              let spell = null;
+              if (ed && typeof ed.selectionStart === 'number' && ed.spellcheck !== false && /^[\p{L}\p{M}'\u2019]{2,40}$/u.test(sel)) {
+                spell = { word: sel, start: ed.selectionStart, end: ed.selectionEnd };
+              }
               const msg = { t: 'ctx', x: e.clientX, y: e.clientY, editable: !!ed, selection: sel.slice(0, 200000),
                 link: a ? a.href : null, code: pre ? pre.innerText.slice(0, 500000) : null,
-                path: pathEl ? pathEl.getAttribute('data-path') : null, image: t.tagName === 'IMG' ? t.src : null };
+                path: pathEl ? pathEl.getAttribute('data-path') : null, image: t.tagName === 'IMG' ? t.src : null, spell };
               if (later) setTimeout(() => dioxus.send(msg), 0); else dioxus.send(msg);
             }, true);
             // Drag a chat (sidebar row or tab) onto a drop target. Pointer
@@ -1065,10 +1071,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
         }
         Some("ctx") => {
             let s = |k: &str| v[k].as_str().map(|x| x.to_string()).filter(|x| !x.is_empty());
-            let mut ui = app.ui.write();
-            ui.ctx = None;
-            ui.menubar = None;
-            ui.gctx = Some(crate::state::GlobalCtx {
+            let g = crate::state::GlobalCtx {
                 x: v["x"].as_f64().unwrap_or(0.0),
                 y: v["y"].as_f64().unwrap_or(0.0),
                 editable: v["editable"].as_bool().unwrap_or(false),
@@ -1077,7 +1080,27 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                 code: s("code"),
                 path: s("path"),
                 image: s("image"),
-            });
+                spell: None,
+            };
+            let word = v["spell"]["word"].as_str().map(|w| (w.to_string(), v["spell"]["start"].as_u64().unwrap_or(0) as usize, v["spell"]["end"].as_u64().unwrap_or(0) as usize));
+            {
+                let mut ui = app.ui.write();
+                ui.ctx = None;
+                ui.menubar = None;
+            }
+            match word {
+                // Windows' checker answers in a moment; the menu opens with its answer.
+                Some((w, start, end)) => {
+                    spawn(async move {
+                        let w2 = w.clone();
+                        let found = tokio::task::spawn_blocking(move || crate::spell::suggest(&w2)).await.ok().flatten();
+                        let mut g = g;
+                        g.spell = found.map(|suggestions| crate::state::Misspelling { word: w, start, end, suggestions });
+                        app.ui.write().gctx = Some(g);
+                    });
+                }
+                None => app.ui.write().gctx = Some(g),
+            }
         }
         _ => {}
     }

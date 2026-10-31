@@ -646,6 +646,35 @@ pub fn GlobalMenu() -> Element {
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().gctx = None; },
         }
         div { id: "g-menu", class: "menu ctx-menu", style: "left: {x}px; top: {y}px; visibility: hidden;",
+            if let Some(sp) = c.spell.clone() {
+                // Corrections for the misspelled word, as Chrome offers them.
+                if sp.suggestions.is_empty() {
+                    button { class: "menu-item disabled", span { class: "muted", Icon { i: I::Spell, size: 14 } } span { "No spelling suggestions" } }
+                }
+                for (i, w) in sp.suggestions.iter().cloned().enumerate() {
+                    button { key: "sp{i}", class: "menu-item spell-fix",
+                        onclick: move |_| {
+                            app.ui.write().gctx = None;
+                            document::eval(&format!(
+                                "const el = window.__larrierCtx; if (el) {{ el.focus(); el.setSelectionRange({}, {}); document.execCommand('insertText', false, {}); }}",
+                                sp.start, sp.end, serde_json::to_string(&w).unwrap_or_default()
+                            ));
+                        },
+                        span { class: "muted", if i == 0 { Icon { i: I::Spell, size: 14 } } }
+                        span { class: "fix", "{w}" }
+                    }
+                }
+                {item("Add to Dictionary", I::BookPlus, "", true, Box::new({
+                    let w = sp.word.clone();
+                    move || {
+                        if crate::spell::add(&w) {
+                            // The underline goes once the box checks its text again.
+                            document::eval("const el = window.__larrierCtx; if (el) { el.spellcheck = false; requestAnimationFrame(() => { el.spellcheck = true; }); }");
+                        }
+                    }
+                }))}
+                div { class: "menu-sep" }
+            }
             if c.editable {
                 {item("Undo", I::Undo, "Ctrl+Z", true, Box::new(|| super::menubar::edit_command("undo")))}
                 {item("Redo", I::Refresh, "Ctrl+Y", true, Box::new(|| super::menubar::edit_command("redo")))}

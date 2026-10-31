@@ -1624,7 +1624,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .update-btn.busy { cursor: default; font-variant-numeric: tabular-nums; }
 
 /* The gliding typing cursor (drawn over text fields while motion is on). */
-.l-caret { position: fixed; left: 0; top: 0; width: 2px; border-radius: 1px; pointer-events: none; z-index: 2500; visibility: hidden;
+.l-caret { position: fixed; left: 0; top: 0; width: 1px; pointer-events: none; z-index: 2500; visibility: hidden;
   transition: transform .08s ease-out; will-change: transform; }
 .l-caret.snap { transition: none; }
 .l-caret.blink { animation: caret-blink 1.06s steps(1) infinite; }

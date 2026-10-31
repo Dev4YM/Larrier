@@ -342,6 +342,7 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
             if !files.is_empty() || ahead > 0 {
                 div { class: "commit-box",
                     textarea {
+                        dir: "auto",
                         placeholder: "{subject_hint}",
                         title: "Leave empty to use the chat title with the agent's summary as the body",
                         value: "{commit_msg}",

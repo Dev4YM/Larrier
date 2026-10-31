@@ -625,7 +625,7 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                     }
 
                     span { class: "k top", "Instructions" }
-                    textarea { placeholder: "What should the agent do each time it runs?", value: "{cur.prompt}",
+                    textarea { dir: "auto", placeholder: "What should the agent do each time it runs?", value: "{cur.prompt}",
                         oninput: move |e| a.write().prompt = e.value() }
                 }
                 div { class: "modal-foot",

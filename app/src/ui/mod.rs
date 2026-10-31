@@ -129,12 +129,52 @@ pub fn Root() -> Element {
               const caret = document.createElement('div');
               caret.className = 'l-caret';
               document.body.appendChild(caret);
+              // A copy of the field's text laid out the same way, to find
+              // where its cursor is.
               const mirror = document.createElement('div');
               mirror.setAttribute('aria-hidden', 'true');
-              mirror.style.cssText = 'position:absolute;visibility:hidden;top:0;left:-99999px;overflow:hidden;';
               document.body.appendChild(mirror);
-              const PROPS = ['boxSizing','width','borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth','paddingTop','paddingRight','paddingBottom','paddingLeft',
-                'fontStyle','fontVariant','fontWeight','fontStretch','fontSize','lineHeight','fontFamily','textAlign','textTransform','textIndent','letterSpacing','wordSpacing','tabSize','direction'];
+              const PROPS = ['paddingTop','paddingRight','paddingBottom','paddingLeft','fontStyle','fontVariant','fontWeight','fontStretch','fontSize','lineHeight','fontFamily',
+                'fontKerning','fontFeatureSettings','fontVariationSettings','textAlign','textTransform','textIndent','letterSpacing','wordSpacing','tabSize','direction','unicodeBidi','wordBreak','overflowWrap'];
+              const rng = document.createRange();
+              const rects = (t, a, b) => { rng.setStart(t, a); rng.setEnd(t, b); return [...rng.getClientRects()]; };
+              // Letters of right-to-left scripts (Hebrew, Arabic, Syriac, Thaana, N'Ko...).
+              const RTL = /[\u0590-\u05FF\u0608\u060B\u060D\u061B-\u064A\u066D-\u066F\u0671-\u06D5\u06E5\u06E6\u06EE\u06EF\u06FA-\u0710\u0712-\u072F\u074D-\u07A5\u07B1-\u07EA\u07F4\u07F5\u07FA-\u0815\u081A\u0824\u0828\u0830-\u0858\u085E-\u08BD\uFB1D-\uFDFF\uFE70-\uFEFC]|[\uD802\uD803\uD83A\uD83B][\uDC00-\uDFFF]/;
+              // The cursor's box in the copy, where the field draws its own.
+              const spot = (el, cs) => {
+                const v = el.value, i = el.selectionStart || 0;
+                // A zero-width mark at the end keeps a last empty line.
+                mirror.textContent = v + '\u200b';
+                let t = mirror.firstChild;
+                let qs = rects(t, i, i);
+                if (!qs.length) {
+                  // An empty line has nothing to measure: the mark goes where the cursor is.
+                  mirror.textContent = v.slice(0, i) + '\u200b' + v.slice(i);
+                  t = mirror.firstChild;
+                  qs = rects(t, i, i + 1);
+                }
+                if (qs.length < 2) return qs[0];
+                const a = qs[0], b = qs[qs.length - 1];
+                // Where a line wraps, the cursor starts the next one.
+                if (Math.abs(a.top - b.top) > 1) return a.top > b.top ? a : b;
+                // Between text running different ways there are two spots;
+                // the cursor sits with the side running the paragraph's way.
+                let k = i - 1;
+                if (k > 0 && v.charCodeAt(k) >= 0xDC00 && v.charCodeAt(k) <= 0xDFFF) k--;
+                const before = k >= 0 && v[k] !== '\n' ? rects(t, k, i)[0] : null;
+                if (!before) return a;
+                let pdir = cs.direction;
+                if (cs.unicodeBidi === 'plaintext') {
+                  // dir=auto: each paragraph goes the way of its first letter.
+                  const s = v.lastIndexOf('\n', i - 1) + 1, e = v.indexOf('\n', i);
+                  pdir = 'ltr';
+                  for (const ch of v.slice(s, e < 0 ? v.length : e)) { if (RTL.test(ch)) { pdir = 'rtl'; break; } if (/\p{L}/u.test(ch)) break; }
+                }
+                const near = (x, y) => Math.abs(x - y) < 0.75;
+                const end = qs.find(r => near(r.left, before.left) || near(r.left, before.right)) || a;
+                const bdir = near(end.left, before.right) ? 'ltr' : 'rtl';
+                return bdir === pdir ? end : (qs.find(r => r !== end) || end);
+              };
               let el = null, raf = 0, moved = 0;
               // Where it was last drawn: it glides only along the same line,
               // a short way, in a field that hasn't moved or changed size.
@@ -149,7 +189,7 @@ pub fn Root() -> Element {
                 if (el.selectionStart !== el.selectionEnd) { hide(); last = null; return; }
                 const r = el.getBoundingClientRect();
                 const box = Math.round(r.left) + ',' + Math.round(r.top) + ',' + Math.round(r.width) + ',' + Math.round(r.height);
-                const key = el.selectionStart + ':' + el.value.length + ':' + el.scrollTop + ':' + el.scrollLeft;
+                const key = el.selectionStart + ':' + el.scrollTop + ':' + el.scrollLeft + ':' + el.value;
                 // Following a layout change frame by frame: nothing to redo
                 // while the field stays put.
                 if (last && last.el === el && last.box === box && last.key === key && !snapNext) {
@@ -158,28 +198,31 @@ pub fn Root() -> Element {
                   return;
                 }
                 const cs = getComputedStyle(el);
+                mirror.style.cssText = 'position:absolute;visibility:hidden;top:0;left:-99999px;overflow:hidden;border:0;box-sizing:border-box;';
                 for (const p of PROPS) mirror.style[p] = cs[p];
-                const area = el.tagName === 'TEXTAREA';
-                mirror.style.whiteSpace = area ? 'pre-wrap' : 'pre';
-                mirror.style.overflowWrap = area ? 'break-word' : 'normal';
-                mirror.style.height = 'auto';
-                const i = el.selectionStart || 0;
-                mirror.textContent = el.value.slice(0, i);
-                const mark = document.createElement('span');
-                mark.textContent = el.value.slice(i, i + 1) || '​';
-                mirror.appendChild(mark);
+                mirror.style.whiteSpace = el.tagName === 'TEXTAREA' ? 'pre-wrap' : 'pre';
+                mirror.style.width = el.clientWidth + 'px';
+                const q = spot(el, cs);
+                if (!q) { hide(); last = null; return; }
+                const m = mirror.getBoundingClientRect();
+                // On whole screen pixels, one wide and as tall as the text,
+                // like the field's own.
+                const dpr = window.devicePixelRatio || 1;
                 const fs = parseFloat(cs.fontSize) || 14;
-                const lh = parseFloat(cs.lineHeight) || fs * 1.35;
-                const h = Math.round(Math.min(lh, fs * 1.45));
-                const x = Math.round(r.left + mark.offsetLeft - el.scrollLeft);
-                const y = Math.round(r.top + mark.offsetTop - el.scrollTop + Math.max(0, (lh - h) / 2));
+                const h = q.height || fs * 1.3;
+                const x = Math.floor((r.left + el.clientLeft + q.left - m.left - el.scrollLeft) * dpr) / dpr;
+                const y = Math.round((r.top + el.clientTop + q.top - m.top - el.scrollTop) * dpr) / dpr;
                 if (x < r.left - 1 || x > r.right + 1 || y < r.top - 1 || y + h > r.bottom + 2) { hide(); last = null; return; }
                 const glide = !snapNext && !!last && last.el === el && last.box === box && last.y === y && Math.abs(last.x - x) <= fs * 6;
                 snapNext = false;
                 last = { el, box, key, x, y };
                 caret.classList.toggle('snap', !glide);
                 caret.style.height = h + 'px';
-                caret.style.background = cs.caretColor && cs.caretColor !== 'transparent' && !el.classList.contains('l-caret-on') ? cs.caretColor : cs.color;
+                caret.style.width = Math.max(1, Math.floor(dpr)) / dpr + 'px';
+                // A box drawing its text from a copy behind it (objects) has
+                // invisible text of its own: the copy has the color.
+                const clear = cs.color === 'transparent' || /rgba\([^)]*,\s*0\)$/.test(cs.color);
+                caret.style.background = clear && el.parentElement ? getComputedStyle(el.parentElement).color : cs.color;
                 caret.style.transform = 'translate(' + x + 'px,' + y + 'px)';
                 caret.style.visibility = covered(x, y) ? 'hidden' : 'visible';
                 // Solid while it moves; blinks once still.

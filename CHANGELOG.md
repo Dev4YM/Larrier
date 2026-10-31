@@ -5,6 +5,14 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.17 — 2026-10-31
+
+### Fixed
+
+- The composer is back to its own height, its text drawn right from the start
+- The typing cursor sits on the text in one-line fields
+- Editing a prompt no longer slides the card
+- The browser's page lands on its panel at any zoom
 ## 0.1.16 — 2026-10-31
 
 ### New

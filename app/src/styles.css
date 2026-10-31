@@ -736,7 +736,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .overlay { animation: fade-in .12s ease-out; }
 .palette, .modal { animation: pop-in .16s cubic-bezier(.2, .8, .2, 1); }
 .right-pane { animation: slide-in-right .18s cubic-bezier(.2, .8, .2, 1); }
-.user-msg, .a-block, .tool-card, .step, .msg-actions { animation: rise-in .2s ease-out both; }
+.user-msg, .a-block, .tool-card, .step, .msg-actions { animation: rise-in .2s ease-out backwards; }
 .chat-row, .repo-row, .nav-row, .menu-item, .icon-btn, .pill-btn, .ghost-btn, .primary-btn, .picker, .env-chip, .tool-link, .select-btn, .plus-btn, .send-btn, .chip, .seg button, .toggle, .toggle::after {
   transition: background-color .12s ease, color .12s ease, border-color .12s ease, opacity .12s ease, transform .12s ease, left .15s ease, box-shadow .12s ease;
 }
@@ -1097,8 +1097,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
    never move) and things that open ease in. All of it is off with Reduce
    Motion (.app.no-motion). */
 @keyframes stream-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.turn.live .a-block > *, .turn.live > .user-msg, .turn.live .tool-images img { animation: stream-in .28s cubic-bezier(.2, .8, .2, 1) both; }
-.thinking-row { animation: fade-in .24s ease-out both; }
+.turn.live .a-block > *, .turn.live > .user-msg, .turn.live .tool-images img { animation: stream-in .28s cubic-bezier(.2, .8, .2, 1) backwards; }
+.thinking-row { animation: fade-in .24s ease-out backwards; }
 .sub-steps, .tool-card.tool-io, .reasoning-text, .tool-card .cmd, .tool-card > pre, .preview.open { transition: opacity .2s ease, transform .2s cubic-bezier(.2, .8, .2, 1); }
 @starting-style {
   .sub-steps, .tool-card.tool-io, .reasoning-text, .tool-card .cmd, .tool-card > pre { opacity: 0; transform: translateY(-4px); }
@@ -1336,7 +1336,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .agent-sub-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .agent-sub-row .cnt { font-size: 11px; font-variant-numeric: tabular-nums; }
 .agent-sub .chat-row { padding-left: 16px; }
-.chat-row.fresh { overflow: hidden; animation: row-slide-in .42s cubic-bezier(.2, .8, .2, 1) both; }
+.chat-row.fresh { overflow: hidden; animation: row-slide-in .42s cubic-bezier(.2, .8, .2, 1) backwards; }
 @keyframes row-slide-in { from { height: 0; opacity: 0; transform: translateX(-10px); } 60% { opacity: 1; } }
 .repo-group.project-lifted { position: relative; z-index: 6; border-radius: 8px; background: var(--win); box-shadow: 0 8px 24px -10px rgba(0, 0, 0, .25);
   opacity: .96; cursor: grabbing; }
@@ -1449,8 +1449,8 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* The rail eases between its folded card and the full column. */
 .rail-wrap { flex-shrink: 0; width: 264px; display: flex; min-height: 0; overflow: hidden; transition: width .24s cubic-bezier(.2, .8, .2, 1); }
 .rail-wrap.folded { width: 56px; }
-.rail-wrap > .tools-col:not(.collapsed) { flex: 0 0 264px; animation: rail-content-in .26s ease-out both; }
-.rail-wrap > .tools-col.collapsed { animation: rail-card-in .22s cubic-bezier(.2, .8, .2, 1) both; }
+.rail-wrap > .tools-col:not(.collapsed) { flex: 0 0 264px; animation: rail-content-in .26s ease-out backwards; }
+.rail-wrap > .tools-col.collapsed { animation: rail-card-in .22s cubic-bezier(.2, .8, .2, 1) backwards; }
 @keyframes rail-content-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
 @keyframes rail-card-in { from { opacity: 0; transform: translateX(-6px) scale(.96); } to { opacity: 1; transform: none; } }
 
@@ -1464,7 +1464,10 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .app.narrow .sidebar { transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .2s ease, visibility 0s linear 0s; }
 
 /* The side panel slides in. */
-.right-pane { animation: pane-in .24s cubic-bezier(.2, .8, .2, 1) both; }
+/* Entry animations fill backwards only: a transform left behind at the end
+   (even translateX(0)) traps the menus inside, which are placed against the
+   window (position: fixed). */
+.right-pane { animation: pane-in .24s cubic-bezier(.2, .8, .2, 1) backwards; }
 @keyframes pane-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
 
 /* Pane toggles stay put: one button each, at the same spot whether its
@@ -1510,7 +1513,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 
 /* The queue: a card that folds into a pill; rows drag to reorder and
    show their actions on hover. */
-.queue-card { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-2); padding: 5px 6px 6px; animation: queue-in .2s cubic-bezier(.2, .8, .2, 1) both; }
+.queue-card { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-2); padding: 5px 6px 6px; animation: queue-in .2s cubic-bezier(.2, .8, .2, 1) backwards; }
 @keyframes queue-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .queue-head { display: flex; align-items: center; gap: 6px; padding: 2px 4px 4px 10px; font-size: 12px; color: var(--fg-2); }
 .queue-head .n { font-weight: 500; }
@@ -1536,7 +1539,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* Editing a queued message: a badge next to "+", Esc or × cancels. */
 .c-plus { display: flex; align-items: center; gap: 6px; }
 .edit-badge { display: inline-flex; align-items: center; gap: 3px; height: 26px; padding: 0 3px 0 9px; border-radius: 13px;
-  background: color-mix(in srgb, var(--accent-c, var(--blue)) 14%, transparent); color: var(--accent-c, var(--blue)); animation: queue-in .16s ease-out both; }
+  background: color-mix(in srgb, var(--accent-c, var(--blue)) 14%, transparent); color: var(--accent-c, var(--blue)); animation: queue-in .16s ease-out backwards; }
 .edit-badge .x { width: 20px; height: 20px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; color: inherit; }
 .edit-badge .x:hover { background: color-mix(in srgb, var(--accent-c, var(--blue)) 20%, transparent); }
 
@@ -1592,7 +1595,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ad-foot a { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 
 /* A message sent into the running turn, until the agent reads it. */
-.user-msg.pending { position: relative; top: auto; animation: queue-in .18s ease-out both; }
+.user-msg.pending { position: relative; top: auto; animation: queue-in .18s ease-out backwards; }
 .user-msg.pending .user-card { opacity: .55; border-style: dashed; cursor: default; }
 .user-msg.pending .pending-note { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 4px; font-size: 11px; color: var(--fg-3); }
 
@@ -1601,7 +1604,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
    out on hover; while downloading and when ready it stays out. */
 .update-btn { display: inline-flex; align-items: center; height: 28px; padding: 0 7px; border-radius: 14px; overflow: hidden;
   background: color-mix(in srgb, var(--accent-c, var(--blue)) 14%, transparent); color: var(--accent-c, var(--blue));
-  animation: queue-in .2s ease-out both; transition: background-color .15s ease; }
+  animation: queue-in .2s ease-out backwards; transition: background-color .15s ease; }
 .update-btn:hover { background: color-mix(in srgb, var(--accent-c, var(--blue)) 22%, transparent); }
 .update-btn .lbl { max-width: 0; opacity: 0; margin-left: 0; white-space: nowrap; font-size: 12px; font-weight: 500;
   transition: max-width .22s cubic-bezier(.2, .8, .2, 1), opacity .16s ease, margin-left .22s ease; }

@@ -118,6 +118,8 @@ pub struct Choice {
     pub shown: bool,
     pub group: Option<String>,
     pub context: Option<u64>,
+    /// Context sizes and how the agent takes them (Cursor).
+    pub params: Option<models::ModelParams>,
 }
 
 /// Every model Larrier knows for `agent`, the agent's own first.
@@ -151,6 +153,7 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
             shown,
             group: m.group.clone(),
             context: m.context,
+            params: m.params.clone(),
         });
     }
     for c in ac.added_models() {
@@ -178,6 +181,7 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
                 shown: true,
                 group: Some("Added".into()),
                 context: larrier_core::models::lookup(&c.id).and_then(|i| i.context),
+                params: None,
             }),
         }
     }
@@ -207,6 +211,8 @@ pub struct Resolved {
     pub family: Option<String>,
     pub effort: Option<String>,
     pub fast: bool,
+    /// The context size picked (Cursor), as the agent names it.
+    pub context: Option<String>,
     /// Taken from the agent's own settings rather than chosen.
     pub model_from_agent: bool,
     pub effort_from_agent: bool,
@@ -220,6 +226,18 @@ pub fn resolve(app: &App, agent: &AgentKind, model: Option<&str>, effort: Option
     r.model_from_agent = chosen.is_none();
     r.model = chosen.or_else(|| native.as_ref().and_then(|n| n.default_model.clone()));
     let found = r.model.as_deref().and_then(|id| native.as_ref().and_then(|n| n.variant(id).map(|(m, v)| (m.clone(), v.cloned()))));
+    // A model with its parameters spelled out (a context picked).
+    if let (Some((m, _)), Some(id)) = (&found, r.model.as_deref()) {
+        let (_, kv) = models::split_params(id);
+        if !kv.is_empty() {
+            r.family = Some(m.id.clone());
+            r.context = kv.iter().find(|(k, _)| k == "context").map(|(_, v)| v.clone());
+            r.effort = kv.iter().find(|(k, _)| matches!(k.as_str(), "effort" | "reasoning_effort" | "reasoning")).map(|(_, v)| models::normalize_effort(v));
+            r.fast = kv.iter().any(|(k, v)| k == "fast" && v == "true");
+            r.effort_from_agent = false;
+            return r;
+        }
+    }
     if let Some((m, v)) = &found {
         r.family = Some(m.id.clone());
         if let Some(v) = v {
@@ -245,6 +263,7 @@ pub fn resolve(app: &App, agent: &AgentKind, model: Option<&str>, effort: Option
 /// Short name for a model id ("Opus 5.5", "GPT-6.1 Sol", "Kimi K2.7 Code").
 pub fn short_name(app: &App, agent: &AgentKind, id: &str) -> String {
     use larrier_core::models as reg;
+    let id = models::split_params(id).0;
     // The agent's own name for it ("Opus 5.5" for Claude Code's `opus`).
     if let Some(m) = app.agent_models(agent).as_ref().and_then(|n| n.model(id).filter(|m| m.listed).map(|m| m.name.clone())) {
         return m.trim_start_matches("Claude ").to_string();
@@ -268,7 +287,18 @@ pub fn short_name(app: &App, agent: &AgentKind, id: &str) -> String {
 /// The model id and effort to store for a pick: Cursor names one variant
 /// per effort and speed; other agents take the effort on its own.
 pub fn compose(app: &App, agent: &AgentKind, family: &str, effort: Option<&str>, fast: bool) -> (String, Option<String>) {
+    compose_with(app, agent, family, effort, fast, None)
+}
+
+/// [`compose`], with a context size (the model then runs with its
+/// parameters spelled out, as Cursor takes them).
+pub fn compose_with(app: &App, agent: &AgentKind, family: &str, effort: Option<&str>, fast: bool, context: Option<&str>) -> (String, Option<String>) {
+    let family = models::split_params(family).0;
     if let Some(m) = app.agent_models(agent).as_ref().and_then(|n| n.models.iter().find(|m| m.id == family).cloned()) {
+        if let (Some(p), Some(c)) = (&m.params, context) {
+            let e = effort.map(str::to_string).or(m.default_effort.clone());
+            return (p.compose(&m.id, c, e.as_deref(), fast), None);
+        }
         if !m.variants.is_empty() {
             let e = effort.map(str::to_string).or(m.default_effort.clone());
             if let Some(v) = m.pick_variant(e.as_deref(), fast) {

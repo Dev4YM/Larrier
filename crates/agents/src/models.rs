@@ -120,8 +120,10 @@ impl AgentModels {
             .or_else(|| self.models.iter().find(|m| m.aliases.iter().any(|a| a == id)))
     }
 
-    /// The model and variant an id names (Cursor's ids name a variant).
+    /// The model and variant an id names (Cursor's ids name a variant; one
+    /// with parameters names its model).
     pub fn variant(&self, id: &str) -> Option<(&AgentModel, Option<&Variant>)> {
+        let id = split_params(id).0;
         let m = self.model(id)?;
         Some((m, m.variants.iter().find(|v| v.id == id)))
     }
@@ -164,6 +166,60 @@ pub struct AgentModel {
     /// Other ids for the same model (what Claude Code's `opus` stands for).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
+    /// How the agent takes its settings as parameters of the model
+    /// (Cursor's `grok-4.7[context=500k,reasoning_effort=high,fast=false]`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<ModelParams>,
+}
+
+/// A model's parameters as its agent names them (Cursor's app lists them).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+pub struct ModelParams {
+    /// Context sizes to choose from: (value, label) — ("500k", "500K").
+    #[serde(default)]
+    pub contexts: Vec<(String, String)>,
+    /// The context used when none is chosen.
+    #[serde(default)]
+    pub default_context: Option<String>,
+    /// The effort parameter's name (`effort`, `reasoning_effort`, `reasoning`)
+    /// and its values as the agent spells them (`extra-high`).
+    #[serde(default)]
+    pub effort: Option<(String, Vec<String>)>,
+    #[serde(default)]
+    pub fast: bool,
+}
+
+impl ModelParams {
+    /// `id[context=…,<effort>=…,fast=…]` for an effort (Larrier's names)
+    /// and speed.
+    pub fn compose(&self, id: &str, context: &str, effort: Option<&str>, fast: bool) -> String {
+        let mut parts = vec![format!("context={context}")];
+        if let (Some((name, values)), Some(e)) = (&self.effort, effort) {
+            let raw = values.iter().find(|v| normalize_effort(v) == e).cloned().unwrap_or_else(|| e.to_string());
+            parts.push(format!("{name}={raw}"));
+        }
+        if self.fast {
+            parts.push(format!("fast={fast}"));
+        }
+        format!("{id}[{}]", parts.join(","))
+    }
+}
+
+/// An effort as Larrier names it (`extra-high` → `xhigh`).
+pub fn normalize_effort(v: &str) -> String {
+    if v == "extra-high" { "xhigh".to_string() } else { v.to_string() }
+}
+
+/// A model id with parameters, split: (`grok-4.7`, [(context, 500k), …]).
+pub fn split_params(id: &str) -> (&str, Vec<(String, String)>) {
+    match id.split_once('[') {
+        Some((base, rest)) => {
+            let inner = rest.trim_end_matches(']');
+            let kv = inner.split(',').filter_map(|p| p.split_once('=')).map(|(k, v)| (k.trim().to_string(), v.trim().to_string())).collect();
+            (base, kv)
+        }
+        None => (id, Vec::new()),
+    }
 }
 
 impl AgentModel {
@@ -542,6 +598,26 @@ pub fn parse_claude_models(init: &Value) -> Vec<AgentModel> {
 
 const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
+#[cfg(test)]
+mod param_tests {
+    use super::*;
+
+    #[test]
+    fn a_model_with_parameters_reads_and_writes_them() {
+        let p = ModelParams {
+            contexts: vec![("256k".into(), "256K".into()), ("500k".into(), "500K".into())],
+            default_context: Some("256k".into()),
+            effort: Some(("reasoning".into(), vec!["low".into(), "high".into(), "extra-high".into()])),
+            fast: true,
+        };
+        assert_eq!(p.compose("gpt-5.5", "500k", Some("xhigh"), false), "gpt-5.5[context=500k,reasoning=extra-high,fast=false]");
+        let (base, kv) = split_params("grok-4.7[context=500k,reasoning_effort=high,fast=true]");
+        assert_eq!(base, "grok-4.7");
+        assert_eq!(kv, vec![("context".into(), "500k".into()), ("reasoning_effort".into(), "high".into()), ("fast".into(), "true".into())]);
+        assert_eq!(split_params("opus").0, "opus");
+    }
+}
+
 fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
     use larrier_core::models::{self, ModelStatus, Source, Vendor};
     let mut m = AgentModels::default();
@@ -799,6 +875,7 @@ fn cursor(cli_dir: &Path, ide_db: Option<&Path>, listed: Vec<AgentModel>) -> Age
 
     // The Cursor app: which models are switched on, and its own keys.
     let mut enabled: Option<Vec<String>> = None;
+    let mut params: Vec<(String, ModelParams)> = Vec::new();
     if let Some(db) = ide_db {
         if let Ok(conn) = larrier_formats::util::open_sqlite(db) {
             let get = |k: &str| conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [k], |r| r.get::<_, String>(0)).ok();
@@ -817,6 +894,37 @@ fn cursor(cli_dir: &Path, ide_db: Option<&Path>, listed: Vec<AgentModel>) -> Age
                 set.extend(on);
                 set.retain(|x| !off.contains(x));
                 enabled = Some(set);
+                // Each model's parameters (context sizes, how it names its
+                // effort), and the context last picked for it.
+                let picked_context = |name: &str| -> Option<String> {
+                    let from = |v: Option<&Value>| v.and_then(|p| p.as_array()).and_then(|a| a.iter().find(|p| str_of(p, &["id"]) == Some("context"))).and_then(|p| str_of(p, &["value"])).map(str::to_string);
+                    from(cli.pointer(&format!("/modelParameters/{name}/parameters"))).or_else(|| from(ai.pointer(&format!("/modelParameterPreferences/{name}/parameters"))))
+                };
+                if let Some(defs) = user.get("availableDefaultModels2").and_then(|v| v.as_array()) {
+                    for d in defs {
+                        let Some(name) = str_of(d, &["name"]) else { continue };
+                        let mut p = ModelParams::default();
+                        for def in d.get("parameterDefinitions").and_then(|x| x.as_array()).into_iter().flatten() {
+                            let id = str_of(def, &["id"]).unwrap_or("");
+                            let values: Vec<(String, String)> = def
+                                .pointer("/parameterType/enumParameter/values")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.iter().filter_map(|x| str_of(x, &["value"]).map(|v| (v.to_string(), str_of(x, &["displayName"]).unwrap_or(v).to_string()))).collect())
+                                .unwrap_or_default();
+                            match id {
+                                "context" if values.len() > 1 => p.contexts = values,
+                                "effort" | "reasoning_effort" | "reasoning" if !values.is_empty() => p.effort = Some((id.to_string(), values.into_iter().map(|(v, _)| v).collect())),
+                                "fast" => p.fast = def.pointer("/parameterType/booleanParameter").is_some(),
+                                _ => {}
+                            }
+                        }
+                        if p.contexts.is_empty() {
+                            continue;
+                        }
+                        p.default_context = picked_context(name).filter(|c| p.contexts.iter().any(|(v, _)| v == c)).or_else(|| p.contexts.first().map(|(v, _)| v.clone()));
+                        params.push((name.to_string(), p));
+                    }
+                }
                 if let Some(o) = ai.get("modelParameterPreferences").and_then(|p| p.as_object()) {
                     for (k, v) in o {
                         if let Some(e) = param(v.get("parameters")) {
@@ -856,6 +964,9 @@ fn cursor(cli_dir: &Path, ide_db: Option<&Path>, listed: Vec<AgentModel>) -> Age
             if x.efforts.iter().any(|y| y == e) {
                 x.default_effort = Some(e.clone());
             }
+        }
+        if let Some((_, p)) = params.iter().find(|(n, _)| matches(&x.id, n)) {
+            x.params = Some(p.clone());
         }
     }
     if let Some(d) = m.default_model.clone() {

@@ -104,7 +104,14 @@ fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &
         (_, Some(m)) => am::short_name(app, agent, m),
         _ => "Auto".into(),
     };
-    let mut extra: Vec<String> = r.effort.as_deref().map(larrier_agents::models::effort_label).into_iter().collect();
+    let mut extra: Vec<String> = Vec::new();
+    if let (Some(ctx), Some(fam)) = (&r.context, r.family.as_deref()) {
+        let params = am::choices(app, agent).into_iter().find(|c| c.id == fam).and_then(|c| c.params);
+        if let Some(p) = params.filter(|p| p.default_context.as_deref() != Some(ctx.as_str())) {
+            extra.push(p.contexts.iter().find(|(v, _)| v == ctx).map(|(_, l)| l.clone()).unwrap_or_else(|| ctx.to_uppercase()));
+        }
+    }
+    extra.extend(r.effort.as_deref().map(larrier_agents::models::effort_label));
     if r.fast {
         extra.push("Fast".into());
     }
@@ -606,8 +613,38 @@ pub fn Composer(
             }
         }
     };
+    // A context size (Cursor): the model runs with its parameters spelled
+    // out, keeping its effort and speed.
+    let set_context = move |ctx: String, sid: Option<String>| {
+        let mut app = app;
+        let (agent, model, effort) = match &sid {
+            Some(id) => match app.peek_session(id, |s| (s.agent.clone(), s.model.clone(), s.effort.clone())) {
+                Some(x) => x,
+                None => return,
+            },
+            None => {
+                let d = app.draft.read();
+                (d.agent.clone(), d.model.clone(), d.effort.clone())
+            }
+        };
+        let now = crate::agent_models::resolve(&app, &agent, model.as_deref(), effort.as_deref());
+        let Some(family) = now.family.clone().or(now.model.clone()) else { return };
+        let (m, _) = crate::agent_models::compose_with(&app, &agent, &family, now.effort.as_deref(), now.fast, Some(&ctx));
+        match &sid {
+            Some(id) => {
+                app.set_session_model(id, Some(m));
+                app.set_session_effort(id, None);
+            }
+            None => {
+                let mut d = app.draft.write();
+                d.model = Some(m);
+                d.effort = None;
+            }
+        }
+    };
     // Effort (and Cursor's speed) for the model in use: Cursor switches to
-    // that variant, other agents keep the effort beside the model.
+    // that variant (keeping a context picked), other agents keep the effort
+    // beside the model.
     let set_effort = move |e: Option<String>, fast: bool, sid: Option<String>| {
         let mut app = app;
         let (agent, model, effort) = match &sid {
@@ -622,7 +659,7 @@ pub fn Composer(
         };
         let now = crate::agent_models::resolve(&app, &agent, model.as_deref(), effort.as_deref());
         let Some(family) = now.family.clone().or(now.model.clone()) else { return };
-        let (m, e) = crate::agent_models::compose(&app, &agent, &family, e.as_deref(), fast);
+        let (m, e) = crate::agent_models::compose_with(&app, &agent, &family, e.as_deref(), fast, now.context.as_deref());
         // Picking the agent's own default model and effort keeps following it.
         let model_changed = Some(m.as_str()) != now.model.as_deref() || model.is_some();
         match &sid {
@@ -798,6 +835,10 @@ pub fn Composer(
             oneffort: {
                 let sid = session_id.clone();
                 move |(e, fast): (Option<String>, bool)| set_effort(e, fast, sid.clone())
+            },
+            oncontext: {
+                let sid = session_id.clone();
+                move |ctx: String| set_context(ctx, sid.clone())
             },
             onaccount: {
                 let sid = session_id.clone();
@@ -1318,6 +1359,7 @@ fn ModelPicker(
     account: Option<String>,
     onpick: EventHandler<(AgentKind, Option<String>)>,
     oneffort: EventHandler<(Option<String>, bool)>,
+    oncontext: EventHandler<String>,
     onaccount: EventHandler<String>,
 ) -> Element {
     let app = use_app();
@@ -1383,10 +1425,10 @@ fn ModelPicker(
     let cur_name = cur_meta.as_ref().map(|m| m.1.clone()).unwrap_or_else(|| cur.display_name().to_string());
     // The model in use and its effort and speed (its Edit menu checks them).
     let family = now.family.clone().or(now.model.clone());
-    let (cur_effort, cur_fast) = (now.effort.clone(), now.fast);
+    let (cur_effort, cur_fast, cur_context) = (now.effort.clone(), now.fast, now.context.clone());
     let cur_choices = crate::agent_models::choices(&app, &cur);
     let editable = |id: &Option<String>| -> bool {
-        id.as_ref().and_then(|id| cur_choices.iter().find(|c| &c.id == id)).is_some_and(|c| !c.efforts.is_empty() || c.fast || c.context.is_some())
+        id.as_ref().and_then(|id| cur_choices.iter().find(|c| &c.id == id)).is_some_and(|c| !c.efforts.is_empty() || c.fast || c.context.is_some() || c.params.is_some())
     };
     rsx! {
         Dropdown { open, up, right: true, class: "model-picker",
@@ -1577,17 +1619,47 @@ fn ModelPicker(
                     let efforts = choice.as_ref().map(|c| c.efforts.clone()).unwrap_or_default();
                     let has_fast = choice.as_ref().is_some_and(|c| c.fast);
                     let context = choice.as_ref().and_then(|c| c.context);
+                    // Context sizes to choose from (Cursor), the one in use checked.
+                    let params = choice.as_ref().and_then(|c| c.params.clone()).filter(|p| p.contexts.len() > 1);
+                    let sel_context = params.as_ref().and_then(|p| if using { cur_context.clone().or(p.default_context.clone()) } else { p.default_context.clone() });
+                    let (ek2, eid2) = (ek.clone(), eid.clone());
+                    let pick_context = move |c: String| {
+                        let mut ed = edit;
+                        ed.set(None);
+                        if !using {
+                            onpick.call((ek2.clone(), Some(eid2.clone())));
+                        }
+                        oncontext.call(c);
+                    };
+                    // The model in use keeps what else was picked for it (its context).
                     let pick = move |e: Option<String>, fast: bool| {
                         let mut ed = edit;
                         ed.set(None);
-                        onpick.call((ek.clone(), Some(eid.clone())));
+                        if !using {
+                            onpick.call((ek.clone(), Some(eid.clone())));
+                        }
                         oneffort.call((e, fast));
                     };
                     let pick2 = pick.clone();
                     rsx! {
                         div { class: "mp-edit-backdrop", onclick: move |e| { e.stop_propagation(); edit.set(None); } }
                         div { id: "mp-edit", class: "menu mp-edit", role: "menu", onclick: move |e| e.stop_propagation(),
-                            if let Some(t) = context {
+                            if let Some(p) = params.clone() {
+                                div { class: "menu-label", "Context" }
+                                for (v, label) in p.contexts.clone() {
+                                    {
+                                        let on = sel_context.as_deref() == Some(v.as_str());
+                                        let pc = pick_context.clone();
+                                        rsx! {
+                                            button { key: "{v}", class: if on { "menu-item checked" } else { "menu-item" },
+                                                onclick: move |_| pc(v.clone()),
+                                                span { "{label}" }
+                                                span { class: "check", style: if on { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else if let Some(t) = context {
                                 div { class: "menu-label", "Context" }
                                 div { class: "menu-item checked static", title: "The model's context window",
                                     span { "{larrier_core::models::tokens_short(t)}" }
@@ -1595,7 +1667,7 @@ fn ModelPicker(
                                 }
                             }
                             if !efforts.is_empty() {
-                                if context.is_some() { div { class: "menu-sep" } }
+                                if context.is_some() || params.is_some() { div { class: "menu-sep" } }
                                 div { class: "menu-label", "Effort" }
                                 for e in efforts.clone() {
                                     {
@@ -1613,7 +1685,7 @@ fn ModelPicker(
                                 }
                             }
                             if has_fast {
-                                if context.is_some() || !efforts.is_empty() { div { class: "menu-sep" } }
+                                if context.is_some() || params.is_some() || !efforts.is_empty() { div { class: "menu-sep" } }
                                 div { class: "menu-label", "Options" }
                                 {
                                     let se = sel_effort.clone();

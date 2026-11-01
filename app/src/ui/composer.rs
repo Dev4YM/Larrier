@@ -776,6 +776,10 @@ pub fn Composer(
             agent: agent.clone(),
             model: model.clone(),
             effort: effort.clone(),
+            account: match &session_id {
+                Some(_) => sess.read().as_ref().and_then(|s| s.account.clone()),
+                None => app.draft.read().account_id.clone(),
+            },
             onpick: {
                 let sid = session_id.clone();
                 move |(k, m): (AgentKind, Option<String>)| {
@@ -786,6 +790,13 @@ pub fn Composer(
             oneffort: {
                 let sid = session_id.clone();
                 move |(e, fast): (Option<String>, bool)| set_effort(e, fast, sid.clone())
+            },
+            onaccount: {
+                let sid = session_id.clone();
+                move |acc: String| match &sid {
+                    Some(id) => app.switch_account(id, acc),
+                    None => app.draft.write().account_id = Some(acc),
+                }
             },
         }
     };
@@ -1295,8 +1306,11 @@ fn ModelPicker(
     agent: AgentKind,
     model: Option<String>,
     effort: Option<String>,
+    /// The account the chat runs as (None: the agent's default).
+    account: Option<String>,
     onpick: EventHandler<(AgentKind, Option<String>)>,
     oneffort: EventHandler<(Option<String>, bool)>,
+    onaccount: EventHandler<String>,
 ) -> Element {
     let app = use_app();
     let mut query = use_signal(String::new);
@@ -1420,6 +1434,34 @@ fn ModelPicker(
                         div { class: "mp-head",
                             span { class: "nm", "{cur_name}" }
                             if let Some((_, _, sub)) = cur_meta.clone() { span { class: "sub", "{sub}" } }
+                        }
+                        // The logins it can run as (Settings → Accounts).
+                        {
+                            let cfg = app.config.read();
+                            let accounts: Vec<larrier_core::Account> = if cur == agent { cfg.accounts_for(&cur).into_iter().cloned().collect() } else { Vec::new() };
+                            let using = account.clone().or_else(|| cfg.default_account(&cur).map(|a| a.id.clone()));
+                            rsx! {
+                                if accounts.len() > 1 {
+                                    div { class: "mp-accounts",
+                                        span { class: "lbl", "Runs as" }
+                                        for a in accounts {
+                                            {
+                                                let on = using.as_deref() == Some(a.id.as_str());
+                                                let (ok, email) = crate::state::signed_in_as(&a);
+                                                let tip = match (ok, email) { (true, Some(e)) => format!("Signed in as {e}"), (true, None) => "Signed in".to_string(), (false, _) => "Not signed in".to_string() };
+                                                let id = a.id.clone();
+                                                rsx! {
+                                                    button { key: "{a.id}", class: if on { "mp-acct on" } else if ok { "mp-acct" } else { "mp-acct off" }, title: "{tip}",
+                                                        onclick: move |e| { e.stop_propagation(); onaccount.call(id.clone()); },
+                                                        Icon { i: match a.auth { larrier_core::AccountAuth::ApiKey { .. } => I::Key, larrier_core::AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 12 }
+                                                        span { "{a.label}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         for row in pick_rows(&app, &cur, false) {
                             {

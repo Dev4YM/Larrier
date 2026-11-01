@@ -1803,8 +1803,44 @@ impl App {
         self.update_session(id, |s| s.permission = permission);
     }
 
-    pub fn set_session_account(self, id: &str, account: Option<String>) {
-        self.update_session(id, |s| s.account_id = account);
+    /// Run a chat as another of its agent's accounts. Its conversation so far
+    /// goes along: a copy of it in that account's own folder (where its agent
+    /// looks), else the context handed over on the next message.
+    pub fn switch_account(self, id: &str, account: String) {
+        if !self.ensure_loaded(id) {
+            return;
+        }
+        let cfg = self.config.read().clone();
+        let label = cfg.account(&account).map(|a| a.label.clone()).unwrap_or_default();
+        let mut note = String::new();
+        self.update_session(id, |s| {
+            let current = s.account_id.clone().or_else(|| cfg.default_account(&s.agent).map(|a| a.id.clone()));
+            if current.as_deref() == Some(account.as_str()) {
+                return;
+            }
+            s.account_id = Some(account.clone());
+            let agent = s.agent.clone();
+            if s.native_link(&agent).is_none() || s.messages.is_empty() {
+                return;
+            }
+            let home = account_home(&cfg, &agent, Some(&account));
+            match larrier_formats::supports_native_export(&agent).then(|| larrier_formats::export_native(s, &agent, home.as_deref())) {
+                Some(Ok(link)) => {
+                    store().set_import_record(&import_key(&agent, &link.id), ImportRecord::linked(&s.id));
+                    store().flush_imports();
+                    s.set_native_link(link);
+                    note = format!("Now runs as “{label}”");
+                }
+                _ => {
+                    s.native.retain(|l| l.agent != agent);
+                    note = format!("Now runs as “{label}” (the conversation so far goes along with the next message)");
+                }
+            }
+            s.push(Message::new(Role::System, vec![Part::Notice { text: note.clone() }]));
+        });
+        if !note.is_empty() {
+            self.toast(note);
+        }
     }
 
     pub fn export(self, id: &str, format: ExportFormat) {

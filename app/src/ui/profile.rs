@@ -1,5 +1,5 @@
 //! Settings → Profile: who's using Larrier (name, photo, role, about) and
-//! their work with AI over the year: a calendar of every day's tokens,
+//! their usage over the year: a calendar of every day's tokens,
 //! cost, prompts or sessions, by harness and model.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -33,6 +33,12 @@ pub fn Avatar(#[props(default = 30)] size: u32) -> Element {
             if let Some(s) = src { img { src: "{s}", alt: "", draggable: "false" } } else { "{initial}" }
         }
     }
+}
+
+/// A website as typed ("example.com") as an address a browser opens.
+fn web_url(site: &str) -> String {
+    let s = site.trim();
+    if s.contains("://") || s.starts_with("mailto:") { s.to_string() } else { format!("https://{s}") }
 }
 
 fn mime_of(path: &str) -> &'static str {
@@ -330,7 +336,7 @@ pub fn ProfileView() -> Element {
     rsx! {
         style { {CSS} }
         h1 { "Profile" }
-        div { class: "sub", "How you show up in Larrier, and your work with AI over time." }
+        div { class: "sub", "How you show up in Larrier, and your usage over time." }
 
         div { class: "set-card pf-card",
             div { class: "pf-photo",
@@ -385,13 +391,13 @@ pub fn ProfileView() -> Element {
             if let Some(r) = p.role.clone() { span { class: "pf-meta", Icon { i: I::Briefcase, size: 12 } "{r}" } }
             if let Some(l) = p.location.clone() { span { class: "pf-meta", Icon { i: I::MapPin, size: 12 } "{l}" } }
             if let Some(w) = p.website.clone() {
-                button { class: "pf-meta pf-web", onclick: move |_| { let _ = open::that(&w); }, Icon { i: I::Link, size: 12 } {p.website.clone().unwrap_or_default().trim_start_matches("https://").trim_start_matches("http://").to_string()} }
+                button { class: "pf-meta pf-web", title: "Open in your browser", onclick: move |_| { let _ = open::that(web_url(&w)); }, Icon { i: I::Link, size: 12 } {p.website.clone().unwrap_or_default().trim_start_matches("https://").trim_start_matches("http://").to_string()} }
             }
             if let Some(s) = since { span { class: "pf-meta", Icon { i: I::CalendarDays, size: 12 } "With Larrier since {s}" } }
         }
 
         div { class: "pf-head",
-            h3 { "Your AI work" }
+            h3 { "Usage" }
             div { class: "grow" }
             crate::ui::Select { value: harness(), options: harnesses.clone(), onchange: move |v: String| harness.set(v) }
             div { class: "seg",
@@ -624,6 +630,12 @@ mod tests {
         let codex = build(&list, &map, Some(&AgentKind::Codex));
         assert_eq!(codex.days[&today].all.tokens, 50);
         assert_eq!(codex.first, Some(today - 5));
+    }
+
+    #[test]
+    fn a_website_opens_as_an_address() {
+        assert_eq!(web_url("example.com"), "https://example.com");
+        assert_eq!(web_url(" http://a.b/c "), "http://a.b/c");
     }
 
     #[test]

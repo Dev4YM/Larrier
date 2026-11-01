@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-f4f3ef?style=flat-square&labelColor=18181b" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/platform-Windows-f4f3ef?style=flat-square&labelColor=18181b" alt="Windows">
+  <img src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-f4f3ef?style=flat-square&labelColor=18181b" alt="Windows, macOS and Linux">
   <img src="https://img.shields.io/badge/built_with-Rust_%2B_Dioxus-f4f3ef?style=flat-square&labelColor=18181b" alt="Rust and Dioxus">
   <a href="docs/LSF.md"><img src="https://img.shields.io/badge/sessions-LSF_1.0-f4f3ef?style=flat-square&labelColor=18181b" alt="Larrier Session Format"></a>
 </p>
@@ -79,18 +79,27 @@ once, then continues in that agent's own session. See
 
 ## Install
 
-Download `Larrier-<version>-windows-x64.exe` from the
-[latest release](https://github.com/Dev4YM/Larrier/releases/latest) and
-run it. It installs itself, just for you (no administrator rights) or for
-everyone on the computer, and keeps itself up to date from GitHub releases.
-Details in [docs/install.md](docs/install.md).
+Download yours from the
+[latest release](https://github.com/Dev4YM/Larrier/releases/latest):
+
+| System | Download | Then |
+|---|---|---|
+| Windows 10 / 11 | `Larrier-<version>-windows-x64.exe` | Run it: it installs itself, for you or for everyone. |
+| macOS 11+ (Apple silicon) | `Larrier-<version>-macos-arm64.zip` | Unzip, drag Larrier.app to Applications, right-click → Open the first time. |
+| macOS 11+ (Intel) | `Larrier-<version>-macos-x64.zip` | The same. |
+| Linux (x64) | `Larrier-<version>-linux-x64.tar.gz` | Unpack and run `./larrier/install.sh` (needs WebKitGTK 4.1). |
+
+Every copy keeps itself up to date from GitHub releases. Details for each
+system are in [docs/install.md](docs/install.md).
 
 Larrier finds the agents you already have. Agents you don't have yet can be
 installed from **Settings → Agents**.
 
 ## Build from source
 
-Rust 1.85 or newer. On Windows, WebView2 (included in Windows 10 and 11).
+Rust 1.85 or newer, plus the Windows build tools, the Xcode command line
+tools, or WebKitGTK's development packages on Linux
+([docs/building.md](docs/building.md) lists them).
 
 ```bash
 cargo run -p larrier-app          # the desktop app
@@ -100,8 +109,9 @@ cargo run -p larrier-app          # the desktop app
 cargo run -p larrier-cli -- --help
 ```
 
-`scripts/` has helpers for development, checks, builds, releases and demo
-data; see [docs/building.md](docs/building.md).
+`scripts/` has the same helpers for every system (`.ps1` on Windows, `.sh`
+on macOS and Linux): setup checks, running, checks, release builds and
+demo data.
 
 ## Documentation
 

@@ -14,15 +14,17 @@ follows, and how changes get in.
 
 ## Setting up
 
-```powershell
+```bash
 git clone https://github.com/Dev4YM/Larrier
 cd Larrier
-./scripts/setup.ps1      # checks Rust, WebView2, Python, gh
-./scripts/dev.ps1 -Sandbox
 ```
 
-`-Sandbox` runs Larrier with a throwaway data folder, so development never
-touches your own sessions. `python scripts/demo/make_demo.py` builds a full
+| | Windows | macOS / Linux |
+|---|---|---|
+| Check what's missing | `./scripts/setup.ps1` | `./scripts/setup.sh` |
+| Run with a throwaway data folder | `./scripts/dev.ps1 -Sandbox` | `./scripts/dev.sh --sandbox` |
+
+The sandbox keeps development away from your own sessions. `python scripts/demo/make_demo.py` builds a full
 demo home with sample projects, chats and a stand-in agent that runs live
 without an account. See [docs/building.md](docs/building.md).
 
@@ -31,12 +33,18 @@ without an account. See [docs/building.md](docs/building.md).
 1. Branch from `main`.
 2. Keep each commit to one concern; a feature and an unrelated fix are two
    commits.
-3. Run `./scripts/check.ps1` (build, tests, Clippy) before you push.
+3. Run `./scripts/check.ps1` or `./scripts/check.sh` (build, tests,
+   Clippy) before you push. CI runs the same on Windows, macOS and Linux.
 4. For UI changes, check the change in the running app: light and dark
    themes, a narrow window, with **Reduce Motion** on and off. Include a
    screenshot in the pull request.
-5. Open a pull request describing what changed and why, and how you tested
-   it.
+5. Keep it working on all three systems: put platform code behind
+   `cfg(windows)` / `cfg(target_os = "macos")` / `cfg(target_os = "linux")`
+   with a path for the others, start programs without assuming a shell or
+   `.exe`, and write shortcuts as `Ctrl+…` (`platform::keys` shows ⌘ on
+   macOS).
+6. Open a pull request describing what changed and why, and how you tested
+   it (and on which system).
 
 ## Conventions
 

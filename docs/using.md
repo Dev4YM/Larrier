@@ -4,8 +4,10 @@
 
 ## The window
 
-**Menu bar.** File / Edit / View / Help and the window buttons, drawn by
-Larrier and themed with the rest of the window.
+**Menu bar.** File / Edit / View / Help. On Windows Larrier draws it with
+the window's buttons (the window has no system frame); on Linux it sits
+under your desktop's title bar; on macOS the menus are in the system menu
+bar and the traffic lights sit over Larrier's top bar.
 
 **Sidebar.**
 
@@ -77,7 +79,8 @@ keeps its own panel.
 - **Browser:** a real browser in the panel. Agents can drive it through
   Larrier's browser tools while you watch; annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
-- **Terminal:** real terminals (ConPTY on Windows), plus read-only views of
+- **Terminal:** real terminals (your shell: PowerShell on Windows, `$SHELL`
+  on macOS and Linux), plus read-only views of
   the agent's own background commands.
 - **Files:** tabs, quick open, a file tree and a highlighted viewer.
 
@@ -130,18 +133,20 @@ the searches and filters of every page.
 
 ## Keyboard
 
-| Action | Shortcut |
-|---|---|
-| New agent | Ctrl N |
-| Command palette | Ctrl K / Ctrl Shift P |
-| Toggle sidebar | Ctrl B |
-| Toggle side panel | Ctrl Shift J |
-| Terminal / Changes / Files / Browser | Ctrl J / Ctrl E / Ctrl G / Ctrl Shift B |
-| Close tab / next tab | Ctrl W / Ctrl Tab |
-| Zoom in / out / reset | Ctrl = / Ctrl − / Ctrl 0 |
-| Focus composer | Ctrl L |
-| Stop agent | Ctrl . |
-| Settings | Ctrl , |
-| Import sessions | Ctrl Shift I |
+| Action | Windows / Linux | macOS |
+|---|---|---|
+| New agent | Ctrl N | ⌘N |
+| Command palette | Ctrl K / Ctrl Shift P | ⌘K / ⌘⇧P |
+| Toggle sidebar | Ctrl B | ⌘B |
+| Toggle side panel | Ctrl Shift J | ⌘⇧J |
+| Terminal / Changes / Files / Browser | Ctrl J / Ctrl E / Ctrl G / Ctrl Shift B | ⌘J / ⌘E / ⌘G / ⌘⇧B |
+| Close tab / next tab | Ctrl W / Ctrl Tab | ⌘W / ⌃Tab |
+| Zoom in / out / reset | Ctrl = / Ctrl − / Ctrl 0 | ⌘= / ⌘− / ⌘0 |
+| Focus composer | Ctrl L | ⌘L |
+| Stop agent | Ctrl . | ⌘. |
+| Settings | Ctrl , | ⌘, |
+| Import sessions | Ctrl Shift I | ⌘⇧I |
 
-On macOS, use Cmd in place of Ctrl.
+Larrier shows each shortcut the way your system writes it. In the
+terminal, copy and paste are Ctrl+Shift+C / Ctrl+Shift+V on Windows and
+Linux (Ctrl+C / Ctrl+V with a selection) and ⌘C / ⌘V on macOS.

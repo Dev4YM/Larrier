@@ -1,26 +1,50 @@
 # Building and testing
 
+Larrier builds on Windows, macOS and Linux from the same code. Each system
+has the same set of scripts: PowerShell (`.ps1`) on Windows, Bash (`.sh`)
+on macOS and Linux.
+
 ## Requirements
 
-- Rust 1.85 or newer (`rustup` recommended).
-- Windows: WebView2 (included in Windows 10 and 11) and the MSVC build
-  tools.
-- Optional: PowerShell 7 for the scripts, Python 3.10+ with Pillow and
-  NumPy for the demo and screenshot tools, the GitHub CLI (`gh`) for
-  releases.
+All systems: Rust 1.85 or newer (`rustup` recommended) and Git.
 
-`scripts/setup.ps1` checks all of these and tells you what's missing.
+| System | Also needs |
+|---|---|
+| Windows 10 / 11 | The MSVC build tools ("Desktop development with C++"). WebView2 is part of Windows. |
+| macOS 11+ | The Xcode command line tools: `xcode-select --install`. |
+| Linux | A C toolchain, `pkg-config` and the WebKitGTK 4.1 / GTK 3 development packages (below). |
+
+Linux packages:
+
+```bash
+sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+```
+
+```bash
+sudo dnf install gcc pkgconf-pkg-config webkit2gtk4.1-devel gtk3-devel libsoup3-devel libappindicator-gtk3-devel librsvg2-devel libxdo-devel openssl-devel
+```
+
+```bash
+sudo pacman -S base-devel webkit2gtk-4.1 gtk3 libsoup3 libappindicator-gtk3 librsvg xdotool openssl
+```
+
+Optional everywhere: Python 3.10+ with Pillow and NumPy for the demo and
+screenshot tools, the GitHub CLI (`gh`) for releases, Docker for portable
+Linux builds.
+
+`scripts/setup.ps1` (Windows) or `scripts/setup.sh` (macOS, Linux) checks
+all of this and says what's missing.
 
 ## Everyday commands
 
-```powershell
-./scripts/dev.ps1                 # run the desktop app (debug)
-./scripts/dev.ps1 -Sandbox        # … with a throwaway data folder
-./scripts/check.ps1               # build, test and lint everything
-./scripts/build.ps1               # optimized program into dist/, with its SHA-256
-```
+| | Windows | macOS / Linux |
+|---|---|---|
+| Run the app (debug) | `./scripts/dev.ps1` | `./scripts/dev.sh` |
+| … with a throwaway data folder | `./scripts/dev.ps1 -Sandbox` | `./scripts/dev.sh --sandbox` |
+| Build, test and lint | `./scripts/check.ps1` | `./scripts/check.sh` |
+| Release build into `dist/` | `./scripts/build.ps1` | `./scripts/build.sh` |
 
-Or with Cargo directly:
+Or with Cargo directly, on any system:
 
 ```bash
 cargo run -p larrier-app
@@ -28,16 +52,33 @@ cargo test --workspace
 cargo build --release -p larrier-app
 ```
 
+## Packages
+
+`build.ps1` and `build.sh` produce what a release carries, with its SHA-256:
+
+| System | Output |
+|---|---|
+| Windows | `dist/Larrier-<version>-windows-x64.exe` |
+| macOS | `dist/Larrier-<version>-macos-<arch>.zip` holding Larrier.app (signed ad hoc, not notarized) |
+| Linux | `dist/Larrier-<version>-linux-<arch>.tar.gz`: the program, `larrier.desktop`, the icon and `install.sh` |
+
+On an Apple silicon Mac, `./scripts/build.sh --target x86_64-apple-darwin`
+builds the Intel app too (after `rustup target add x86_64-apple-darwin`).
+On Linux, `./scripts/build.sh --docker` builds inside Ubuntu 22.04
+(`scripts/linux/Dockerfile`), so the program runs on every distribution at
+least that new; Windows and macOS can use the same image to check the Linux
+build.
+
 ## Working on the app without your own data
 
 `LARRIER_HOME` points Larrier at another data folder, so a development copy
 never touches your real sessions and settings. `./scripts/dev.ps1 -Sandbox`
-creates a fresh one for each run.
+(or `./scripts/dev.sh --sandbox`) creates a fresh one for each run.
 
 For a realistic window (projects, a dozen chats across agents, live runs)
 build the demo home:
 
-```powershell
+```bash
 python scripts/demo/make_demo.py
 ```
 

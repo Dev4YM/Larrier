@@ -84,8 +84,10 @@ button gets a dot.
 Updates use the agent's own updater where it has one (`claude update`,
 `codex update`, `cursor-agent update`, `opencode upgrade`, `hermes update`,
 `droid update`); otherwise npm (when npm installed it) or the official
-installer again. Installs use the official installer for your system.
-Larrier shows the exact command first and its output as it runs.
+installer again. Installs use the official installer for your system:
+PowerShell installers on Windows, the shell installers (`curl … | sh`) on
+macOS and Linux. Larrier shows the exact command first and its output as it
+runs.
 
 Not covered: Goose has no official Windows installer, and Aider is updated
 from its own site.

@@ -1,10 +1,22 @@
 # Installing and updating
 
-## Install
+Larrier runs on **Windows 10 and 11**, **macOS 11 or newer** (Apple silicon
+and Intel) and **Linux** (x86_64, with WebKitGTK 4.1). Every release has a
+program for each, from the
+[latest release](https://github.com/Dev4YM/Larrier/releases/latest):
 
-Download `Larrier-<version>-windows-x64.exe` from the
-[latest release](https://github.com/Dev4YM/Larrier/releases/latest) and run
-it. The program installs itself:
+| System | Download |
+|---|---|
+| Windows 10 / 11 (x64) | `Larrier-<version>-windows-x64.exe` |
+| macOS, Apple silicon | `Larrier-<version>-macos-arm64.zip` |
+| macOS, Intel | `Larrier-<version>-macos-x64.zip` |
+| Linux (x64) | `Larrier-<version>-linux-x64.tar.gz` |
+
+Each comes with a `.sha256` file to check the download against.
+
+## Windows
+
+Run `Larrier-<version>-windows-x64.exe`. The program installs itself:
 
 - **Just for me:** no administrator rights. The app goes to
   `%LOCALAPPDATA%\Programs\Larrier`, everything else stays in your profile.
@@ -16,16 +28,63 @@ it. The program installs itself:
 
 You get a Start menu shortcut (and a Desktop one if you like), and Larrier
 appears in Settings → Apps, where it uninstalls, optionally with your data.
+WebView2, which Larrier draws with, is part of Windows 10 and 11.
 
-Releases are built for Windows (x64). Larrier is written to be
-cross-platform, but macOS and Linux builds aren't released or tested yet.
+## macOS
+
+1. Unzip `Larrier-<version>-macos-<arch>.zip` and drag **Larrier.app** to
+   Applications (or anywhere you like).
+2. The first time, **right-click Larrier.app → Open** and confirm. Releases
+   aren't notarized by Apple yet, so a plain double-click is refused once;
+   after that it opens normally. (Or run
+   `xattr -dr com.apple.quarantine /Applications/Larrier.app`.)
+
+Larrier's menus are in the menu bar, and shortcuts use ⌘ where Windows and
+Linux use Ctrl. To uninstall, move Larrier.app to the Trash; your sessions
+and settings stay in `~/Library/Application Support/Larrier` until you
+delete that folder.
+
+## Linux
+
+Larrier needs WebKitGTK 4.1 and GTK 3:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0        # Debian 12+, Ubuntu 22.04+
+```
+
+```bash
+sudo dnf install webkit2gtk4.1 gtk3                    # Fedora
+```
+
+```bash
+sudo pacman -S webkit2gtk-4.1 gtk3                     # Arch
+```
+
+Then unpack the archive and run its installer, which puts the program in
+`~/.local/bin` and Larrier in your applications menu (no root needed):
+
+```bash
+tar -xzf Larrier-<version>-linux-x64.tar.gz
+```
+
+```bash
+./larrier/install.sh
+```
+
+Or run `./larrier/larrier` straight from the folder. `install.sh --remove`
+uninstalls it; your sessions and settings stay in `~/.local/share/larrier`.
+
+The window has your desktop's own title bar, with Larrier's menus under it.
+On Wayland and X11 alike.
 
 ## Updates
 
-Installed copies look for a new release on their own (Settings → About):
+Larrier looks for a new release on its own (Settings → About):
 
-- They download the new program, check it against its published SHA-256
-  and swap it in on restart. No building, no source code.
+- It downloads the new program for your system, checks it against its
+  published SHA-256 and puts it in place on restart: the `.exe` on Windows,
+  the whole Larrier.app on macOS, the program on Linux. No building, no
+  source code.
 - **Stable** gets releases; **Preview** also gets pre-releases such as
   `0.3.0-beta.1`.
 - Settings → About chooses whether Larrier only tells you, downloads, or
@@ -33,12 +92,17 @@ Installed copies look for a new release on their own (Settings → About):
 - After an update Larrier shows what's new; every version's notes are built
   in (About → Release notes).
 
+On macOS and Linux, Larrier updates itself where it is, so it needs to be
+able to write there (Applications and `~/.local/bin` both work). A copy
+installed by root or a package manager is updated the same way you
+installed it.
+
 While the repository is private, updates need a GitHub token:
 `LARRIER_GITHUB_TOKEN`, `GITHUB_TOKEN`, or a signed-in GitHub CLI.
 
 ## Your data
 
-| Platform | Location |
+| System | Location |
 |---|---|
 | Windows | `%APPDATA%\Larrier` |
 | macOS | `~/Library/Application Support/Larrier` |
@@ -50,8 +114,9 @@ Set `LARRIER_HOME` to use another folder. What's in it is described in
 ## Agents
 
 Larrier finds the agent programs you already have (on `PATH` and in their
-usual install folders). In **Settings → Agents** you can point an agent at a
-specific program, turn agents off, and install or update them; see
+usual install folders, on every system). In **Settings → Agents** you can
+point an agent at a specific program, turn agents off, and install or
+update them with their makers' installer for your system; see
 [agents.md](agents.md#installing-and-updating-agents).
 
 ## Command-line flags
@@ -59,5 +124,5 @@ specific program, turn agents off, and install or update them; see
 | Flag | Effect |
 |---|---|
 | `--version` | Print the version, commit and build date, then exit. |
-| `--portable` | Run this copy without installing it. |
-| `--uninstall` | Start the uninstaller. |
+| `--portable` | Windows: run this copy without installing it. |
+| `--uninstall` | Windows: start the uninstaller. |

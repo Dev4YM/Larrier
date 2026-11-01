@@ -9,7 +9,7 @@ crates/
   formats/   larrier-formats  native session discovery and importers, native exporters, sync, live watching
   agents/    larrier-agents   agent drivers, the turn engine, detection, models, versions, git, the browser tools
   cli/       larrier          the command line
-app/         larrier-app      the desktop app (Dioxus 0.7 on WebView2 / WebKit)
+app/         larrier-app      the desktop app (Dioxus 0.7: WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux)
 docs/                         documentation; LSF.md is the session format spec
 scripts/                      development, release and demo tooling
 ```
@@ -74,8 +74,13 @@ Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
 - `keep.rs`: window state saved to `kept.json` (debounced, flushed on close)
   and restored on start.
 - `browser_host.rs`, `browser_control.rs`: the Browser tab's views.
-- `update.rs`, `install.rs`, `version.rs`: self-install and updates from
-  GitHub releases.
+- `update.rs`, `install.rs`, `version.rs`: self-install (Windows) and
+  updates from GitHub releases on every system (the `.exe`, the whole
+  Larrier.app, or the Linux program, swapped on restart).
+- `platform.rs`: what differs by system in the window and in how shortcuts
+  read: Windows draws its own frame and buttons, macOS keeps the traffic
+  lights and a system menu bar (`ui::menubar::system_menu`), Linux uses
+  the system's frame; `Ctrl+K` reads `⌘K` on macOS.
 - `agent_models.rs`, `agent_versions.rs`, `quota.rs`, `notify.rs`,
   `automations.rs`, `live.rs`: background work feeding the UI.
 

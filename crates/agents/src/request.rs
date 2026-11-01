@@ -776,7 +776,9 @@ mod tests {
         d
     }
 
+    // npm writes .cmd and .ps1 shims on Windows only (symlinks elsewhere).
     #[test]
+    #[cfg(windows)]
     fn npm_cmd_shim_unwraps_to_node() {
         let d = tmpdir("npm");
         std::fs::create_dir_all(d.join("node_modules/@openai/codex/bin")).unwrap();
@@ -795,6 +797,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn exe_and_one_line_shims() {
         let d = tmpdir("exe");
         std::fs::create_dir_all(d.join("node_modules/opencode-ai/bin")).unwrap();

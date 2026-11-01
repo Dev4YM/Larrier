@@ -434,6 +434,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(windows)]
     fn knows_where_it_runs_from() {
         assert_eq!(kind_of(Path::new(r"D:\src\Larrier\target\release\larrier-desktop.exe")), Kind::Dev);
         if !cfg!(debug_assertions) {
@@ -444,5 +445,15 @@ mod tests {
         let user = layout(Scope::User);
         assert!(user.bin_dir.ends_with(r"Programs\Larrier") && user.shared_dir.ends_with("Larrier"));
         assert!(layout(Scope::Machine).shared_dir.to_string_lossy().contains("ProgramData"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn knows_where_it_runs_from() {
+        assert_eq!(kind_of(Path::new("/home/me/src/larrier/target/release/larrier-desktop")), Kind::Dev);
+        if !cfg!(debug_assertions) {
+            assert_eq!(kind_of(Path::new("/Applications/Larrier.app/Contents/MacOS/Larrier")), Kind::App);
+            assert_eq!(kind_of(Path::new("/home/me/.local/bin/larrier")), Kind::App);
+        }
     }
 }

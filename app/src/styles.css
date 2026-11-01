@@ -1778,6 +1778,23 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* The agent's modes beside the environment; blue when off their default. */
 .mode-chip.changed, .mode-chip.changed:hover { color: var(--blue); }
 
+/* Sidebar search: the icon grows into the box, up to Back. Without room
+   beside it, the box opens a row of its own. */
+.side-find { display: flex; align-items: center; flex: 0 0 28px; min-width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent;
+  transition: flex-grow .24s cubic-bezier(.2, .8, .2, 1), background-color .2s ease, border-color .2s ease; overflow: hidden; }
+.side-find input { flex: 1; min-width: 0; width: 0; border: none; outline: none; background: transparent; font-size: 12px; color: var(--fg); opacity: 0; pointer-events: none; padding: 0 8px 0 0;
+  transition: opacity .16s ease; }
+.side-find input::placeholder { color: var(--fg-3); }
+.side-find.open { flex: 1 1 28px; background: var(--hover); border-color: var(--border); }
+.side-find.open input { opacity: 1; pointer-events: auto; transition-delay: .06s; }
+.side-find.open .icon-btn { width: 26px; height: 26px; color: var(--fg-3); background: none; cursor: text; }
+.side-top:has(.side-find.open) > .grow { flex-grow: 0; }
+.side-top > .grow { transition: flex-grow .24s cubic-bezier(.2, .8, .2, 1); }
+.side-find-row { height: 0; opacity: 0; overflow: hidden; transition: height .22s cubic-bezier(.2, .8, .2, 1), opacity .18s ease; flex-shrink: 0; }
+.side-find-row.open { height: 34px; opacity: 1; }
+.side-find-row .side-search { margin: 0 8px 6px; }
+.app.no-motion .side-find, .app.no-motion .side-find input, .app.no-motion .side-find-row, .app.no-motion .side-top > .grow { transition: none; }
+
 /* The environment menu: places with what they mean; one that can't be
    picked any more stays readable, just quieter. */
 .menu.env-menu { min-width: 260px; }

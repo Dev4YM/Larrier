@@ -214,6 +214,9 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
     let view = app.view.read().clone();
     let (can_back, can_fwd) = (app.can_go(-1), app.can_go(1));
     let show_search = searching() || !query.is_empty();
+    // Room for the box beside the icon (up to Back), or a row of its own.
+    let roomy = app.config.read().settings.sidebar_width >= 262;
+    let focus_find = || document::eval("setTimeout(() => (document.querySelector('.side-find.open input') || document.querySelector('.side-find-row.open input'))?.focus(), 40)");
     let name = user_name();
     let initial = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
     let ctx = SideCtx { selected: selected.clone(), running: running.clone(), searching: !query.is_empty() };
@@ -221,13 +224,24 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
     rsx! {
         aside { class: if parked { "sidebar parked" } else if side_open { "sidebar" } else { "sidebar closed" }, "aria-hidden": if side_open && !parked { "false" } else { "true" },
             div { class: "side-top",
-                button { class: if show_search { "icon-btn active" } else { "icon-btn" }, title: "Search agents",
-                    onclick: move |_| {
-                        let now = !searching();
-                        searching.set(now);
-                        if !now { app.ui.write().sidebar_query.clear(); }
-                    },
-                    Icon { i: I::Search, size: 15, stroke: 1.5 }
+                div { class: if show_search && roomy { "side-find open" } else { "side-find" },
+                    button { class: if show_search && !roomy { "icon-btn active" } else { "icon-btn" }, title: "Search agents", tabindex: if show_search && roomy { "-1" } else { "0" },
+                        onclick: move |_| {
+                            searching.set(true);
+                            focus_find();
+                        },
+                        Icon { i: I::Search, size: 15, stroke: 1.5 }
+                    }
+                    if roomy {
+                        input {
+                            placeholder: "Search agents",
+                            tabindex: if show_search { "0" } else { "-1" },
+                            value: "{query_raw}",
+                            oninput: move |e| app.ui.write().sidebar_query = e.value(),
+                            onkeydown: move |e| if e.key() == Key::Escape { app.ui.write().sidebar_query.clear(); searching.set(false); },
+                            onblur: move |_| if app.ui.peek().sidebar_query.trim().is_empty() { searching.set(false); },
+                        }
+                    }
                 }
                 div { class: "grow" }
                 button { class: "icon-btn", title: "Back", disabled: !can_back, onclick: move |_| app.go(-1),
@@ -237,15 +251,18 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                     Icon { i: I::ArrowRight, size: 16, stroke: 1.5 }
                 }
             }
-            if show_search {
-                div { class: "side-search",
-                    Icon { i: I::Search, size: 13 }
-                    input {
-                        placeholder: "Search agents",
-                        autofocus: true,
-                        value: "{query_raw}",
-                        oninput: move |e| app.ui.write().sidebar_query = e.value(),
-                        onkeydown: move |e| if e.key() == Key::Escape { app.ui.write().sidebar_query.clear(); searching.set(false); },
+            if !roomy {
+                div { class: if show_search { "side-find-row open" } else { "side-find-row" },
+                    div { class: "side-search",
+                        Icon { i: I::Search, size: 13 }
+                        input {
+                            placeholder: "Search agents",
+                            tabindex: if show_search { "0" } else { "-1" },
+                            value: "{query_raw}",
+                            oninput: move |e| app.ui.write().sidebar_query = e.value(),
+                            onkeydown: move |e| if e.key() == Key::Escape { app.ui.write().sidebar_query.clear(); searching.set(false); },
+                            onblur: move |_| if app.ui.peek().sidebar_query.trim().is_empty() { searching.set(false); },
+                        }
                     }
                 }
             }

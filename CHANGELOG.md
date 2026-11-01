@@ -5,6 +5,15 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.28 — 2026-11-01
+
+### New
+
+- Choose the account a chat runs as in the model picker
+
+### Fixed
+
+- One list of logins, the same in Accounts and on the agent
 ## 0.1.27 — 2026-11-01
 
 ### Fixed

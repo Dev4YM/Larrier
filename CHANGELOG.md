@@ -5,6 +5,11 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.25 — 2026-11-01
+
+### New
+
+- A Profile with your photo and a year of your AI work
 ## 0.1.24 — 2026-11-01
 
 ### New

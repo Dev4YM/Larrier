@@ -144,6 +144,13 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
     parse(&text, Some(&info.path), &info.native_id)
 }
 
+/// A command run in Claude Code itself (`/login`, `/model`), its output or
+/// its caveat: the model never sees it, so it opens no turn.
+fn local_command(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with("<command-name>") || t.starts_with("<local-command-") || t.starts_with("Caveat: The messages below were generated")
+}
+
 /// Strip harness wrappers from user text; empty means "not a real prompt".
 pub fn clean_user_text(text: &str) -> String {
     let t = text.trim();
@@ -419,6 +426,22 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
         }
     }
 
+    // Only commands run in Claude Code itself (a terminal's `/login`):
+    // nothing was said to the model, so there's no chat to show.
+    let said = |v: &&Value| {
+        let c = &v["message"]["content"];
+        let text = match c {
+            Value::String(t) => t.clone(),
+            Value::Array(b) => b.iter().filter_map(|x| s(x, "text")).collect::<Vec<_>>().join(" "),
+            _ => String::new(),
+        };
+        !v["isMeta"].as_bool().unwrap_or(false) && !local_command(&text)
+    };
+    let users = lines.iter().filter(|v| s(v, "type") == Some("user"));
+    if !lines.iter().any(|v| s(v, "type") == Some("assistant")) && !users.clone().any(|v| said(&v)) && users.count() > 0 {
+        return Err(util::skip("only commands run in Claude Code itself"));
+    }
+
     let (mut conv, agent_ids) = convert(&lines, active.as_ref(), false);
     attach_inline_sidechains(&mut conv.messages, &lines);
     if let Some(p) = path {
@@ -470,8 +493,9 @@ fn turn_open(lines: &[Value]) -> bool {
                     Value::Array(b) => b.iter().filter_map(|x| s(x, "text")).collect::<Vec<_>>().join(" "),
                     _ => String::new(),
                 };
-                // Reports from subagents / other sessions are delivered mid-turn.
-                if peer_notice(&text, &v["origin"]).is_some() {
+                // Reports from subagents / other sessions are delivered
+                // mid-turn; commands run in Claude Code itself get no reply.
+                if peer_notice(&text, &v["origin"]).is_some() || local_command(&text) {
                     continue;
                 }
                 if text.contains("[Request interrupted") {
@@ -1167,6 +1191,31 @@ pub fn export_native(session: &Session, home_override: Option<&Path>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A terminal's `/login` is three records the model never saw: it's no
+    /// chat, and a chat that ran one isn't left mid-turn by it.
+    #[test]
+    fn local_commands_are_no_chat_and_no_turn() {
+        let login = [
+            r#"{"type":"user","uuid":"u0","parentUuid":null,"isMeta":true,"sessionId":"S","cwd":"/r","timestamp":"2026-11-01T07:53:00Z","message":{"role":"user","content":"<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request.</local-command-caveat>"}}"#,
+            r#"{"type":"user","uuid":"u1","parentUuid":"u0","sessionId":"S","timestamp":"2026-11-01T07:53:01Z","message":{"role":"user","content":"<command-name>/login</command-name>
+<command-message>login</command-message>
+<command-args></command-args>"}}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"u1","sessionId":"S","timestamp":"2026-11-01T07:53:28Z","message":{"role":"user","content":"<local-command-stdout>Login successful</local-command-stdout>"}}"#,
+        ];
+        let err = parse(&login.join("
+"), None, "S").unwrap_err();
+        assert!(err.downcast_ref::<util::ImportSkip>().is_some(), "{err}");
+        // In a real chat, a /login after the reply leaves the turn closed.
+        let mut chat = vec![
+            r#"{"type":"user","uuid":"p1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-11-01T07:50:00Z","message":{"role":"user","content":"hi"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"p1","sessionId":"S","timestamp":"2026-11-01T07:50:01Z","message":{"id":"m1","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Hello"}]}}"#,
+        ];
+        chat.extend(login.iter().copied());
+        let s = parse(&chat.join("
+"), None, "S").unwrap();
+        assert!(!s.external_turn, "a local command opens no turn");
+    }
 
     /// A second account signed in from a folder of its own: its sessions are
     /// found there and run as that account.

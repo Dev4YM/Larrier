@@ -72,7 +72,7 @@ pub fn drop_copies(store: &Store) -> usize {
 /// Bump when an importer changes what it produces: sessions imported by an
 /// older version are imported again on the next sync, keeping what the user
 /// changed in Larrier.
-pub const IMPORTER_VERSION: u32 = 8;
+pub const IMPORTER_VERSION: u32 = 9;
 
 pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(&str) -> bool) -> SyncReport {
     let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -155,8 +155,20 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
                 }
                 Err(e) if e.downcast_ref::<ImportSkip>().is_some() => {
                     // Remember empty sessions so they aren't re-parsed every run.
-                    if matches!(plan, Plan::New) {
-                        store.set_import_record(key, ImportRecord { session_id: String::new(), source_mtime: info.mtime_ms, source_len: info.size, importer: IMPORTER_VERSION, ..Default::default() });
+                    let empty = ImportRecord { session_id: String::new(), source_mtime: info.mtime_ms, source_len: info.size, importer: IMPORTER_VERSION, ..Default::default() };
+                    match plan {
+                        Plan::New => store.set_import_record(key, empty),
+                        // No longer worth a chat (a newer importer knows
+                        // better): a copy nobody touched goes.
+                        Plan::Update(id, _) => {
+                            let untouched = store.load(id).is_ok_and(|s| {
+                                !s.pinned && s.parent.is_none() && s.extra.get("import_title").and_then(|t| t.as_str()) == Some(s.title.as_str()) && !s.extra.keys().any(|k| k.starts_with("feedback:"))
+                            });
+                            if untouched && store.delete(id).is_ok() {
+                                store.set_import_record(key, empty);
+                                report.removed += 1;
+                            }
+                        }
                     }
                     report.skipped += 1;
                 }

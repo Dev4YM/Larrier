@@ -40,6 +40,8 @@ case "$machine" in
     *) echo "build.sh: unsupported architecture $machine" >&2; exit 1 ;;
 esac
 
+# The oldest macOS the app says it runs on (Info.plist below).
+if [ "$os" = Darwin ]; then export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"; fi
 cargo build --release --locked -p larrier-app ${target:+--target "$target"}
 bin="target/${target:+$target/}release/larrier-desktop"
 mkdir -p dist

@@ -5,6 +5,16 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.35 — 2026-11-01
+
+### New
+
+- Run on macOS and Linux
+- Install and update on macOS and Linux
+
+### Fixed
+
+- Keep API keys on Linux after logging out
 ## 0.1.34 — 2026-11-01
 
 ### Fixed

@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use larrier_core::lsf::is_narration_block;
 use larrier_core::{AgentKind, FileDiff, Message, Part, Session, ToolCall, Usage};
 use rusqlite::Connection;
 use serde_json::Value;
@@ -231,6 +232,7 @@ fn build(list: Vec<(Value, Vec<Value>)>, meta: Meta, children: &dyn Fn(&str) -> 
             }
             match s(p, "type") {
                 Some("text") if !p["synthetic"].as_bool().unwrap_or(false) => conv.text(s(p, "text").unwrap_or(""), pts, model),
+                Some("reasoning") if is_narration_block(p) => conv.text(s(p, "text").unwrap_or(""), pts, model),
                 Some("reasoning") => {
                     let dur = match (p["time"]["start"].as_i64(), p["time"]["end"].as_i64()) {
                         (Some(a), Some(b)) if b >= a => Some((b - a) as u64),

@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use larrier_core::{lsf::MediaSource, AgentKind, FileDiff, Part, ToolCall, ToolKind, ToolStatus, Usage};
+use larrier_core::{lsf::{is_narration_block, is_narration_signature, MediaSource}, AgentKind, FileDiff, Part, ToolCall, ToolKind, ToolStatus, Usage};
 use larrier_formats::claude::{fix_tool_kind, loaded_tools, server_tool_result};
 use larrier_formats::util::image_parts;
 use serde_json::{json, Value};
@@ -670,6 +670,11 @@ pub struct ClaudeStream {
     /// Tool calls shown while being written: their full input still has
     /// to replace the partial one.
     partial_tools: HashSet<String>,
+    /// Thinking blocks of the message being streamed, by content index.
+    thinking_blocks: HashSet<u64>,
+    /// Streamed thinking blocks already turned into text as narration, by
+    /// the start of their signature.
+    narrated: HashSet<String>,
 }
 
 /// A tool call whose input is still streaming in.
@@ -818,10 +823,17 @@ impl ClaudeStream {
                 self.current_msg = ev["message"]["id"].as_str().map(|s| s.to_string());
                 self.retrying = false;
                 self.writing.clear();
+                self.thinking_blocks.clear();
             }
             // A tool call starts: show it right away, then as it is written.
             "content_block_start" => {
                 let b = &ev["content_block"];
+                // Each thinking block streams into a part of its own: one
+                // may turn out to be narration once its signature arrives.
+                if let (Some("thinking"), Some(i)) = (s(b, "type"), ev["index"].as_u64()) {
+                    self.thinking_blocks.insert(i);
+                    sink.send(AgentEvent::ReasoningBlock);
+                }
                 if let (Some("tool_use"), Some(id), Some(name), Some(i)) = (s(b, "type"), s(b, "id"), s(b, "name"), ev["index"].as_u64()) {
                     if self.seen_tools.insert(id.to_string()) {
                         self.partial_tools.insert(id.to_string());
@@ -854,6 +866,15 @@ impl ClaudeStream {
                         if let Some(t) = d["thinking"].as_str() {
                             self.mark_streamed();
                             sink.send(AgentEvent::ReasoningDelta { text: t.to_string() });
+                        }
+                    }
+                    // A thinking block's signature says whether it was
+                    // narration: words for the reader, shown as text.
+                    "signature_delta" => {
+                        if let (Some(i), Some(sig)) = (ev["index"].as_u64(), d["signature"].as_str()) {
+                            if self.thinking_blocks.contains(&i) && is_narration_signature(sig) && self.narrated.insert(signature_key(sig)) {
+                                sink.send(AgentEvent::ReasoningToText { back: 0 });
+                            }
                         }
                     }
                     // A tool call's input as it is written (a command, a
@@ -896,16 +917,28 @@ impl ClaudeStream {
         }
         let streamed = self.streamed.contains(&mid);
         let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else { return };
-        for b in blocks {
+        for (i, b) in blocks.iter().enumerate() {
             match s(b, "type").unwrap_or("") {
                 "text" if !streamed => {
                     if let Some(t) = b["text"].as_str() {
                         sink.send(AgentEvent::Text { text: t.to_string() });
                     }
                 }
-                "thinking" if !streamed => {
-                    if let Some(t) = b["thinking"].as_str().filter(|t| !t.is_empty()) {
-                        sink.send(AgentEvent::Reasoning { text: t.to_string(), duration_ms: v["thinking_duration_ms"].as_u64() });
+                "thinking" => {
+                    let text = b["thinking"].as_str().unwrap_or("");
+                    let narration = narration_at(v, i) || is_narration_block(b);
+                    if streamed {
+                        // Streamed as reasoning; narration its signature
+                        // didn't reveal while streaming turns into text now.
+                        if narration && !text.trim().is_empty() && self.narrated.insert(signature_key(s(b, "signature").unwrap_or(text))) {
+                            sink.send(AgentEvent::ReasoningToText { back: 0 });
+                        }
+                    } else if !text.is_empty() {
+                        sink.send(if narration {
+                            AgentEvent::Text { text: text.to_string() }
+                        } else {
+                            AgentEvent::Reasoning { text: text.to_string(), duration_ms: v["thinking_duration_ms"].as_u64() }
+                        });
                     }
                 }
                 "tool_use" | "server_tool_use" => {
@@ -1071,7 +1104,7 @@ impl ClaudeStream {
                     }
                 }
                 let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else { return };
-                for b in blocks {
+                for (i, b) in blocks.iter().enumerate() {
                     match s(b, "type").unwrap_or("") {
                         "text" => {
                             if let Some(t) = b["text"].as_str().filter(|t| !t.trim().is_empty()) {
@@ -1080,7 +1113,12 @@ impl ClaudeStream {
                         }
                         "thinking" => {
                             if let Some(t) = b["thinking"].as_str().filter(|t| !t.trim().is_empty()) {
-                                sink.send(wrap(AgentEvent::Reasoning { text: t.to_string(), duration_ms: None }));
+                                let narration = narration_at(v, i) || is_narration_block(b);
+                                sink.send(wrap(if narration {
+                                    AgentEvent::Text { text: t.to_string() }
+                                } else {
+                                    AgentEvent::Reasoning { text: t.to_string(), duration_ms: None }
+                                }));
                             }
                         }
                         "tool_use" | "server_tool_use" => {
@@ -1206,6 +1244,18 @@ impl ClaudeStream {
             self.streamed.insert(id.clone());
         }
     }
+}
+
+/// Whether Claude Code lists content block `i` of this frame as narration
+/// (`narration_block_indexes`, beside the message).
+fn narration_at(v: &Value, i: usize) -> bool {
+    v["narration_block_indexes"].as_array().is_some_and(|a| a.iter().any(|x| x.as_u64() == Some(i as u64)))
+}
+
+/// What identifies a thinking block across its stream and its frame: the
+/// start of its signature (the part a chunked signature shares).
+fn signature_key(sig: &str) -> String {
+    sig.chars().take(48).collect()
 }
 
 /// One `<task-notification>` block.
@@ -1762,6 +1812,83 @@ mod tests {
     }
     use crate::drivers::testutil::collect;
     use larrier_core::ToolKind;
+
+    /// A thinking block's signature naming its kind, as the API writes it.
+    fn signature(kind: &str) -> String {
+        use base64::Engine;
+        let mut b = vec![0x08, 0x04, 0x12, 0x60, 0x0a, 0x11, 0x08, 0x13, 0x18, 0x02, 0x38, 0x01, 0x42, kind.len() as u8];
+        b.extend_from_slice(kind.as_bytes());
+        b.extend((0..90u8).map(|i| i.wrapping_mul(37)));
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }
+
+    /// What a reply holds, part by part: ("thinking" | "text", its text).
+    fn shape(parts: &[Part]) -> Vec<(&'static str, String)> {
+        parts
+            .iter()
+            .filter_map(|p| match p {
+                Part::Reasoning { text, .. } => Some(("thinking", text.clone())),
+                Part::Text { text } => Some(("text", text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Narration (words for the reader that the API sends as a thinking
+    /// block) shows as text, never as a thought: streamed right after real
+    /// thinking, in whole frames, by Claude Code's own list, in subagents.
+    #[test]
+    fn narration_shows_as_text() {
+        let (think, say) = (signature("thinking"), signature("narration"));
+        let ev = |e: Value| serde_json::json!({"type": "stream_event", "event": e, "parent_tool_use_id": null}).to_string();
+        let frame = |id: &str, content: Value, extra: Value| {
+            let mut v = serde_json::json!({"type": "assistant", "parent_tool_use_id": null, "message": {"id": id, "role": "assistant", "content": content}});
+            if let (Some(v), Some(x)) = (v.as_object_mut(), extra.as_object()) {
+                v.extend(x.clone());
+            }
+            v.to_string()
+        };
+        let lines = [
+            ev(serde_json::json!({"type": "message_start", "message": {"id": "m1"}})),
+            ev(serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}})),
+            ev(serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "A retry can race the first delivery."}})),
+            ev(serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": think}})),
+            ev(serde_json::json!({"type": "content_block_stop", "index": 0})),
+            frame("m1", serde_json::json!([{"type": "thinking", "thinking": "A retry can race the first delivery.", "signature": think}]), Value::Null),
+            ev(serde_json::json!({"type": "content_block_start", "index": 1, "content_block": {"type": "thinking", "thinking": "", "signature": ""}})),
+            ev(serde_json::json!({"type": "content_block_delta", "index": 1, "delta": {"type": "thinking_delta", "thinking": "Agreed, the rings felt cheap."}})),
+            ev(serde_json::json!({"type": "content_block_delta", "index": 1, "delta": {"type": "signature_delta", "signature": say}})),
+            ev(serde_json::json!({"type": "content_block_stop", "index": 1})),
+            frame("m1", serde_json::json!([{"type": "thinking", "thinking": "Agreed, the rings felt cheap.", "signature": say}]), Value::Null),
+            // Whole frames: by the signature, and by Claude Code's list.
+            frame("m2", serde_json::json!([{"type": "thinking", "thinking": "Plan the tests.", "signature": think}, {"type": "thinking", "thinking": "Now the tests.", "signature": say}]), Value::Null),
+            frame("m3", serde_json::json!([{"type": "thinking", "thinking": "Check the lock."}, {"type": "thinking", "thinking": "The lock holds."}]), serde_json::json!({"narration_block_indexes": [1]})),
+            serde_json::json!({"type": "assistant", "parent_tool_use_id": "task1", "message": {"id": "s1", "content": [{"type": "thinking", "thinking": "Looking for writers.", "signature": say}]}}).to_string(),
+        ];
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let mut p = ClaudeStream::default();
+        let events = collect(&mut p, &lines);
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Subagent { inner, .. } if matches!(&**inner, AgentEvent::Text { text } if text == "Looking for writers."))));
+
+        let mut s = larrier_core::Session::new(AgentKind::ClaudeCode, None);
+        s.push(larrier_core::Message::user_text("make webhooks idempotent"));
+        let mut rec = crate::engine::TurnRecorder::begin(&mut s, AgentKind::ClaudeCode, None, None);
+        for e in events.iter().filter(|e| !matches!(e, AgentEvent::Subagent { .. })) {
+            rec.apply(&mut s, e);
+        }
+        let t = |k: &'static str, x: &str| (k, x.to_string());
+        assert_eq!(
+            shape(&s.messages.last().unwrap().parts),
+            vec![
+                t("thinking", "A retry can race the first delivery."),
+                t("text", "Agreed, the rings felt cheap."),
+                t("thinking", "Plan the tests."),
+                t("text", "Now the tests."),
+                t("thinking", "Check the lock."),
+                t("text", "The lock holds."),
+            ]
+        );
+    }
 
     #[test]
     fn parses_partial_stream_without_duplicates() {

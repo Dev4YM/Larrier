@@ -3064,6 +3064,7 @@ name = "larrier-core"
 version = "0.1.32"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "keyring",
@@ -3079,6 +3080,7 @@ name = "larrier-formats"
 version = "0.1.32"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "hex",

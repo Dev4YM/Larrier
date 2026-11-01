@@ -1,7 +1,7 @@
 //! OpenCode: `opencode run --format json --thinking --dir <cwd> [-s ses_…]
 //! [-m provider/model] [--agent build|plan] [--auto] <message>`.
 
-use larrier_core::{FileDiff, ToolKind, ToolStatus};
+use larrier_core::{lsf::is_narration_block, FileDiff, ToolKind, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -62,7 +62,12 @@ impl LineParser for OpenCodeStream {
             "reasoning" => {
                 if let Some(t) = s(part, "text").filter(|t| !t.trim().is_empty()) {
                     let dur = part["time"]["end"].as_u64().zip(part["time"]["start"].as_u64()).map(|(e, b)| e.saturating_sub(b));
-                    sink.send(AgentEvent::Reasoning { text: t.to_string(), duration_ms: dur });
+                    // Narration from Anthropic models arrives as reasoning.
+                    sink.send(if is_narration_block(part) {
+                        AgentEvent::Text { text: t.to_string() }
+                    } else {
+                        AgentEvent::Reasoning { text: t.to_string(), duration_ms: dur }
+                    });
                 }
             }
             "tool_use" => {

@@ -22,6 +22,8 @@ pub struct TurnRecorder {
     /// The agent finished a reply and later spoke again (after background
     /// work): its next words start a paragraph of their own.
     text_break: bool,
+    /// A new reasoning block started: its first delta opens a new part.
+    reasoning_break: bool,
 }
 
 impl TurnRecorder {
@@ -43,6 +45,7 @@ impl TurnRecorder {
             finished: false,
             ok: false,
             text_break: false,
+            reasoning_break: false,
         }
     }
 
@@ -136,8 +139,27 @@ impl TurnRecorder {
                 if self.reasoning_started.is_none() {
                     self.reasoning_started = Some(std::time::Instant::now());
                 }
-                self.msg(session).push_reasoning(text);
+                let fresh = std::mem::take(&mut self.reasoning_break);
+                let m = self.msg(session);
+                if fresh {
+                    m.parts.push(Part::Reasoning { text: text.clone(), duration_ms: None });
+                } else {
+                    m.push_reasoning(text);
+                }
                 true
+            }
+            AgentEvent::ReasoningBlock => {
+                self.close_reasoning(session);
+                self.reasoning_break = true;
+                false
+            }
+            AgentEvent::ReasoningToText { back } => {
+                self.close_reasoning(session);
+                let changed = self.msg(session).reasoning_to_text(*back);
+                if changed {
+                    session.touch();
+                }
+                changed
             }
             AgentEvent::Reasoning { text, duration_ms } => {
                 self.close_reasoning(session);
@@ -437,6 +459,10 @@ fn apply_nested(tool: &mut ToolCall, event: &AgentEvent, agent: &AgentKind, dept
         AgentEvent::Text { text } => m.parts.push(Part::Text { text: text.clone() }),
         AgentEvent::ReasoningDelta { text } => m.push_reasoning(text),
         AgentEvent::Reasoning { text, duration_ms } => m.parts.push(Part::Reasoning { text: text.clone(), duration_ms: *duration_ms }),
+        AgentEvent::ReasoningBlock => {}
+        AgentEvent::ReasoningToText { back } => {
+            m.reasoning_to_text(*back);
+        }
         AgentEvent::ToolStart { tool } => place_tool(m, tool),
         AgentEvent::Plan { entries } => {
             if let Some(Part::Plan { entries: e }) = m.parts.iter_mut().rev().find(|p| matches!(p, Part::Plan { .. })) {

@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use larrier_core::lsf::is_narration_block;
 use larrier_core::{AgentKind, Part, Session, ToolCall, Usage};
 use serde_json::Value;
 
@@ -124,6 +125,7 @@ fn parse_with(text: &str, path: Option<&Path>, settings: &Value) -> Result<Sessi
                         for b in &blocks {
                             match s(b, "type") {
                                 Some("text") => conv.text(s(b, "text").unwrap_or(""), ts, model),
+                                Some("thinking") if is_narration_block(b) => conv.text(s(b, "thinking").unwrap_or(""), ts, model),
                                 Some("thinking") => conv.reasoning(s(b, "thinking").unwrap_or(""), b["durationMs"].as_u64(), ts, model),
                                 Some("tool_use") => {
                                     let t = ToolCall::new(s(b, "id").unwrap_or(""), s(b, "name").unwrap_or("tool"), b.get("input").cloned().unwrap_or(Value::Null));

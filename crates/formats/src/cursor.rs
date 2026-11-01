@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use larrier_core::lsf::{close_active_tools, slim_transcript, title_from_prompt, MediaSource};
+use larrier_core::lsf::{close_active_tools, is_narration_block, slim_transcript, title_from_prompt, MediaSource};
 use larrier_core::{AgentKind, FileDiff, Message, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
 use serde_json::Value;
 
@@ -716,6 +716,7 @@ fn transcript_conv(text: &str, mtime: Option<DateTime<Utc>>) -> (Conv, bool) {
                 for c in content.as_array().into_iter().flatten() {
                     match s(c, "type") {
                         Some("text") => conv.text(s(c, "text").unwrap_or(""), ts.or(mtime), None),
+                        Some("thinking") | Some("reasoning") if is_narration_block(c) => conv.text(s(c, "thinking").or_else(|| s(c, "text")).unwrap_or(""), ts.or(mtime), None),
                         Some("thinking") | Some("reasoning") => conv.reasoning(s(c, "thinking").or_else(|| s(c, "text")).unwrap_or(""), None, ts.or(mtime), None),
                         Some("tool_use") | Some("tool-call") => {
                             let name = s(c, "name").or_else(|| s(c, "toolName")).unwrap_or("tool");

@@ -292,11 +292,16 @@ impl Decoder {
                     usage.cache_write_tokens = u(us, "cache_creation_input_tokens");
                     usage.context_tokens = Some(usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens);
                 }
+                "content_block_start" if s(&v["content_block"], "type") == Some("thinking") => sink.send(AgentEvent::ReasoningBlock),
                 "content_block_delta" => {
                     let d = &v["delta"];
                     match s(d, "type").unwrap_or("") {
                         "text_delta" => sink.text(s(d, "text").unwrap_or("")),
                         "thinking_delta" => sink.send(AgentEvent::ReasoningDelta { text: s(d, "thinking").unwrap_or("").to_string() }),
+                        // Narration arrives as a thinking block; its signature says so.
+                        "signature_delta" if larrier_core::lsf::is_narration_signature(s(d, "signature").unwrap_or("")) => {
+                            sink.send(AgentEvent::ReasoningToText { back: 0 })
+                        }
                         _ => {}
                     }
                 }

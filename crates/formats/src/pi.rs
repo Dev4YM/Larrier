@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use larrier_core::lsf::is_narration_block;
 use larrier_core::{AgentKind, NativeLink, Part, Role, Session, ToolCall, Usage};
 use serde_json::{json, Value};
 
@@ -146,6 +147,7 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                         for c in m["content"].as_array().into_iter().flatten() {
                             match s(c, "type") {
                                 Some("text") => conv.text(s(c, "text").unwrap_or(""), mts, model),
+                                Some("thinking") if is_narration_block(c) => conv.text(s(c, "thinking").unwrap_or(""), mts, model),
                                 Some("thinking") => conv.reasoning(s(c, "thinking").unwrap_or(""), None, mts, model),
                                 Some("toolCall") => {
                                     let t = ToolCall::new(s(c, "id").unwrap_or(""), s(c, "name").unwrap_or("tool"), c.get("arguments").cloned().unwrap_or(Value::Null));

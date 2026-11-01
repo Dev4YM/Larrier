@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use larrier_core::{FileDiff, ToolStatus};
+use larrier_core::{lsf::is_narration_block, FileDiff, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -36,6 +36,8 @@ pub struct PiStream {
     /// Whether the current assistant message streamed deltas.
     streamed_text: bool,
     streamed_thinking: bool,
+    /// The content index of the thinking block streaming now.
+    thinking_index: Option<u64>,
     tool_paths: std::collections::HashMap<String, String>,
     started: HashSet<String>,
 }
@@ -52,6 +54,7 @@ impl LineParser for PiStream {
             "message_start" => {
                 self.streamed_text = false;
                 self.streamed_thinking = false;
+                self.thinking_index = None;
             }
             "message_update" => {
                 let e = &v["assistantMessageEvent"];
@@ -62,6 +65,12 @@ impl LineParser for PiStream {
                         sink.text(delta);
                     }
                     "thinking_delta" if !delta.is_empty() => {
+                        // Each thinking block streams into a part of its own.
+                        let index = e["contentIndex"].as_u64();
+                        if self.thinking_index != index || !self.streamed_thinking {
+                            self.thinking_index = index;
+                            sink.send(AgentEvent::ReasoningBlock);
+                        }
                         self.streamed_thinking = true;
                         sink.send(AgentEvent::ReasoningDelta { text: delta.to_string() });
                     }
@@ -130,6 +139,20 @@ impl PiStream {
             return;
         }
         if let Some(blocks) = m["content"].as_array() {
+            // Thinking blocks that were narration (words for the reader) by
+            // their signature; streamed ones are the reply's last parts.
+            let thinking: Vec<bool> = blocks
+                .iter()
+                .filter(|b| s(b, "type") == Some("thinking") && s(b, "thinking").or_else(|| s(b, "text")).is_some_and(|t| !t.is_empty()))
+                .map(is_narration_block)
+                .collect();
+            if self.streamed_thinking {
+                for (j, narration) in thinking.iter().enumerate() {
+                    if *narration {
+                        sink.send(AgentEvent::ReasoningToText { back: thinking.len() - 1 - j });
+                    }
+                }
+            }
             for b in blocks {
                 match s(b, "type").unwrap_or("") {
                     "text" if !self.streamed_text => {
@@ -139,7 +162,11 @@ impl PiStream {
                     }
                     "thinking" if !self.streamed_thinking => {
                         if let Some(t) = s(b, "thinking").or_else(|| s(b, "text")).filter(|t| !t.is_empty()) {
-                            sink.send(AgentEvent::Reasoning { text: t.to_string(), duration_ms: None });
+                            sink.send(if is_narration_block(b) {
+                                AgentEvent::Text { text: t.to_string() }
+                            } else {
+                                AgentEvent::Reasoning { text: t.to_string(), duration_ms: None }
+                            });
                         }
                     }
                     _ => {}
@@ -165,6 +192,41 @@ impl PiStream {
 
 #[cfg(test)]
 mod tests {
+
+    /// A thinking block's signature naming its kind, as the API writes it.
+    fn signature(kind: &str) -> String {
+        use base64::Engine;
+        let mut b = vec![0x08, 0x04, 0x12, 0x60, 0x0a, 0x11, 0x08, 0x13, 0x18, 0x02, 0x38, 0x01, 0x42, kind.len() as u8];
+        b.extend_from_slice(kind.as_bytes());
+        b.extend((0..90u8).map(|i| i.wrapping_mul(37)));
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }
+
+    #[test]
+    fn narration_streamed_as_thinking_becomes_text() {
+        let say = signature("narration");
+        let lines = [
+            r#"{"type":"message_start","message":{"role":"assistant"}}"#.to_string(),
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":0,"delta":"Read the handler first."}}"#.to_string(),
+            r#"{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","contentIndex":1,"delta":"I'll add the key."}}"#.to_string(),
+            serde_json::json!({"type": "message_end", "message": {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "Read the handler first."},
+                {"type": "thinking", "thinking": "I'll add the key.", "thinkingSignature": say},
+            ]}})
+            .to_string(),
+        ];
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let events = crate::drivers::testutil::collect(&mut PiStream::default(), &lines);
+        let mut s = larrier_core::Session::new(larrier_core::AgentKind::Pi, None);
+        s.push(larrier_core::Message::user_text("go"));
+        let mut rec = crate::engine::TurnRecorder::begin(&mut s, larrier_core::AgentKind::Pi, None, None);
+        for e in &events {
+            rec.apply(&mut s, e);
+        }
+        let parts = &s.messages.last().unwrap().parts;
+        assert!(matches!(&parts[0], larrier_core::Part::Reasoning { text, .. } if text == "Read the handler first."), "{parts:?}");
+        assert!(matches!(&parts[1], larrier_core::Part::Text { text } if text == "I'll add the key."), "{parts:?}");
+    }
     use super::*;
     use crate::drivers::testutil::collect;
     use larrier_core::ToolKind;

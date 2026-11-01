@@ -25,4 +25,5 @@ regex.workspace = true
 ruzstd = "0.9"
 
 [dev-dependencies]
+base64.workspace = true
 tempfile = "3"

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::Utc;
-use larrier_core::lsf::{close_active_tools, find_tool_deep_mut, slim_transcript, title_from_prompt};
+use larrier_core::lsf::{close_active_tools, find_tool_deep_mut, is_narration_block, slim_transcript, title_from_prompt};
 use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -726,9 +726,14 @@ fn convert(lines: &[Value], active: Option<&HashSet<usize>>, sidechain: bool) ->
             continue;
         }
         if let Some(blocks) = msg["content"].as_array() {
-            for b in blocks {
+            for (i, b) in blocks.iter().enumerate() {
                 match s(b, "type") {
                     Some("text") => conv.text(s(b, "text").unwrap_or(""), ts, model),
+                    // Narration: words for the reader that the API sends as a
+                    // thinking block (its signature, or Claude Code, says so).
+                    Some("thinking") if is_narration_block(b) || v["narration_block_indexes"].as_array().is_some_and(|a| a.iter().any(|x| x.as_u64() == Some(i as u64))) => {
+                        conv.text(s(b, "thinking").unwrap_or(""), ts, model)
+                    }
                     Some("thinking") => {
                         let dur = v["thinkingDurationMs"].as_u64();
                         conv.reasoning(s(b, "thinking").unwrap_or(""), dur, ts, model)
@@ -1311,6 +1316,36 @@ mod tests {
         let bypass = [lines[0], r#"{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"S"}"#];
         assert_eq!(parse(&bypass.join("
 "), None, "S").unwrap().mode, None);
+    }
+
+
+    /// A thinking block's signature naming its kind, as the API writes it.
+    fn signature(kind: &str) -> String {
+        use base64::Engine;
+        let mut b = vec![0x08, 0x04, 0x12, 0x60, 0x0a, 0x11, 0x08, 0x13, 0x18, 0x02, 0x38, 0x01, 0x42, kind.len() as u8];
+        b.extend_from_slice(kind.as_bytes());
+        b.extend((0..90u8).map(|i| i.wrapping_mul(37)));
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }
+
+    /// Claude Code stores narration as a thinking record; its signature
+    /// says it's words for the reader.
+    #[test]
+    fn narration_records_import_as_text() {
+        let rec = |uuid: &str, parent: &str, thinking: &str, sig: &str| {
+            serde_json::json!({"type": "assistant", "uuid": uuid, "parentUuid": parent, "sessionId": "S", "timestamp": "2026-10-01T10:00:01Z",
+                "message": {"id": "m1", "model": "claude-x", "role": "assistant", "content": [{"type": "thinking", "thinking": thinking, "signature": sig}]}, "thinkingDurationMs": 31260})
+            .to_string()
+        };
+        let lines = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"sessionId":"S","cwd":"/r","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"the background is ugly"}}"#.to_string(),
+            rec("a1", "u1", "The user wants something more artistic.", &signature("thinking")),
+            rec("a2", "a1", "Agreed, the rings felt cheap. I'll make a few options.", &signature("narration")),
+        ];
+        let s = parse(&lines.join("\n"), None, "S").unwrap();
+        let parts = &s.messages[1].parts;
+        assert!(matches!(&parts[0], Part::Reasoning { text, .. } if text.starts_with("The user wants")), "{parts:?}");
+        assert!(matches!(&parts[1], Part::Text { text } if text.starts_with("Agreed")), "{parts:?}");
     }
 
     #[test]

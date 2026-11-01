@@ -26,6 +26,12 @@ pub enum AgentEvent {
     Text { text: String },
     ReasoningDelta { text: String },
     Reasoning { text: String, duration_ms: Option<u64> },
+    /// A new reasoning block starts: its deltas don't join the one before.
+    ReasoningBlock,
+    /// A streamed reasoning block turned out to be narration (text for the
+    /// reader that the API sent as a thinking block): the reasoning part
+    /// `back` places before the reply's last one becomes text.
+    ReasoningToText { back: usize },
     ToolStart { tool: ToolCall },
     ToolUpdate {
         id: String,

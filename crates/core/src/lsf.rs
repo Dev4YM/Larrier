@@ -22,6 +22,31 @@ pub const LSF_VERSION: &str = "1.0";
 pub const LSF_EXT_JSONL: &str = "lsf.jsonl";
 pub const LSF_EXT_JSON: &str = "lsf.json";
 
+/// Whether an Anthropic thinking block is narration: what the model says to
+/// the reader between tool calls, which the API delivers as a thinking
+/// block. The signature opens with a plain protobuf header naming the
+/// block's kind (`thinking` or `narration`); a signature that doesn't
+/// decode, or an older one without the kind, counts as thinking.
+pub fn is_narration_signature(signature: &str) -> bool {
+    use base64::Engine;
+    // The kind sits in the first few dozen bytes; the rest is opaque.
+    let n = signature.len().min(128) / 4 * 4;
+    let Some(head) = signature.get(..n) else { return false };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(head) else { return false };
+    // Field 8 (length-delimited), 9 bytes long: "narration".
+    bytes.windows(11).any(|w| w == b"\x42\x09narration")
+}
+
+/// [`is_narration_signature`] for a thinking block as an agent stores it,
+/// wherever it keeps the signature: `signature` (Claude Code, Droid,
+/// Cursor), `thinkingSignature` (Pi) or provider metadata (OpenCode).
+pub fn is_narration_block(block: &Value) -> bool {
+    [&block["signature"], &block["thinkingSignature"], &block["metadata"]["anthropic"]["signature"], &block["providerMetadata"]["anthropic"]["signature"]]
+        .iter()
+        .filter_map(|v| v.as_str())
+        .any(is_narration_signature)
+}
+
 pub fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
@@ -373,6 +398,19 @@ impl Message {
         } else {
             self.parts.push(Part::Reasoning { text: delta.to_string(), duration_ms: None });
         }
+    }
+
+    /// Turn the reasoning part `back` places before the last one into text
+    /// (narration that streamed in as reasoning). Returns whether one did.
+    pub fn reasoning_to_text(&mut self, back: usize) -> bool {
+        let Some(i) = self.parts.iter().enumerate().rev().filter(|(_, p)| matches!(p, Part::Reasoning { .. })).nth(back).map(|(i, _)| i) else {
+            return false;
+        };
+        if let Part::Reasoning { text, .. } = &mut self.parts[i] {
+            let text = std::mem::take(text);
+            self.parts[i] = Part::Text { text };
+        }
+        true
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1528,6 +1566,39 @@ pub fn title_from_prompt(prompt: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A signature with the header the API writes, naming `kind`.
+    fn signature(kind: &str) -> String {
+        use base64::Engine;
+        let mut b = vec![0x08, 0x04, 0x12, 0x60, 0x0a, 0x11, 0x08, 0x13, 0x18, 0x02, 0x38, 0x01, 0x42, kind.len() as u8];
+        b.extend_from_slice(kind.as_bytes());
+        b.extend((0..90u8).map(|i| i.wrapping_mul(37)));
+        base64::engine::general_purpose::STANDARD.encode(b)
+    }
+
+    #[test]
+    fn narration_is_told_from_thinking_by_its_signature() {
+        assert!(is_narration_signature(&signature("narration")));
+        assert!(!is_narration_signature(&signature("thinking")));
+        assert!(!is_narration_signature(""));
+        assert!(!is_narration_signature("not base64 at all, but long enough to be read"));
+        assert!(is_narration_block(&serde_json::json!({"type": "thinking", "thinking": "Agreed.", "signature": signature("narration")})));
+        assert!(is_narration_block(&serde_json::json!({"type": "thinking", "thinkingSignature": signature("narration")})));
+        assert!(is_narration_block(&serde_json::json!({"type": "reasoning", "metadata": {"anthropic": {"signature": signature("narration")}}})));
+        assert!(!is_narration_block(&serde_json::json!({"type": "thinking", "signature": signature("thinking")})));
+        assert!(!is_narration_block(&serde_json::json!({"type": "thinking", "thinking": "no signature"})));
+    }
+
+    #[test]
+    fn a_reasoning_part_turns_into_text() {
+        let mut m = Message::assistant(AgentKind::ClaudeCode, None);
+        m.parts = vec![Part::Reasoning { text: "think".into(), duration_ms: Some(3) }, Part::Text { text: "a".into() }, Part::Reasoning { text: "say".into(), duration_ms: None }];
+        assert!(m.reasoning_to_text(1));
+        assert_eq!(m.parts[0], Part::Text { text: "think".into() });
+        assert_eq!(m.parts[2], Part::Reasoning { text: "say".into(), duration_ms: None });
+        assert!(m.reasoning_to_text(0));
+        assert!(!m.reasoning_to_text(0));
+    }
 
     #[test]
     fn roundtrip_jsonl() {

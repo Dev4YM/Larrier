@@ -1700,6 +1700,29 @@ fn ModeChip(group: ModeGroupView, gi: usize, plan: bool, up: bool, onpick: Event
     }
 }
 
+/// A place to run: icon, name, what it means, a check when chosen.
+#[component]
+fn EnvRow(icon: I, label: String, description: String, checked: bool, disabled: bool, onclick: EventHandler<()>) -> Element {
+    let mut cls = String::from("menu-item mode-row env-row");
+    if checked {
+        cls.push_str(" checked");
+    }
+    if disabled {
+        cls.push_str(" off");
+    }
+    rsx! {
+        button { class: "{cls}", disabled,
+            onclick: move |e| { e.stop_propagation(); if !disabled { onclick.call(()); } },
+            span { class: "env-ic", Icon { i: icon, size: 15, stroke: 1.5 } }
+            div { class: "mo-main",
+                div { class: "mo-top", span { class: "mo-label", "{label}" } }
+                div { class: "mo-desc", "{description}" }
+            }
+            span { class: "mo-check", if checked { Icon { i: I::Check, size: 14 } } }
+        }
+    }
+}
+
 /// "This PC ▾" / "Worktree ▾" environment picker.
 #[component]
 fn EnvPicker(open: Signal<bool>, worktree: bool, is_repo: bool, session: bool, label: String) -> Element {
@@ -1712,16 +1735,15 @@ fn EnvPicker(open: Signal<bool>, worktree: bool, is_repo: bool, session: bool, l
                 span { "{label}" }
                 Icon { i: I::ChevronDown, size: 12 }
             }
-            Dropdown { open, up: session,
+            Dropdown { open, up: session, class: "env-menu".to_string(),
                 div { class: "menu-label", "Run on" }
-                MenuItem { label: "This PC".to_string(), sub: Some("in the folder".to_string()), icon: Some(I::Laptop), checked: !worktree,
-                    disabled: session,
+                EnvRow { icon: I::Laptop, label: "This PC", description: "In the project folder itself", checked: !worktree, disabled: session && worktree,
                     onclick: move |_| { open.set(false); app.draft.write().worktree = false; } }
-                MenuItem { label: "Worktree".to_string(), sub: Some(if is_repo { "isolated git checkout".to_string() } else { "needs a git repo".to_string() }), icon: Some(I::Layers), checked: worktree,
-                    disabled: session || !is_repo,
+                EnvRow { icon: I::Layers, label: "Worktree", description: if is_repo { "An isolated git checkout of its own".to_string() } else { "Needs a git repository".to_string() }, checked: worktree,
+                    disabled: (session && !worktree) || !is_repo,
                     onclick: move |_| { open.set(false); app.draft.write().worktree = true; } }
                 if session {
-                    div { class: "menu-label", style: "padding-top: 4px;", "The environment is fixed once an agent starts" }
+                    div { class: "env-note", Icon { i: I::Info, size: 12 } "A chat keeps the place it started in" }
                 }
             }
         }

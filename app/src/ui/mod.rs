@@ -1703,6 +1703,11 @@ pub fn place_js(id: &str, prefer_up: bool, align_right: bool) -> String {
   if (up) {{ m.style.top = 'auto'; m.style.bottom = (vh - (a.top - gap)) + 'px'; }} else {{ m.style.top = top + 'px'; }}
   m.style.transformOrigin = (up ? 'bottom ' : 'top ') + ({align_right} ? 'right' : 'left');
   m.classList.toggle('flip-up', up);
+  // It scrolls only when its content is clearly taller than it: checked once
+  // it has settled after opening, and when its content changes.
+  m.style.overflowY = 'hidden';
+  const fit = () => {{ if (m.isConnected) m.style.overflowY = m.scrollHeight > m.clientHeight + 8 ? 'auto' : 'hidden'; }};
+  setTimeout(() => {{ fit(); new MutationObserver(() => requestAnimationFrame(fit)).observe(m, {{ childList: true, subtree: true, characterData: true }}); }}, 320);
   m.style.visibility = 'visible'; m.classList.add('in');
   {keys}
 }});"#,

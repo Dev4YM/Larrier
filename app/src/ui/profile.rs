@@ -71,7 +71,7 @@ fn keep_photo(from: &std::path::Path, old: Option<&str>, dir: &std::path::Path) 
     Ok(to.to_string_lossy().to_string())
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 enum Metric {
     Tokens,
     Cost,
@@ -196,10 +196,10 @@ fn streaks(c: &Calendar, today: i32) -> (u32, u32) {
 pub fn ProfileView() -> Element {
     let mut app = use_app();
     let mut loaded: Signal<Option<std::sync::Arc<HashMap<String, SessionStats>>>> = use_signal(|| None);
-    let mut metric = use_signal(|| Metric::Tokens);
-    let mut harness = use_signal(|| "all".to_string());
+    let mut metric = crate::keep::use_kept(crate::keep::WINDOW, "profile.metric", || Metric::Tokens);
+    let mut harness = crate::keep::use_kept(crate::keep::WINDOW, "profile.harness", || "all".to_string());
     // None: the last twelve months; Some(year): that year.
-    let mut year = use_signal(|| None::<i32>);
+    let mut year = crate::keep::use_kept(crate::keep::WINDOW, "profile.year", || None::<i32>);
     let mut hover = use_signal(|| None::<(i32, usize, usize)>);
 
     // Read every session's usage once (cached on disk, like Plan & Usage).

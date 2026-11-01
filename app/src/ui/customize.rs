@@ -91,17 +91,21 @@ fn matches_query(it: &HarnessItem, q: &str) -> bool {
 pub fn CustomizeView() -> Element {
     let app = use_app();
     let mut nonce = use_signal(|| 0u32);
-    let mut query = use_signal(String::new);
-    // Opened from `/mcp`: on that agent's MCP servers.
+    let mut query = crate::keep::use_kept(crate::keep::WINDOW, "customize.search", String::new);
+    // Opened from `/mcp`: on that agent's MCP servers (else as left).
     let focus = use_hook(|| app.ui.peek().customize_focus.clone());
-    let mut kind_filter = use_signal(|| focus.as_ref().and_then(|f| f.0));
-    let mut agent_filter = use_signal(|| focus.as_ref().and_then(|f| f.1.clone()));
+    let mut kind_filter = crate::keep::use_kept(crate::keep::WINDOW, "customize.kind", || None);
+    let mut agent_filter = crate::keep::use_kept(crate::keep::WINDOW, "customize.agent", || None);
     use_hook(move || {
         let mut app = app;
         app.ui.write().customize_focus = None;
+        if let Some(f) = &focus {
+            kind_filter.set(f.0);
+            agent_filter.set(f.1.clone());
+        }
     });
     let mut scope_open = use_signal(|| false);
-    let expanded = use_signal(BTreeSet::<String>::new);
+    let expanded = crate::keep::use_kept(crate::keep::WINDOW, "customize.open", BTreeSet::<String>::new);
 
     let data = use_resource(move || {
         let _ = nonce();

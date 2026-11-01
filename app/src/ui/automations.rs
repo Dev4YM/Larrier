@@ -79,7 +79,7 @@ const CSS: &str = r#"
 .au-err { color: var(--red); font-size: 12px; margin-right: auto; }
 "#;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 enum Tab {
     Mine,
     Runs,
@@ -88,10 +88,11 @@ enum Tab {
 #[component]
 pub fn AutomationsView() -> Element {
     let app = use_app();
-    let mut tab = use_signal(|| Tab::Mine);
-    let mut query = use_signal(String::new);
-    let mut category = use_signal(|| "Popular");
-    let mut editing: Signal<Option<(Automation, bool)>> = use_signal(|| None);
+    let mut tab = crate::keep::use_kept(crate::keep::WINDOW, "automations.tab", || Tab::Mine);
+    let mut query = crate::keep::use_kept(crate::keep::WINDOW, "automations.search", String::new);
+    let mut category = crate::keep::use_kept(crate::keep::WINDOW, "automations.category", || "Popular".to_string());
+    // The automation being edited, with what was changed so far.
+    let mut editing: Signal<Option<(Automation, bool)>> = crate::keep::use_kept(crate::keep::WINDOW, "automations.editing", || None);
 
     let autos = app.config.read().automations.clone();
     let all_templates = templates();
@@ -113,7 +114,7 @@ pub fn AutomationsView() -> Element {
         editing.set(Some((a, true)));
     };
     let hero: Vec<Template> = all_templates.iter().filter(|t| t.popular).take(3).cloned().collect();
-    let cards: Vec<Template> = all_templates.iter().filter(|t| t.in_category(category())).cloned().collect();
+    let cards: Vec<Template> = all_templates.iter().filter(|t| t.in_category(&category())).cloned().collect();
 
     rsx! {
         style { {CSS} }
@@ -191,7 +192,7 @@ pub fn AutomationsView() -> Element {
 
                 div { class: "au-cats",
                     for c in CATEGORIES.iter().copied() {
-                        button { key: "{c}", class: if category() == c { "au-tab on" } else { "au-tab" }, onclick: move |_| category.set(c), "{c}" }
+                        button { key: "{c}", class: if category() == c { "au-tab on" } else { "au-tab" }, onclick: move |_| category.set(c.to_string()), "{c}" }
                     }
                 }
                 div { class: "au-grid",
@@ -441,6 +442,8 @@ enum Kind {
 fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Element {
     let app = use_app();
     let mut a = use_signal(|| initial.clone());
+    // Changes so far are kept (until saved or cancelled), in case Larrier closes.
+    use_effect(move || crate::keep::set_value(crate::keep::WINDOW, "automations.editing", &Some((a.read().clone(), is_new))));
     let mut error = use_signal(String::new);
     let kind = use_signal(|| match initial.trigger {
         Trigger::Daily { .. } => Kind::Daily,

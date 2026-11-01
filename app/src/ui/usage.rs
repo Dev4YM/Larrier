@@ -124,7 +124,7 @@ pub fn nice_scale(v: f64, integers: bool) -> (f64, f64) {
 
 // ------------------------------------------------------------------ model
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Range {
     Week,
     Month,
@@ -163,7 +163,7 @@ impl Range {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Metric {
     Tokens,
     Cost,
@@ -680,11 +680,11 @@ pub fn severity(pct: f64) -> &'static str {
 #[component]
 pub fn UsageView() -> Element {
     let app = use_app();
-    let mut range = use_signal(|| Range::Month);
-    let mut scope = use_signal(|| "all".to_string());
-    let mut metric = use_signal(|| Metric::Tokens);
-    let mut with_cache = use_signal(|| false);
-    let mut table = use_signal(|| false);
+    let mut range = crate::keep::use_kept(crate::keep::WINDOW, "usage.range", || Range::Month);
+    let mut scope = crate::keep::use_kept(crate::keep::WINDOW, "usage.scope", || "all".to_string());
+    let mut metric = crate::keep::use_kept(crate::keep::WINDOW, "usage.metric", || Metric::Tokens);
+    let mut with_cache = crate::keep::use_kept(crate::keep::WINDOW, "usage.cache", || false);
+    let mut table = crate::keep::use_kept(crate::keep::WINDOW, "usage.table", || false);
     let mut stats: Signal<Option<StatsSet>> = use_signal(|| None);
     let mut loading = use_signal(|| false);
 

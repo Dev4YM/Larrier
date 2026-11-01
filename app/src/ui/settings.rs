@@ -36,7 +36,7 @@ pub fn SettingsNav() -> Element {
         View::Settings(t) => *t,
         _ => SettingsTab::General,
     };
-    let mut q = use_signal(String::new);
+    let mut q = crate::keep::use_kept(crate::keep::WINDOW, "settings.search", String::new);
     let ql = q.read().to_lowercase();
     let name = crate::state::display_name(&app.config.read());
     rsx! {
@@ -275,7 +275,7 @@ fn SourceControl() -> Element {
 fn Agents() -> Element {
     let mut app = use_app();
     let detected = app.detected.read().clone();
-    let mut open = use_signal(|| None::<String>);
+    let mut open = crate::keep::use_kept(crate::keep::WINDOW, "settings.agent", || None::<String>);
     let customs = app.config.read().custom_agents.clone();
     rsx! {
         h1 { "Agents" }
@@ -494,9 +494,9 @@ fn protocol_label(p: Protocol) -> &'static str {
 #[component]
 fn AddCustomAgent() -> Element {
     let app = use_app();
-    let mut name = use_signal(String::new);
-    let mut command = use_signal(String::new);
-    let mut protocol = use_signal(|| Protocol::Acp);
+    let mut name = crate::keep::use_kept(crate::keep::WINDOW, "settings.custom.name", String::new);
+    let mut command = crate::keep::use_kept(crate::keep::WINDOW, "settings.custom.command", String::new);
+    let mut protocol = crate::keep::use_kept(crate::keep::WINDOW, "settings.custom.protocol", || Protocol::Acp);
     rsx! {
         div { class: "set-row",
             input { class: "input", style: "width: 150px", placeholder: "Name", value: "{name}", oninput: move |e| name.set(e.value()) }

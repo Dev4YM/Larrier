@@ -65,8 +65,8 @@ pub fn AgentModelsPanel(kind: AgentKind) -> Element {
     let refreshing = app.models_refreshing.read().contains(&kind.id());
     let ac = app.config.read().agent(&kind);
     let all = am::choices(&app, &kind);
-    let mut query = use_signal(String::new);
-    let mut show_all = use_signal(|| false);
+    let mut query = crate::keep::use_kept(crate::keep::WINDOW, "models.search", String::new);
+    let mut show_all = crate::keep::use_kept(crate::keep::WINDOW, "models.all", || false);
     let mut limit = use_signal(|| 60usize);
     // Re-read the agent's files when its page opens.
     let k0 = kind.clone();

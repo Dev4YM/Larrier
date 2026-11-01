@@ -189,7 +189,7 @@ fn General() -> Element {
                 }
             }
             Row { title: "While an Agent Works, Enter".to_string(),
-                desc: Some(format!("{}. Ctrl+Enter does the other of steer and queue (it never stops the agent). Agents that can't read messages mid-turn get them queued.", s.busy_send.description())),
+                desc: Some(format!("{}. {} does the other of steer and queue (it never stops the agent). Agents that can't read messages mid-turn get them queued.", s.busy_send.description(), crate::platform::keys("Ctrl+Enter"))),
                 super::Select {
                     value: format!("{:?}", s.busy_send),
                     options: larrier_core::BusySend::ALL.iter().map(|b| (format!("{b:?}"), b.label().to_string())).collect(),
@@ -200,10 +200,16 @@ fn General() -> Element {
                     },
                 }
             }
-            Row { title: "Browser for Agents".to_string(), desc: Some("Claude Code, Codex and agents connected over ACP can open pages, click, type and take screenshots in Larrier's browser, which you watch in the Browser tab.".to_string()),
-                Toggle { on: s.browser_tools, onchange: move |v| app.update_config(|c| c.settings.browser_tools = v) }
+            if larrier_agents::browser::SUPPORTED {
+                Row { title: "Browser for Agents".to_string(), desc: Some("Claude Code, Codex and agents connected over ACP can open pages, click, type and take screenshots in Larrier's browser, which you watch in the Browser tab.".to_string()),
+                    Toggle { on: s.browser_tools, onchange: move |v| app.update_config(|c| c.settings.browser_tools = v) }
+                }
+            } else {
+                Row { title: "Browser for Agents".to_string(), desc: Some("Windows only for now: agents drive Larrier's browser through its DevTools port, which this system's web engine doesn't have. The Browser tab is yours to browse in.".to_string()),
+                    span { class: "faint", "Not available" }
+                }
             }
-            Row { title: "Send with Ctrl+Enter".to_string(), desc: Some("Otherwise Enter sends and Shift+Enter adds a line.".to_string()),
+            Row { title: format!("Send with {}", crate::platform::keys("Ctrl+Enter")), desc: Some("Otherwise Enter sends and Shift+Enter adds a line.".to_string()),
                 Toggle { on: s.send_with_ctrl_enter, onchange: move |v| app.update_config(|c| c.settings.send_with_ctrl_enter = v) }
             }
             Row { title: "Show Reasoning".to_string(), desc: Some("Display thinking blocks inside \u{201c}Worked for\u{201d}.".to_string()),
@@ -997,7 +1003,6 @@ fn Shortcuts() -> Element {
     ];
     rsx! {
         h1 { "Keyboard Shortcuts" }
-        div { class: "sub", "Use Cmd instead of Ctrl on macOS." }
         div { class: "set-card",
             for (i, (label, keys)) in rows.iter().enumerate() {
                 div { key: "{i}", class: "set-row", style: "min-height: 40px;",
@@ -1025,6 +1030,10 @@ fn About() -> Element {
         crate::install::Kind::Installed(crate::install::Scope::Machine) => ("Installed for everyone", crate::install::layout(crate::install::Scope::Machine).bin_dir.display().to_string()),
         crate::install::Kind::Installed(crate::install::Scope::User) => ("Installed for you", crate::install::layout(crate::install::Scope::User).bin_dir.display().to_string()),
         crate::install::Kind::Portable => ("Not installed", "Running this copy as it is. Run it again to install it.".to_string()),
+        crate::install::Kind::App => {
+            let exe = std::env::current_exe().unwrap_or_default();
+            ("Installed", crate::install::bundle_of(&exe).unwrap_or(exe).display().to_string())
+        }
         crate::install::Kind::Dev => ("Development build", "Built from source: updates come from your checkout.".to_string()),
     };
     let installed = matches!(kind, crate::install::Kind::Installed(_));

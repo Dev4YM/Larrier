@@ -7,6 +7,10 @@
 //!
 //! The release binary is its own installer: run from anywhere else it
 //! offers to install itself (see `ui::setup`).
+//!
+//! macOS and Linux install programs by copying them: Larrier.app wherever
+//! it was put, or the program `install.sh` placed in `~/.local/bin`. Such a
+//! copy is [`Kind::App`]; it updates where it is and never shows the setup.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -34,6 +38,8 @@ pub enum Kind {
     Installed(Scope),
     /// A downloaded binary run from anywhere else.
     Portable,
+    /// macOS or Linux: installed by copying it (see the module docs).
+    App,
     /// Built from source (cargo): updates come from the checkout.
     Dev,
 }
@@ -107,6 +113,9 @@ pub fn kind_of(exe: &Path) -> Kind {
     if cfg!(debug_assertions) || in_target {
         return Kind::Dev;
     }
+    if !cfg!(windows) {
+        return Kind::App;
+    }
     let dir = exe.parent().unwrap_or(exe);
     for scope in [Scope::Machine, Scope::User] {
         if same_path(dir, &layout(scope).bin_dir) {
@@ -174,11 +183,17 @@ pub fn install(scope: Scope, desktop_shortcut: bool) -> Result<PathBuf> {
 /// Tidy up after an update: the program it replaced, and downloaded
 /// updates that are now in place (run at startup).
 pub fn tidy() {
-    let Kind::Installed(scope) = current() else { return };
-    let l = layout(scope);
-    let _ = std::fs::remove_file(l.exe().with_extension("exe.old"));
-    let _ = std::fs::remove_file(l.exe().with_extension("exe.new"));
-    if let Ok(dirs) = std::fs::read_dir(l.shared_dir.join("updates")) {
+    let updates = match current() {
+        Kind::Installed(scope) => {
+            let l = layout(scope);
+            let _ = std::fs::remove_file(sibling(&l.exe(), "old"));
+            let _ = std::fs::remove_file(sibling(&l.exe(), "new"));
+            l.shared_dir.join("updates")
+        }
+        Kind::App => crate::update::cache_dir(),
+        _ => return,
+    };
+    if let Ok(dirs) = std::fs::read_dir(updates) {
         for d in dirs.flatten() {
             let v = d.file_name().to_string_lossy().to_string();
             if !crate::version::newer(&v, crate::version::VERSION) {
@@ -188,14 +203,21 @@ pub fn tidy() {
     }
 }
 
+/// `path` with `.<tag>` added to its name (`Larrier.exe.old`, `larrier.new`).
+fn sibling(path: &Path, tag: &str) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{tag}"));
+    path.with_file_name(name)
+}
+
 /// Copy `from` over `to`, retrying while the old program is still closing.
 pub fn replace_file(from: &Path, to: &Path) -> Result<()> {
-    let tmp = to.with_extension("exe.new");
+    let tmp = sibling(to, "new");
     std::fs::copy(from, &tmp).with_context(|| format!("copying Larrier to {}", tmp.display()))?;
     let mut last = None;
     for _ in 0..40 {
         // A running .exe can be renamed but not overwritten.
-        let old = to.with_extension("exe.old");
+        let old = sibling(to, "old");
         let _ = std::fs::remove_file(&old);
         if to.exists() {
             if let Err(e) = std::fs::rename(to, &old) {
@@ -214,6 +236,29 @@ pub fn replace_file(from: &Path, to: &Path) -> Result<()> {
     }
     let _ = std::fs::remove_file(&tmp);
     Err(anyhow!("could not replace {}: {}", to.display(), last.map(|e| e.to_string()).unwrap_or_default()))
+}
+
+/// macOS: the `.app` bundle a program runs from.
+pub fn bundle_of(exe: &Path) -> Option<PathBuf> {
+    exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf)
+}
+
+/// Put the bundle `from` in place of the bundle `to` (macOS): the old one
+/// moves aside first and is removed once the new one is there.
+pub fn replace_bundle(from: &Path, to: &Path) -> Result<()> {
+    let old = sibling(to, "old");
+    let _ = std::fs::remove_dir_all(&old);
+    std::fs::rename(to, &old).with_context(|| format!("moving {} aside", to.display()))?;
+    // `ditto` copies a bundle as the Finder does (across volumes, keeping
+    // its permissions and signature).
+    let copied = Command::new("ditto").arg(from).arg(to).status().map(|s| s.success()).unwrap_or(false);
+    if !copied {
+        let _ = std::fs::remove_dir_all(to);
+        std::fs::rename(&old, to).ok();
+        return Err(anyhow!("could not copy the new Larrier.app to {}", to.display()));
+    }
+    let _ = std::fs::remove_dir_all(&old);
+    Ok(())
 }
 
 /// The Settings → Apps entry: name, version, icon, size and the uninstaller.
@@ -324,8 +369,33 @@ pub fn run_elevated(exe: &Path, args: &[String]) -> Result<i32> {
     }
 }
 
+/// Start a helper program without waiting: a plain process, no app of its
+/// own (the update hand-over).
+pub fn spawn(exe: &Path, args: &[&str]) -> Result<()> {
+    let mut cmd = Command::new(exe);
+    cmd.args(args);
+    if let Some(dir) = exe.parent() {
+        cmd.current_dir(dir);
+    }
+    cmd.spawn().with_context(|| format!("starting {}", exe.display()))?;
+    Ok(())
+}
+
 /// Start a program without waiting (and without this process's console).
+/// On macOS a program inside a bundle starts as the app (`open`), so it gets
+/// its Dock icon and menu bar.
 pub fn launch(exe: &Path, args: &[&str]) -> Result<()> {
+    if cfg!(target_os = "macos") {
+        if let Some(app) = bundle_of(exe) {
+            let mut cmd = Command::new("open");
+            cmd.arg("-n").arg(&app);
+            if !args.is_empty() {
+                cmd.arg("--args").args(args);
+            }
+            cmd.spawn().with_context(|| format!("starting {}", app.display()))?;
+            return Ok(());
+        }
+    }
     let mut cmd = Command::new(exe);
     cmd.args(args);
     if let Some(dir) = exe.parent() {

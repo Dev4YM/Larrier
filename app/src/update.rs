@@ -1,8 +1,9 @@
-//! Updates from GitHub releases. A release carries the Windows program
-//! (`Larrier-<version>-windows-x64.exe`) and its SHA-256
-//! (`….exe.sha256`); Larrier downloads the newest one's program, checks it,
-//! and on restart the new program takes the old one's place. No source
-//! code is involved.
+//! Updates from GitHub releases. A release carries each platform's program
+//! and its SHA-256 (`<asset>.sha256`): `Larrier-<version>-windows-x64.exe`,
+//! `…-macos-arm64.zip` / `…-macos-x64.zip` (Larrier.app) and
+//! `…-linux-x64.tar.gz`. Larrier downloads the newest one's, checks it, and
+//! on restart the new program takes the old one's place (on macOS the whole
+//! Larrier.app). No source code is involved.
 //!
 //! The Stable channel follows the latest release; Preview also takes
 //! pre-releases (`0.3.0-beta.2`). Versions compare as Semantic Versions
@@ -45,6 +46,10 @@ pub fn asset_suffix() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("windows", "x86_64") => Some("-windows-x64.exe"),
         ("windows", "aarch64") => Some("-windows-arm64.exe"),
+        ("macos", "aarch64") => Some("-macos-arm64.zip"),
+        ("macos", "x86_64") => Some("-macos-x64.zip"),
+        ("linux", "x86_64") => Some("-linux-x64.tar.gz"),
+        ("linux", "aarch64") => Some("-linux-arm64.tar.gz"),
         _ => None,
     }
 }
@@ -146,9 +151,10 @@ pub fn newest(list: &[Value]) -> Option<Release> {
 }
 
 /// Where downloaded updates wait.
-fn cache_dir() -> PathBuf {
+pub fn cache_dir() -> PathBuf {
     match install::current() {
         Kind::Installed(scope) => install::layout(scope).shared_dir.join("updates"),
+        Kind::App => dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("larrier").join("updates"),
         _ => install::layout(Scope::User).shared_dir.join("updates"),
     }
 }
@@ -194,10 +200,33 @@ pub async fn download(rel: &Release, mut progress: impl FnMut(u64, u64)) -> Resu
         }
         _ => bail!("The release has no checksum for its program"),
     }
-    let tmp = path.with_extension("exe.part");
-    std::fs::write(&tmp, &bytes)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(path)
+    if cfg!(windows) {
+        let tmp = path.with_extension("exe.part");
+        std::fs::write(&tmp, &bytes)?;
+        std::fs::rename(&tmp, &path)?;
+        return Ok(path);
+    }
+    unpack(&dir, &rel.asset_name, &bytes)
+}
+
+/// macOS and Linux: unpack a downloaded archive with the system's own tools
+/// and return the program in it (inside Larrier.app on macOS).
+fn unpack(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
+    let archive = dir.join(name);
+    std::fs::write(&archive, bytes)?;
+    let out = dir.join("unpacked");
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out)?;
+    let (tool, args, program): (&str, Vec<&std::ffi::OsStr>, PathBuf) = if name.ends_with(".zip") {
+        ("ditto", vec!["-x".as_ref(), "-k".as_ref(), archive.as_os_str(), out.as_os_str()], out.join("Larrier.app/Contents/MacOS/Larrier"))
+    } else {
+        ("tar", vec!["-xzf".as_ref(), archive.as_os_str(), "-C".as_ref(), out.as_os_str()], out.join("larrier/larrier"))
+    };
+    let ok = std::process::Command::new(tool).args(args).status().map(|s| s.success()).unwrap_or(false);
+    if !ok || !program.exists() {
+        bail!("The download couldn't be unpacked");
+    }
+    Ok(program)
 }
 
 fn hex(b: &[u8]) -> String {
@@ -209,7 +238,7 @@ fn hex(b: &[u8]) -> String {
 pub fn restart_into(downloaded: &Path) -> Result<()> {
     let me = std::env::current_exe()?;
     let pid = std::process::id().to_string();
-    install::launch(downloaded, &["--apply-update", &me.display().to_string(), "--pid", &pid])
+    install::spawn(downloaded, &["--apply-update", &me.display().to_string(), "--pid", &pid])
 }
 
 /// Like [`restart_into`] for a Larrier that is closing: the new program
@@ -217,7 +246,7 @@ pub fn restart_into(downloaded: &Path) -> Result<()> {
 pub fn install_after_exit(downloaded: &Path) -> Result<()> {
     let me = std::env::current_exe()?;
     let pid = std::process::id().to_string();
-    install::launch(downloaded, &["--apply-update", &me.display().to_string(), "--pid", &pid, "--no-launch"])
+    install::spawn(downloaded, &["--apply-update", &me.display().to_string(), "--pid", &pid, "--no-launch"])
 }
 
 /// Run by the downloaded program (`--apply-update <target> --pid <n>`): wait
@@ -229,6 +258,15 @@ pub fn apply(target: &Path, pid: Option<u32>, relaunch: bool) -> Result<()> {
     }
     let me = std::env::current_exe()?;
     let kind = install::kind_of(target);
+    // macOS: the whole Larrier.app is replaced, not just its program.
+    #[cfg(target_os = "macos")]
+    if let (Some(old), Some(new)) = (install::bundle_of(target), install::bundle_of(&me)) {
+        install::replace_bundle(&new, &old)?;
+        if relaunch {
+            install::launch(target, &[])?;
+        }
+        return Ok(());
+    }
     let writable = target.parent().map(|d| {
         let probe = d.join(".larrier-write-test");
         let ok = std::fs::write(&probe, b"").is_ok();
@@ -240,6 +278,8 @@ pub fn apply(target: &Path, pid: Option<u32>, relaunch: bool) -> Result<()> {
         if let Kind::Installed(scope) = kind {
             let _ = install::set_version(scope, larrier_core::APP_VERSION);
         }
+    } else if !cfg!(windows) {
+        bail!("Larrier can't write to {}: update it the way you installed it", target.parent().unwrap_or(target).display());
     } else {
         let code = install::run_elevated(&me, &["--replace".into(), target.display().to_string()])?;
         if code != 0 {
@@ -263,6 +303,18 @@ pub fn replace(target: &Path) -> Result<()> {
 }
 
 fn wait_for_exit(pid: u32) {
+    #[cfg(not(windows))]
+    {
+        for _ in 0..240 {
+            let alive = std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+            if !alive {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        return;
+    }
+    #[allow(unreachable_code)]
     for _ in 0..240 {
         let mut cmd = std::process::Command::new("tasklist");
         cmd.args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"]);

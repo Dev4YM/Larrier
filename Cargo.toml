@@ -41,7 +41,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
 similar = "2"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
-keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native"] }
+# Linux: the kernel keyring as a cache over the desktop's Secret Service
+# (GNOME Keyring, KWallet), so saved keys survive logging out.
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent", "crypto-rust"] }
 open = "5"
 rfd = "0.15"
 dioxus = { version = "0.7", features = ["desktop"] }

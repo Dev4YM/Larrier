@@ -17,8 +17,10 @@ In its data folder (see [install.md](install.md#your-data)):
 | `accounts/<id>/` | Config folders of separate logins you create in Larrier. |
 | `worktrees/` | Git worktrees for agents, when you use them. |
 
-API keys and other secrets go to the operating system's credential store
-(Windows Credential Manager on Windows), never to these files.
+API keys and other secrets go to the operating system's credential store,
+never to these files: Credential Manager on Windows, the Keychain on macOS,
+and the desktop's Secret Service on Linux (GNOME Keyring or KWallet, with
+the kernel keyring in front of it).
 
 ## What Larrier reads
 

@@ -24,8 +24,8 @@ In scope:
 
 - The Larrier app and CLI in this repository.
 - Its updater (downloads, SHA-256 checks, replacing the program).
-- How it stores secrets (the OS credential store) and what it writes to
-  disk.
+- How it stores secrets (Credential Manager, the macOS Keychain, the Linux
+  Secret Service) and what it writes to disk.
 - The browser tools it exposes to agents (`Larrier mcp-browser`).
 
 Out of scope: the agents Larrier runs (report those to their makers) and

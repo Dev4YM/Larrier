@@ -334,6 +334,7 @@ fn discover_ide(db: &Path) -> Result<Vec<NativeSessionInfo>> {
                     updated_at: ts_from_ms(upd),
                     size: value.as_deref().map(|t| t.len() as u64).unwrap_or(0),
                     mtime_ms: upd.max(checkpoint.unwrap_or(0)),
+                    account: None,
                 });
             }
         } else if let Ok(raw) = con.query_row("SELECT value FROM ItemTable WHERE key = 'composer.composerData'", [], |r| r.get::<_, String>(0)) {
@@ -351,6 +352,7 @@ fn discover_ide(db: &Path) -> Result<Vec<NativeSessionInfo>> {
                     updated_at: ts_from_ms(upd),
                     size: 0,
                     mtime_ms: upd,
+                    account: None,
                 });
             }
         }

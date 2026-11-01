@@ -72,7 +72,7 @@ fn discover_db(db: &Path) -> Result<Vec<NativeSessionInfo>> {
         }
         let upd = last.or(started).unwrap_or(0.0);
         let mtime = (upd * 1000.0) as i64;
-        out.push(NativeSessionInfo { agent: AGENT, native_id: id, path: db.to_path_buf(), title, cwd, updated_at: ts_from_secs(upd), size: count as u64, mtime_ms: mtime });
+        out.push(NativeSessionInfo { agent: AGENT, native_id: id, path: db.to_path_buf(), title, cwd, updated_at: ts_from_secs(upd), size: count as u64, mtime_ms: mtime, account: None });
     }
     Ok(out)
 }

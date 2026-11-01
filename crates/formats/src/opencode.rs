@@ -73,7 +73,7 @@ fn discover_db(db: &Path) -> Result<Vec<NativeSessionInfo>> {
     let mut out = Vec::new();
     for (id, title, dir, created, updated, parts) in rows.flatten() {
         let upd = updated.or(created).unwrap_or(0);
-        out.push(NativeSessionInfo { agent: AGENT, native_id: id, path: db.to_path_buf(), title, cwd: dir, updated_at: ts_from_ms(upd), size: parts as u64, mtime_ms: upd });
+        out.push(NativeSessionInfo { agent: AGENT, native_id: id, path: db.to_path_buf(), title, cwd: dir, updated_at: ts_from_ms(upd), size: parts as u64, mtime_ms: upd, account: None });
     }
     Ok(out)
 }

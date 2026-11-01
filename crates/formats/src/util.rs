@@ -186,6 +186,7 @@ pub fn info(agent: AgentKind, native_id: impl Into<String>, path: &Path) -> Nati
         updated_at: ts_from_ms(mtime_ms),
         size,
         mtime_ms,
+        account: None,
     }
 }
 

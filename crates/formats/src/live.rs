@@ -89,11 +89,16 @@ pub fn watch_specs(agents: &[AgentKind]) -> Vec<WatchSpec> {
     let mut out = Vec::new();
     for a in agents {
         match a {
-            AgentKind::ClaudeCode => out.push(WatchSpec::tree(a.clone(), claude::root(None).join("projects"), true)),
+            AgentKind::ClaudeCode => {
+                for root in claude::roots() {
+                    out.push(WatchSpec::tree(a.clone(), root.join("projects"), true));
+                }
+            }
             AgentKind::Codex => {
-                let root = codex::root(None);
-                out.push(WatchSpec::tree(a.clone(), root.join("sessions"), true));
-                out.push(WatchSpec::tree(a.clone(), root.join("archived_sessions"), true));
+                for root in codex::roots() {
+                    out.push(WatchSpec::tree(a.clone(), root.join("sessions"), true));
+                    out.push(WatchSpec::tree(a.clone(), root.join("archived_sessions"), true));
+                }
             }
             AgentKind::Gemini => out.push(WatchSpec::tree(a.clone(), gemini::root(None).join("tmp"), true)),
             AgentKind::Pi => out.push(WatchSpec::tree(a.clone(), pi::root(None).join("sessions"), true)),

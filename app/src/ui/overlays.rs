@@ -475,7 +475,56 @@ fn WhatsNewModal(version: String, updated: bool) -> Element {
 enum AuthKind {
     System,
     Dir,
+    /// A folder the agent already signs in from (another account's).
+    Existing,
     Key,
+}
+
+/// What marks an agent's own folder: its sign-in file, and where its
+/// sessions are.
+fn folder_marks(kind: &AgentKind) -> Option<(&'static str, &'static str, &'static str)> {
+    match kind {
+        AgentKind::ClaudeCode => Some((".claude-", ".credentials.json", "projects")),
+        AgentKind::Codex => Some((".codex-", "auth.json", "sessions")),
+        _ => None,
+    }
+}
+
+/// Whether `path` holds the agent's sign-in (`None`: not a folder).
+fn signed_in(kind: &AgentKind, path: &str) -> Option<bool> {
+    let p = std::path::Path::new(path.trim());
+    if path.trim().is_empty() || !p.is_dir() {
+        return None;
+    }
+    Some(folder_marks(kind).map(|(_, sign, _)| p.join(sign).is_file()).unwrap_or(false))
+}
+
+/// The agent's other folders in the home folder (`~/.claude-work`) that no
+/// account uses yet: (path, a name for it).
+fn found_folders(kind: &AgentKind, used: &[String]) -> Vec<(String, String)> {
+    let Some((prefix, sign, data)) = folder_marks(kind) else { return Vec::new() };
+    let Some(home) = dirs::home_dir() else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(&home) else { return Vec::new() };
+    let mut out: Vec<(String, String)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let rest = name.strip_prefix(prefix)?.to_string();
+            let p = e.path();
+            if rest.is_empty() || !p.is_dir() || !(p.join(sign).is_file() || p.join(data).is_dir()) {
+                return None;
+            }
+            let path = p.to_string_lossy().to_string();
+            (!used.iter().any(|u| same_folder(u, &path))).then_some((path, rest))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+fn same_folder(a: &str, b: &str) -> bool {
+    let canon = |s: &str| std::fs::canonicalize(s).unwrap_or_else(|_| std::path::PathBuf::from(s));
+    a.eq_ignore_ascii_case(b) || canon(a) == canon(b)
 }
 
 #[component]
@@ -486,16 +535,40 @@ fn AddAccountModal(kind: AgentKind) -> Element {
     let mut auth = use_signal(|| if spec.home_env.is_some() { AuthKind::Dir } else if !spec.key_env.is_empty() { AuthKind::Key } else { AuthKind::System });
     let mut key = use_signal(String::new);
     let mut env_var = use_signal(|| spec.key_env.first().map(|s| s.to_string()).unwrap_or_default());
+    // An existing folder: typed, picked, or one of those found at home.
+    let mut folder = use_signal(String::new);
+    let mut folder_name = use_signal(String::new);
+    let found = use_hook({
+        let kind = kind.clone();
+        move || {
+            let used: Vec<String> = app.config.peek().accounts.iter().filter_map(|a| if let AccountAuth::ConfigDir { path } = &a.auth { Some(path.clone()) } else { None }).collect();
+            found_folders(&kind, &used)
+        }
+    });
+    let has_folders = folder_marks(&kind).is_some();
     let k2 = kind.clone();
     let save = move |_| {
-        let name = if label().trim().is_empty() { format!("{} account", k2.display_name()) } else { label() };
+        let fallback = if auth() == AuthKind::Existing && !folder_name().is_empty() { folder_name() } else { format!("{} account", k2.display_name()) };
+        let name = if label().trim().is_empty() { fallback } else { label() };
         let id = new_id();
+        let mut needs_login = matches!(auth(), AuthKind::Dir);
         let a = match auth() {
             AuthKind::System => AccountAuth::SystemLogin,
             AuthKind::Dir => {
                 let dir = store().accounts_dir().join(&id);
                 let _ = std::fs::create_dir_all(&dir);
                 AccountAuth::ConfigDir { path: dir.to_string_lossy().to_string() }
+            }
+            AuthKind::Existing => {
+                let path = folder().trim().to_string();
+                match signed_in(&k2, &path) {
+                    None => {
+                        app.toast_err("That folder doesn't exist");
+                        return;
+                    }
+                    Some(ok) => needs_login = !ok,
+                }
+                AccountAuth::ConfigDir { path }
             }
             AuthKind::Key => {
                 let r = format!("account:{id}");
@@ -512,15 +585,17 @@ fn AddAccountModal(kind: AgentKind) -> Element {
         acc.is_default = first;
         app.update_config(|c| c.accounts.push(acc.clone()));
         app.ui.write().modal = None;
-        if let AccountAuth::ConfigDir { path } = &a {
-            // Open the agent's login flow inside the isolated config dir.
-            if let (Some(var), Some(login)) = (k2.spec().home_env, k2.spec().login_command) {
-                let cmd = if cfg!(windows) { format!("set {var}={path}&& {login}") } else { format!("{var}='{path}' {login}") };
-                let _ = crate::state::open_terminal(&path, &cmd);
-                app.toast("Finish signing in in the terminal window");
+        match &a {
+            // Sign in inside the account's folder.
+            AccountAuth::ConfigDir { path } if needs_login => {
+                if let (Some(var), Some(login)) = (k2.spec().home_env, k2.spec().login_command) {
+                    let cmd = if cfg!(windows) { format!("set {var}={path}&& {login}") } else { format!("{var}='{path}' {login}") };
+                    let _ = crate::state::open_terminal(&path, &cmd);
+                    app.toast("Finish signing in in the terminal window");
+                }
             }
-        } else {
-            app.toast("Account added");
+            AccountAuth::ConfigDir { .. } => app.toast("Account added · bringing in its sessions"),
+            _ => app.toast("Account added"),
         }
     };
     rsx! {
@@ -533,6 +608,9 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                 div { class: "seg",
                     if spec.home_env.is_some() {
                         button { class: if auth() == AuthKind::Dir { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Dir), "Separate login" }
+                    }
+                    if spec.home_env.is_some() && has_folders {
+                        button { class: if auth() == AuthKind::Existing { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Existing), "Existing folder" }
                     }
                     if !spec.key_env.is_empty() {
                         button { class: if auth() == AuthKind::Key { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Key), "API key" }
@@ -549,16 +627,64 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                     span { class: "k", "API key" }
                     input { class: "input full", r#type: "password", placeholder: "sk-…", value: "{key}", oninput: move |e| key.set(e.value()) }
                 }
+                if auth() == AuthKind::Existing {
+                    span { class: "k", "Folder" }
+                    div { class: "folder-pick",
+                        input { class: "input full", placeholder: "C:\\Users\\you\\.claude-work", value: "{folder}", spellcheck: "false",
+                            oninput: move |e| { folder.set(e.value()); folder_name.set(String::new()); },
+                        }
+                        button { class: "ghost-btn", title: "Choose the folder",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    if let Some(d) = rfd::AsyncFileDialog::new().pick_folder().await {
+                                        folder.set(d.path().to_string_lossy().to_string());
+                                        folder_name.set(String::new());
+                                    }
+                                });
+                            },
+                            "Browse…"
+                        }
+                    }
+                    if !found.is_empty() {
+                        span { class: "k", "Found" }
+                        div { class: "found-folders",
+                            for (path, name) in found.clone() {
+                                {
+                                    let short = path.rsplit(['\\', '/']).next().unwrap_or(&path).to_string();
+                                    let on = same_folder(&folder(), &path);
+                                    rsx! {
+                                        button { key: "{path}", class: if on { "pill-btn on" } else { "pill-btn" }, title: "{path}",
+                                            onclick: move |_| { folder.set(path.clone()); folder_name.set(name.clone()); },
+                                            Icon { i: I::Folder, size: 13 }
+                                            "~/{short}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             match auth() {
                 AuthKind::Dir => rsx! { div { "Larrier creates an isolated config folder for this account and opens {spec.name}'s login in a terminal. Each account keeps its own credentials and history." } },
+                AuthKind::Existing => rsx! {
+                    div {
+                        "Uses a {spec.name} folder you already have, with its sign-in, settings and sessions. {spec.name} runs with it for this account, and its sessions show up in Larrier; Larrier itself changes nothing in it."
+                        match signed_in(&kind, &folder()) {
+                            Some(true) => rsx! { div { class: "folder-state ok", "Signed in · its sessions come in once it's added" } },
+                            Some(false) => rsx! { div { class: "folder-state", "No sign-in in this folder yet: {spec.name}'s login opens in a terminal after adding" } },
+                            None if !folder().trim().is_empty() => rsx! { div { class: "folder-state bad", "That folder doesn't exist" } },
+                            None => rsx! {},
+                        }
+                    }
+                },
                 AuthKind::Key => rsx! { div { "The key is stored in your OS keychain and passed to {spec.name} as an environment variable only when this account runs." } },
                 AuthKind::System => rsx! { div { "Uses whatever {spec.name} is currently signed into on this machine." } },
             }
         }
         div { class: "modal-foot",
             button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
-            button { class: "primary-btn", disabled: auth() == AuthKind::Key && key().trim().is_empty(), onclick: save, "Add account" }
+            button { class: "primary-btn", disabled: (auth() == AuthKind::Key && key().trim().is_empty()) || (auth() == AuthKind::Existing && signed_in(&kind, &folder()).is_none()), onclick: save, "Add account" }
         }
     }
 }

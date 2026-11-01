@@ -1585,6 +1585,7 @@ fn ModeRow(label: &'static str, description: &'static str, is_default: bool, che
     }
 }
 
+
 /// "This PC ▾" / "Worktree ▾" environment picker.
 #[component]
 fn EnvPicker(open: Signal<bool>, worktree: bool, is_repo: bool, session: bool, label: String) -> Element {

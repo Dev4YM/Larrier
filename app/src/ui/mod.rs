@@ -50,6 +50,19 @@ pub fn Root() -> Element {
     });
     // The new agent screen's picks, kept with its message.
     use_effect(move || crate::keep::set_draft(&app.draft.read()));
+    // An account with a folder of its own added or removed: its sessions
+    // come in (and are watched) at once.
+    let homes = use_memo(move || crate::state::account_homes(&app.config.read()));
+    let known = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(homes.peek().clone())));
+    use_effect(move || {
+        let h = homes();
+        if *known.borrow() != h {
+            *known.borrow_mut() = h.clone();
+            larrier_formats::set_account_homes(h);
+            crate::live::restart(app);
+            app.sync_imports(true);
+        }
+    });
 
     use_hook(move || {
         let stale = crate::notify::interrupted_sessions();

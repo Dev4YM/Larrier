@@ -1759,3 +1759,13 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ctx-legend .row.deferred .nm, .ctx-legend .row.deferred .v { color: var(--fg-3); }
 .ctx-legend.has-hot .row { opacity: .45; }
 .ctx-legend.has-hot .row.hot { opacity: 1; background: var(--hover); }
+
+/* Add account: an existing folder, picked or found at home. */
+.folder-pick { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.folder-pick .input { flex: 1; min-width: 0; }
+.found-folders { display: flex; flex-wrap: wrap; gap: 6px; }
+.found-folders .pill-btn { display: inline-flex; align-items: center; gap: 6px; }
+.found-folders .pill-btn.on { background: var(--selected); color: var(--fg); }
+.folder-state { margin-top: 8px; font-size: 12px; color: var(--fg-3); }
+.folder-state.ok { color: var(--green); }
+.folder-state.bad { color: var(--red); }

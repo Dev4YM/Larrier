@@ -50,6 +50,46 @@ pub struct NativeSessionInfo {
     /// Source modification time in unix millis (import fingerprint).
     #[serde(default)]
     pub mtime_ms: i64,
+    /// The account whose own folder it's in (see [`set_account_homes`]):
+    /// the imported session runs as that account.
+    #[serde(default)]
+    pub account: Option<String>,
+}
+
+/// Agents' folders other than their default one: accounts that sign in from
+/// a folder of their own (Claude Code's `CLAUDE_CONFIG_DIR`, Codex's
+/// `CODEX_HOME`), each with the id of the account its sessions run as.
+static HOMES: std::sync::RwLock<Vec<(AgentKind, PathBuf, String)>> = std::sync::RwLock::new(Vec::new());
+
+/// Tell discovery and live sync about the accounts' own folders.
+pub fn set_account_homes(homes: Vec<(AgentKind, PathBuf, String)>) {
+    if let Ok(mut h) = HOMES.write() {
+        *h = homes;
+    }
+}
+
+/// An agent's account folders that aren't `default` (nor each other).
+pub(crate) fn account_homes(agent: &AgentKind, default: &Path) -> Vec<(PathBuf, String)> {
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let mut seen = vec![canon(default)];
+    let Ok(h) = HOMES.read() else { return Vec::new() };
+    h.iter()
+        .filter(|(a, ..)| a == agent)
+        .filter_map(|(_, p, id)| {
+            let c = canon(p);
+            if seen.contains(&c) {
+                return None;
+            }
+            seen.push(c);
+            Some((p.clone(), id.clone()))
+        })
+        .collect()
+}
+
+/// The account whose own folder `path` is in.
+pub(crate) fn account_of(agent: &AgentKind, path: &Path) -> Option<String> {
+    let h = HOMES.read().ok()?;
+    h.iter().filter(|(a, ..)| a == agent).find(|(_, p, _)| path.starts_with(p)).map(|(.., id)| id.clone())
 }
 
 /// File formats a session can be exported to.
@@ -163,6 +203,11 @@ pub fn import_native(info: &NativeSessionInfo) -> Result<Session> {
         _ => Err(anyhow!("importing {} sessions is not supported yet", info.agent.display_name())),
     }?;
     util::reopen_open_calls(&mut s);
+    // A session from an account's own folder runs as that account (its
+    // agent finds it only there).
+    if info.account.is_some() {
+        s.account_id = info.account.clone();
+    }
     Ok(s)
 }
 

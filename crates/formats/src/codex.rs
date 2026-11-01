@@ -42,18 +42,27 @@ pub(crate) fn thread_names(root: &Path) -> HashMap<String, String> {
     map
 }
 
+/// The default folder, then the folders of accounts that sign in from one
+/// of their own.
+pub fn roots() -> Vec<PathBuf> {
+    let default = root(None);
+    let extra = crate::account_homes(&AGENT, &default);
+    std::iter::once(default).chain(extra.into_iter().map(|(p, _)| p)).collect()
+}
+
 pub fn discover() -> Vec<NativeSessionInfo> {
-    let root = root(None);
-    let names = thread_names(&root);
     let mut out = Vec::new();
-    for sub in ["sessions", "archived_sessions"] {
-        let dir = root.join(sub);
-        if !dir.exists() {
-            continue;
-        }
-        for e in walkdir::WalkDir::new(&dir).into_iter().flatten() {
-            if let Some(info) = file_info(e.path(), &names) {
-                out.push(info);
+    for root in roots() {
+        let names = thread_names(&root);
+        for sub in ["sessions", "archived_sessions"] {
+            let dir = root.join(sub);
+            if !dir.exists() {
+                continue;
+            }
+            for e in walkdir::WalkDir::new(&dir).into_iter().flatten() {
+                if let Some(info) = file_info(e.path(), &names) {
+                    out.push(info);
+                }
             }
         }
     }
@@ -87,6 +96,7 @@ pub fn file_info(p: &Path, names: &HashMap<String, String>) -> Option<NativeSess
     let mut info = util::info(AGENT, id.clone(), p);
     info.cwd = string(pl, "cwd");
     info.title = names.get(&id).cloned();
+    info.account = crate::account_of(&AGENT, p);
     Some(info)
 }
 

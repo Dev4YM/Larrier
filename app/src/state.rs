@@ -415,6 +415,8 @@ pub fn use_ui<T: PartialEq + 'static>(f: impl Fn(&Ui) -> T + 'static) -> Memo<T>
 impl App {
     pub fn new() -> App {
         let cfg = store().load_config();
+        // Accounts with a folder of their own: their sessions are read too.
+        larrier_formats::set_account_homes(account_homes(&cfg));
         let draft = Draft {
             agent: cfg.settings.default_agent.clone(),
             model: None,
@@ -2350,6 +2352,18 @@ pub fn user_name() -> String {
             c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or(u)
         })
         .unwrap_or_else(|_| "You".into())
+}
+
+/// Accounts that sign in from a folder of their own (Claude Code's
+/// `CLAUDE_CONFIG_DIR`, Codex's `CODEX_HOME`): their sessions live there.
+pub fn account_homes(cfg: &Config) -> Vec<(AgentKind, PathBuf, String)> {
+    cfg.accounts
+        .iter()
+        .filter_map(|a| match &a.auth {
+            AccountAuth::ConfigDir { path } if matches!(a.agent, AgentKind::ClaudeCode | AgentKind::Codex) => Some((a.agent.clone(), PathBuf::from(path), a.id.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Config dir for accounts that use a separate login directory.

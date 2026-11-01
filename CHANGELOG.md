@@ -9,28 +9,38 @@ suffix such as `-beta.2`.
 
 ### New
 
-- Each agent's latest version and how its makers install and update it
-- Install, update and spot outdated agents in Settings → Agents
+- Look up each agent's latest version and update command
+- Install, update and flag outdated agents in Agents
+
 ## 0.1.31 — 2026-11-01
 
 ### New
 
-- A queued follow-up can be sent while the agent is stopped
-- Larrier opens as it was closed — chats, tabs, panels, browser, terminals
-- Pages keep their searches, filters and half-typed forms
+- Restore chats, panels and terminals after a restart
+- Persist page searches, filters and unfinished forms
+
+### Fixed
+
+- Allow sending a queued follow-up while agent is stopped
+
 ## 0.1.30 — 2026-11-01
 
 ### New
 
-- A checkmark marks the agent in use in the model picker
-- Choose Cursor's context size (256K or 500K) in a model's Edit menu
+- Choose a model's context size in its Edit menu
+
+### Look and feel
+
+- Mark the active agent in the model picker with a check
+
 ## 0.1.29 — 2026-11-01
 
 ### Fixed
 
-- A message you sent from New Agent isn't left as a draft
-- Back leaves Settings for where you were
-- The website opens in your browser; Usage is called Usage
+- Clear the New Agent draft when sending
+- Make Back return to the view Settings was opened from
+- Open website in the browser and rename Usage section
+
 ## 0.1.28 — 2026-11-01
 
 ### New
@@ -39,220 +49,246 @@ suffix such as `-beta.2`.
 
 ### Fixed
 
-- One list of logins, the same in Accounts and on the agent
+- Share one account list between Accounts and Agents
+
 ## 0.1.27 — 2026-11-01
 
 ### Fixed
 
-- Each account says who it's signed in as; Sign in is its own
-- /login and /logout run in a terminal, for the chat's account
-- A terminal's /login is no chat, and leaves none mid-turn
-- Your photo fills its avatar everywhere
+- Show sign-in state and email for each account
+- Run /login and /logout in a terminal
+- Skip Claude Code local commands when importing sessions
+- Fill the avatar with the profile photo everywhere
+
 ## 0.1.26 — 2026-11-01
 
 ### Fixed
 
-- Adding another login keeps the one you use as default
+- Keep the current login as default when adding another
+
 ## 0.1.25 — 2026-11-01
 
 ### New
 
-- A Profile with your photo and a year of your AI work
+- Add a Profile settings tab with usage statistics
+
 ## 0.1.24 — 2026-11-01
 
 ### New
 
-- Add a folder you already sign in from as an account
-- Model names come first; each model has Edit and Reset
-- The agent's mode sits beside the environment, always
-- Search grows out of its icon
+- Add an existing agent folder as an account
+- Show models first and add Edit and Reset to the picker
+- Always show the agent mode beside the environment
+- Animate search expanding from its icon
 
 ### Fixed
 
-- Menus don't flash scrollbars; a clearer environment menu
-- The prompt timeline marks the prompt you're reading
+- Avoid transient menu scrollbars and clarify environment menu
+- Mark the prompt being read in the prompt timeline
+
 ## 0.1.23 — 2026-11-01
 
 ### Fixed
 
-- Plan limits keep themselves up to date
+- Refresh plan limits periodically
+
 ## 0.1.22 — 2026-10-31
 
 ### New
 
-- Each chat keeps its own message, side panel and browser
-- A message left on New Agent waits there as a draft
-- Quote an agent's words as objects in your message
-- Ctrl+Shift+V pastes long text as text
-- A tool that changes something shows its line counts
+- Keep drafts, side panel and browser state per chat
+- List unsent New Agent messages as drafts
+- Insert selected agent text as quote objects
+- Add Ctrl+Shift+V to paste long text as plain text
+- Show added and removed line counts on tool calls
 
 ### Fixed
 
-- Look for a new release every ten minutes
+- Check for new releases every ten minutes
+
 ## 0.1.21 — 2026-10-31
 
 ### Fixed
 
-- Background work no longer holds up the chat
+- Don't treat background tasks as an active turn
+
 ## 0.1.20 — 2026-10-31
 
 ### Fixed
 
-- Larrier looks for updates on its own again
-- The context bar is one connected line
+- Check for updates periodically and install on exit
+- Render the context bar as one connected line
+
 ## 0.1.19 — 2026-10-31
 
 ### Fixed
 
-- A tab opened from a link gets its page's name
+- Refresh tab titles for tabs opened from a link
+
 ## 0.1.18 — 2026-10-31
 
 ### New
 
-- Google Chrome runs the Browser tab
-- New tabs open on New Tab
-- Drag a page into a chat as context
-- Ask Claude Code what a chat's context is made of
-- Two rings under the chat's box, plan usage and context
+- Run the Browser tab on Google Chrome when installed
+- Open new tabs on the New Tab page
+- Drag a browser page into a chat as context
+- Read Claude Code's context usage breakdown
+- Show plan usage and context as two rings under the box
+
 ## 0.1.17 — 2026-10-31
 
 ### Fixed
 
-- The composer is back to its own height, its text drawn right from the start
-- The typing cursor sits on the text in one-line fields
-- Editing a prompt no longer slides the card
-- The browser's page lands on its panel at any zoom
+- Restore the composer height and style its text copy at once
+- Center the drawn cursor in one-line fields
+- Stop the prompt card sliding when editing it
+- Place the page on its panel at any zoom level
+
 ## 0.1.16 — 2026-10-31
 
 ### New
 
-- Larrier's browser is a real browser, with Claude in Chrome's tools for agents
-- Annotate mode in the browser: point at elements and tell the agent about them
+- Host real WebView2 pages and add the agent browser tools
+- Add annotate mode to point at page elements for the agent
+
 ## 0.1.15 — 2026-10-31
 
 ### New
 
-- Take back a message sent into a running turn
+- Allow taking back a message sent into a running turn
 
 ### Fixed
 
-- Only Larrier's own loaders: the Cursor-style dots are gone
+- Use only Larrier's own loaders and drop the dots loader
+
 ## 0.1.14 — 2026-10-31
 
 ### New
 
-- One set of loaders: dots for tools, a stamp for subagents, an orbit for chats
-- @files, /commands, chats and agents sit in the text as objects
-- Spelling suggestions in the right-click menu
-- A harness turned off in Settings takes its chats out of the sidebar
+- Unify loaders into one library by purpose
+- Show mentions and commands as objects inside the text
+- Offer spelling suggestions in the context menu
+- Hide chats of a harness that is turned off
 
 ### Fixed
 
-- A thin typing cursor that sits right in Arabic and mixed text
-- Editing a sent message no longer jumps
-- The Changes tab wraps long file names and scrolls code per block
-- The side panel's + menu opens again
+- Draw a thin text cursor placed correctly in RTL and mixed text
+- Keep a sent message in place when editing it
+- Wrap long file names and scroll wide diffs in the Changes tab
+- Keep the side panel's + menu on screen
+
 ## 0.1.13 — 2026-10-30
 
 ### New
 
-- Copy, save and open images from the right-click menu
+- Copy, save and open images from the context menu
 
 ### Fixed
 
-- A message sent to Claude Code is never dropped
-- Who a chat runs as shows in the session rail
-- The gliding cursor stays under dialogs and menus
-- Right-click menus open over dialogs and the image viewer
+- Stop dropping a message sent after a background command
+- Show the chat's agent in the session rail, not the composer
+- Hide the drawn text cursor when a dialog or menu covers it
+- Stack right-click menus above dialogs and the image viewer
+
 ## 0.1.12 — 2026-10-30
 
 ### New
 
-- A browser agents can use, all of its tools allowed
-- The Browser tab shows the agents' browser live
+- Add a browser tool set for agents over MCP
+- Stream the agents' browser live in the Browser tab
+
 ## 0.1.11 — 2026-10-30
 
 ### New
 
-- OpenCode and Hermes connect over ACP, so they can ask
+- Connect OpenCode and Hermes over ACP by default
+
 ## 0.1.10 — 2026-10-30
 
 ### New
 
-- Codex runs through its app server, asking live
+- Run Codex through its app server with live approvals
 
 ### Fixed
 
-- A request card says what's being asked
-- A Codex plan is built with the permissions picked
-- Mode and permission chips sit side by side
+- Vary the request card header by the kind of request
+- Use the chosen permissions for the sandbox in plan mode
+- Lay out the mode and permission chips in one row
+
 ## 0.1.9 — 2026-10-30
 
 ### New
 
-- MCP servers a Claude agent defines for itself
-- Run a Claude Code chat as one of the user's agents
-- Pick the agent a new chat runs as from @
+- Show MCP servers a Claude agent defines for itself
+- Run a chat as one of the user's Claude Code agents
+- Choose the agent a new chat runs as from @
 
 ### Look and feel
 
-- A reply starts where the prompt's text does
+- Align reply rows with the prompt's text
 
 ### Fixed
 
-- The @ menu stays in view and opens down when it fits only there
-- The gliding cursor glides only along a line
-- Opened projects stay open across launches
+- Keep the @ menu in view and open it where it fits
+- Glide the typing cursor only along a single line
+- Persist opened projects across launches
 - Wait for Claude Code's MCP servers before listing them
+
 ## 0.1.8 — 2026-10-30
 
 ### New
 
 - Read Claude Code's commands, subagents and MCP servers
-- Show the MCP servers agents report themselves
-- The agent's own / commands, @ subagents, /mcp and /usage
+- Show MCP servers that agents report themselves
+- List agent commands and subagents, add /mcp and /usage
+
 ## 0.1.7 — 2026-10-30
 
 ### New
 
-- A typing cursor that glides
+- Draw an animated typing cursor in text fields
+
 ## 0.1.6 — 2026-10-30
 
 ### New
 
-- An update button that's only there when there's an update
+- Show the update button only when an update exists
+
 ## 0.1.5 — 2026-10-30
 
 ### Fixed
 
-- Prompts keep their images and files when a chat re-syncs
-- Steps start at the reply's left edge, like its text and cards
-- Copy on code blocks copies
+- Restore prompt attachments when a chat re-syncs
+- Align steps with the reply's left edge
+- Make the code block Copy button copy
+
 ## 0.1.4 — 2026-10-30
 
 ### New
 
-- A steered message shows at once, greyed until it's read
+- Show a steered message immediately as pending
 
 ### Fixed
 
-- Menus stay inside the window when their contents grow
-- Ctrl+Backspace deletes a word again in text fields
+- Keep menus inside the window when their contents grow
+- Let text fields handle Ctrl+Backspace
+
 ## 0.1.3 — 2026-10-30
 
 ### New
 
-- Turn agents on and off, and a clearer agent card
+- Add per-agent on/off switches and a clearer agent card
+
 ## 0.1.2 — 2026-10-30
 
 ### New
 
-- Answer a running agent live, steer it, and queue messages like Cursor
-- Say what an agent refused because it couldn't ask
-- Pane toggles that stay put, and panes that move smoothly
-- Larrier's own tooltips instead of the system's
-- Chats with new activity come first
-- The mark's stem becomes a dry brush stroke
+- Answer a running agent live, steer it and queue messages
+- Report what an agent refused because it could not ask
+- Keep pane toggles fixed and animate pane transitions
+- Replace system tooltips with themed in-app tooltips
+- Order chats by recent activity
+- Redraw the mark's stem as a dry brush stroke
 
 ### Look and feel
 
@@ -260,125 +296,128 @@ suffix such as `-beta.2`.
 
 ### Fixed
 
-- Release script pushes with the GitHub CLI's login
-- Give imported chats their folder and resume them where they live
-- Claude Code's own model menu, and the pick stays checked
-- Edit a sent prompt in place, keeping its images and files
-- Rows of a turn line up, terminals are background commands, previews hold
+- Push with the GitHub CLI's login in release.ps1
+- Resume imported chats from their own workspace folder
+- Read Claude Code's model menu from Claude Code itself
+- Edit a sent prompt in place, keeping its attachments
+- Align turn rows and count only background terminals
+
 ## 0.1.1 — 2026-10-30
 
 ### New
 
-- Semantic versions, update channels and release notes
+- Add semantic versions, update channels and release notes
+
 ## 0.1.0 — 2026-10-30
 
 The first release.
 
 ### New
 
+- Initial Larrier workspace
 - Track subagents and background tasks end to end
-- Appearance, behavior and sidebar settings
-- Tabs, split view, drag & drop, fast transcripts and settings revamp
-- Model registry with names, context windows and prices
-- Sessions from other tools update live in Larrier
-- Menus stay inside the window; Cursor-style repo rows
-- Show models by name with context and price; registry browser
-- Read turn state, queued prompts and images from transcripts
-- A session running in its own app looks like any running session
-- Render every tool properly, MCP included
-- @-mentions and /-skills are real chips
-- Smooth streaming motion (off with Reduce Motion)
-- A prompt timeline that opens on hover
-- Each agent's real modes and permission settings
-- Import every Claude Code record type properly
-- Handle every Claude Code stream event, checked against real runs
+- Add appearance, behavior and sidebar options
+- Add tabs, split view, drag and drop and usage settings
+- Add model registry with context windows and prices
+- Update sessions live from other tools' session stores
+- Keep context menus inside the window
+- Show model names, context and price in the picker
+- Read turn state, queued prompts and images
+- Treat sessions running in other tools as active
+- Render every tool call, including MCP calls
+- Turn @-mentions and /-skills into chips
+- Animate streaming steps and scrolling
+- Open the prompt timeline on hover
+- Use each agent's own modes and permission settings
+- Handle every Claude Code record type
+- Handle every stream-json event from Claude Code
 - Label task, cron and team tools
-- Smooth running spinner
-- Fixed sidebar order and unread marks
-- Cursor-style tool step wording
+- Replace the loader glyph with a smooth spinner
+- Use a fixed sort order and mark unread chats
+- Reword tool steps and reasoning labels
 - Import Claude Code mode, pull requests and relocation
-- Pull request link in the chat header
-- Show images returned by commands
-- Import images in Gemini CLI chats
-- One session per window, with its subagents as tabs
-- Side panel tabs that keep or preview, and background tasks
-- Collapsible session rail with a session summary
-- Live Claude plan limits in the composer chip
-- Re-import sessions when an importer improves
-- Drop a chat where the pointer is, no options panel
+- Show the pull request link in the chat header
+- Show images returned by shell commands
+- Import images from Gemini CLI chats
+- Show one session per window with subagents as tabs
+- Add keep/preview side panel tabs and background tasks
+- Add collapsible session rail with a summary
+- Update plan limits live from Claude Code events
+- Re-import sessions when the importer version changes
+- Drop a chat by pointer position instead of an options panel
 - Record how full the model's context is
-- Session rail with context, to-dos, activity and changes
+- Add a session rail with context, to-dos and changes
 - Mark tool calls that never ran
-- The stencil logo, on ink or paper
-- Cursor-style prompt timeline cards
-- A text size for each kind of text, set with − / +
-- Prompt cards with thumbnails on top and a fixed height
-- Double-click a resizer to fit the window
-- Telescope the timeline under the pointer
-- Answer an agent's questions in the chat, for every agent
-- Show tools live while the agent writes them
-- Show what Claude Code subagents say, and what they run on
-- Background work as Cursor-style chips, cards and panel
-- The agent's terminals, read-only in the Terminal tab
+- Replace the logo with a stencil L mark in two tiles
+- Show prompt timeline cards on hover
+- Add per-kind text sizes with stepper controls
+- Show prompt image thumbnails above text, cap height
+- Fit panel widths to the window on resizer double-click
+- Magnify timeline dashes under the pointer
+- Answer agent questions in the chat for every agent
+- Stream tool calls live while the model writes them
+- Forward subagent text, record its model and context
+- Add background work chips, cards and panel
+- Show agent terminals read-only in the Terminal tab
 - Edit an earlier prompt in place
-- Mark every session as read at once
-- Choose the corners of buttons — Solid, Balanced, Rounded
-- Projects and Home in the sidebar, a Mixed grouping, and motion
-- Edit cards are colored by the file's language
-- Install, update and uninstall like a regular Windows app
+- Add Mark all as read
+- Add a Button Corners appearance option
+- Group chats by Project and Home, add Mixed grouping
+- Highlight edit card previews by file language
+- Install, update and uninstall as a regular Windows app
 - Read each agent's own models, defaults and providers
-- Reasoning effort and your own endpoints at launch
-- Model management per agent, synced with each agent
+- Pass reasoning effort and custom endpoints at launch
+- Manage models per agent, synced with each agent
 
 ### Look and feel
 
 - Order the model registry and keep names readable
-- Pinned edit card, softer shadows, fade above the composer
-- No block caret after streaming text
-- A smaller, quieter background-tasks card
-- Codex wears the OpenAI mark
-- Droid wears Factory's real mark
-- The composer's agent button wears the harness's logo
-- The header runs the whole width over the session rail
+- Pin edit card, soften shadows, fade above composer
+- Remove the block caret after streaming text
+- Make the background tasks card smaller and lighter
+- Use the OpenAI mark for Codex
+- Use Factory's own mark for Droid
+- Span the chat header across the window over the rail
 
 ### Faster
 
-- Stop re-rendering the whole window on unrelated UI changes
+- Avoid re-rendering the whole window on unrelated UI changes
 
 ### Fixed
 
-- Keep the scroll-to-bottom button above a tall composer
-- Remove the band and shadow around prompt cards
-- Removed colors now take effect (Larrier preset, Reset)
-- Import queued prompts that carry images
+- Keep scroll-to-bottom button above tall composer
+- Remove band and shadow around prompt cards
+- Apply removed colors when switching appearance presets
+- Import queued Claude Code prompts that carry images
 - Complete Droid session import
-- One to-do card per message
+- Show one to-do card per message
 - Complete OpenCode session import
-- Offer sign-in when OpenCode's provider rejects the key
-- Readable Hermes tool output, session usage, running state
+- Offer sign-in when the provider rejects the key
+- Show readable tool output, usage and running state
 - Complete Pi session import
-- ACP tool output from terminals, tool images, refined titles
+- Handle ACP terminal output, tool images and titles
 - Complete Codex rollout import
 - Complete Cursor session import
-- Codex stream titles, MCP images, errors and resume usage
-- Cursor stream reconnects, usage, to-dos and tool shapes
+- Clean stream titles, MCP images, errors and resume usage
+- Dedupe reconnect output and handle more stream shapes
 - Keep list keys unique when a source repeats ids
-- Codex app attachments and git directives
-- Show local images in replies
-- Say why a CLI failed instead of its wrapper text
-- Only git directives become Codex notices
-- Show pasted images that are gone by name
-- A reply that is done stops looking like it is being written
-- A thought with nothing in it does not open
-- A session and its subagent tabs share one view
-- Imported sessions update quietly, in place and in time
-- Back never gets stuck on a deleted session
-- The background-tasks card makes room instead of covering the chat
-- Cursor follow-ups no longer fail on the model
-- A call that never ran says so
-- Every Cursor chat is imported once
-- Claude's "This computer" sessions belong in Home
-- A session running in another app is never run here at the same time
-- A chat still working in Cursor shows as running
-- Sessions follow the folder their agent moved to
-- A project made inside a scratch folder is its own project
+- Handle Codex app attachments and git directives
+- Inline local images in replies
+- Report the real reason when a CLI fails
+- Turn only git directives into notices
+- Show pasted images whose file is gone by name
+- Stop showing a finished reply as still being written
+- Render empty reasoning blocks as a plain row
+- Keep one view for a session and its subagent tabs
+- Update imported sessions in place without false activity
+- Prevent Back from getting stuck on a deleted session
+- Lay out the background tasks card above the chips
+- Stop failing follow-ups on the reported model name
+- Label calls that were blocked, rejected or stopped
+- Import each Cursor chat once
+- File Claude "This computer" sessions under Home
+- Do not run a session that is active in another app
+- Detect a chat still running in Cursor
+- Follow the folder an agent moved a session to
+- Treat projects created inside scratch folders as projects
+- Show the running agent's logo on the agent button

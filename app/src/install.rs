@@ -245,6 +245,7 @@ pub fn bundle_of(exe: &Path) -> Option<PathBuf> {
 
 /// Put the bundle `from` in place of the bundle `to` (macOS): the old one
 /// moves aside first and is removed once the new one is there.
+#[cfg(target_os = "macos")]
 pub fn replace_bundle(from: &Path, to: &Path) -> Result<()> {
     let old = sibling(to, "old");
     let _ = std::fs::remove_dir_all(&old);

@@ -149,9 +149,12 @@ pub struct Area {
 pub(crate) enum Ev {
     Load { id: u64, started: bool, url: String },
     Title { id: u64, title: String },
-    /// The page's address changed (a link, the page itself).
+    /// The page's address changed (a link, the page itself). From Chrome;
+    /// webviews report it as they load.
+    #[cfg(windows)]
     Url { id: u64, url: String },
     /// The tab's page closed by itself (the page closed it, Chrome quit).
+    #[cfg(windows)]
     Gone { id: u64 },
     /// A page opened another (a link to a new window): a tab in the same
     /// chat's browser.
@@ -350,12 +353,14 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                                 t.title = title;
                             }
                         }
+                        #[cfg(windows)]
                         Ev::Url { id, url } => {
                             let mut st = STATE.write();
                             if let Some(t) = st.tabs.iter_mut().find(|t| t.id == id) {
                                 t.url = url;
                             }
                         }
+                        #[cfg(windows)]
                         Ev::Gone { id } => close_tab(id),
                         Ev::Open { url, from } => {
                             let owner = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| t.owner.clone()));
@@ -522,7 +527,7 @@ fn build_pending() {
         let made = made
             // Which Larrier tab a page is in, for the agents' tools.
             .with_initialization_script(format!("Object.defineProperty(window, '__larrierTab', {{ value: {id} }});"))
-            .with_initialization_script(include_str!("browser_annotate.js").replace("__LARRIER_TOKEN__", annotate_token()))
+            .with_initialization_script(annotate_script())
             .with_ipc_handler(move |req| {
                 let _ = t4.send(Ev::Annotate { id, body: req.body().clone() });
             })

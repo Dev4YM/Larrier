@@ -6,7 +6,9 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+#[cfg(not(target_os = "macos"))]
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use dioxus::desktop::{LogicalPosition, LogicalSize, WindowBuilder};
@@ -69,6 +71,11 @@ pub fn show_notification(title: &str, body: &str) {
                 n.image_path(&icon.to_string_lossy());
             }
         }
+        // macOS shows the app's own icon; Linux desktops take a file.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let Some(icon) = icon_png_path() {
+            n.icon(&icon.to_string_lossy());
+        }
         match n.show() {
             #[cfg(windows)]
             Ok(handle) => {
@@ -126,6 +133,7 @@ pub fn windows_app_id() -> &'static str {
 }
 
 /// The Larrier mark as a PNG on disk (notification / AUMID icon).
+#[cfg(not(target_os = "macos"))]
 fn icon_png_path() -> Option<PathBuf> {
     static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
     PATH.get_or_init(|| {
@@ -575,6 +583,7 @@ pub fn app_icon_rgba(n: u32) -> Vec<u8> {
 }
 
 /// Minimal PNG encoder (RGBA8, uncompressed deflate blocks).
+#[cfg(any(not(target_os = "macos"), test))]
 pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     fn crc32(data: &[u8]) -> u32 {
         let mut c = 0xFFFF_FFFFu32;

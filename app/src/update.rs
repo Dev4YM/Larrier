@@ -324,4 +324,19 @@ mod tests {
             assert_eq!((r.version.as_str(), r.asset_name.as_str(), r.sha_url.as_deref()), ("0.2.0", "Larrier-0.2.0-windows-x64.exe", Some("dl/2")));
         }
     }
+
+    /// The published releases answer without a GitHub account or token
+    /// (`cargo test -p larrier-app public_releases_need_no_token -- --ignored`).
+    #[test]
+    #[ignore]
+    fn public_releases_need_no_token() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let rel = parse_release(&get_json("releases/latest").await.unwrap()).expect("a program for this computer");
+            let sha = fetch(rel.sha_url.as_deref().expect("its checksum")).await.unwrap().text().await.unwrap();
+            assert!(sha.trim().ends_with(&rel.asset_name), "{sha}");
+            let program = fetch(&rel.asset_url).await.unwrap();
+            assert_eq!(program.content_length(), Some(rel.size));
+        });
+    }
 }

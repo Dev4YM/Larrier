@@ -1831,3 +1831,21 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .mp-acct:hover { background: var(--hover); color: var(--fg); }
 .mp-acct.on { background: var(--selected); color: var(--fg); border-color: var(--border-2); }
 .mp-acct.off { color: var(--fg-3); }
+
+/* Agents' versions: an install or update running, a newer version, its output. */
+.status-pill.busy { background: var(--hover); color: var(--fg-2); }
+.status-pill.new { background: var(--accent-bg, var(--hover)); color: var(--accent-c, var(--blue)); }
+.pill-btn.agent-update, .pill-btn.agent-install { height: 22px; padding: 0 8px; font-size: 11.5px; }
+.pill-btn.agent-update { color: var(--accent-c, var(--blue)); }
+.pill-btn.agent-install { color: var(--fg-2); }
+.ad-log { margin-top: 6px; max-height: 180px; overflow-y: auto; display: flex; flex-direction: column-reverse; padding: 8px 10px; border-radius: 6px;
+  background: var(--chip); font-size: 11.5px; line-height: 1.5; color: var(--fg-2); white-space: pre-wrap; word-break: break-word; user-select: text; }
+.ad-row > .v > .row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; }
+.ad-row > .v > .row .plain { padding-top: 0; }
+.ad-row > .v > .ad-log { align-self: stretch; }
+.ok-c { color: var(--green); }
+.err-c { color: var(--red); }
+.nav-row .nav-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent-c, var(--blue)); color: #fff;
+  font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
+.icon-btn.gear { position: relative; }
+.gear-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 2px var(--sidebar, var(--bg)); }

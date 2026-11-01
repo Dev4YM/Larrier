@@ -38,6 +38,7 @@ pub fn SettingsNav() -> Element {
     };
     let mut q = crate::keep::use_kept(crate::keep::WINDOW, "settings.search", String::new);
     let ql = q.read().to_lowercase();
+    let outdated = crate::agent_versions::outdated(&app);
     let name = crate::state::display_name(&app.config.read());
     rsx! {
         aside { class: "sidebar",
@@ -63,6 +64,9 @@ pub fn SettingsNav() -> Element {
                             onclick: move |_| app.set_view(View::Settings(t)),
                             span { class: "ic", Icon { i: tab_icon(t), size: 16, stroke: 1.5 } }
                             "{t.label()}"
+                            if t == SettingsTab::Agents && outdated > 0 {
+                                span { class: "nav-badge", title: "Agents with a newer version", "{outdated}" }
+                            }
                         }
                     }
                     button { class: "nav-row", onclick: move |_| { let _ = open::that("https://github.com/Dev4YM/Larrier#readme"); },
@@ -281,7 +285,10 @@ fn Agents() -> Element {
         h1 { "Agents" }
         div { class: "sub", "Every coding agent Larrier can drive, import from, and port sessions to." }
         div { class: "set-group-title", "Coding agents"
-            button { class: "icon-btn sm", title: "Re-detect", onclick: move |_| { app.detect_agents(); app.toast("Detecting agents…"); }, Icon { i: I::Refresh, size: 12 } }
+            button { class: "icon-btn sm", title: "Find agents again and look up their latest versions",
+                onclick: move |_| { app.detect_agents(); crate::agent_versions::check_now(); app.toast("Finding agents and their latest versions…"); },
+                Icon { i: I::Refresh, size: 12 }
+            }
         }
         div { class: "set-card",
             for spec in catalog().iter().filter(|s| !s.binaries.is_empty()) {
@@ -299,6 +306,16 @@ fn Agents() -> Element {
                     let row_class = if enabled { "set-row agent-row" } else { "set-row agent-row off" };
                     let detected_path = d.as_ref().and_then(|d| d.path.clone()).map(|p| p.to_string_lossy().to_string());
                     let model_now = crate::agent_models::short_name(&app, &k2, ac.default_model.as_deref().unwrap_or(app.agent_models(&k2).and_then(|n| n.default_model).as_deref().unwrap_or("auto")));
+                    // Its versions: the latest published, an install or update running.
+                    let job = crate::agent_versions::JOBS.read().get(&id).cloned();
+                    let running = job.as_ref().is_some_and(|j| j.ok.is_none());
+                    let newer = crate::agent_versions::update_to(&app, &spec.kind);
+                    let latest = crate::agent_versions::LATEST.read().get(&id).cloned();
+                    let checking = crate::agent_versions::CHECKING();
+                    let versions = larrier_agents::updates::of(&spec.kind);
+                    let update_cmd = if installed { crate::agent_versions::step(&app, &spec.kind, false) } else { None };
+                    let install_cmd = if installed { None } else { larrier_agents::updates::install_step(&spec.kind) };
+                    let (k9, k10, k11, k12) = (k.clone(), k.clone(), k.clone(), k.clone());
                     let live_note = match spec.kind {
                         AgentKind::ClaudeCode => "Its own protocol: live approvals, questions, plans and steering.",
                         AgentKind::Codex => "Its app server: live approvals, questions, plans and steering.",
@@ -318,6 +335,19 @@ fn Agents() -> Element {
                                     Some(_) => rsx! { span { class: "status-pill missing", "Not installed" } },
                                     None => rsx! { super::loaders::Orbit { size: 13 } },
                                 }
+                                if running {
+                                    span { class: "status-pill busy", super::loaders::Orbit { size: 11 } if job.as_ref().is_some_and(|j| j.installing) { "Installing…" } else { "Updating…" } }
+                                } else if let (Some(v), Some(c)) = (newer.clone(), update_cmd.clone()) {
+                                    button { class: "pill-btn agent-update", title: "Update to v{v}: {c.shown}",
+                                        onclick: move |e| { e.stop_propagation(); crate::agent_versions::run(app, k9.clone(), false); },
+                                        Icon { i: I::ArrowUp, size: 12 } "Update to v{v}"
+                                    }
+                                } else if let (Some(c), Some(_)) = (install_cmd.clone(), d.as_ref()) {
+                                    button { class: "pill-btn agent-install", title: "Install: {c.shown}",
+                                        onclick: move |e| { e.stop_propagation(); crate::agent_versions::run(app, k10.clone(), true); },
+                                        Icon { i: I::Download, size: 12 } "Install"
+                                    }
+                                }
                                 if installed {
                                     div { class: "agent-on", title: if enabled { "On: offered in pickers, its sessions sync" } else { "Off: hidden from pickers and the sidebar, its sessions don't sync" },
                                         onclick: move |e| e.stop_propagation(),
@@ -328,6 +358,103 @@ fn Agents() -> Element {
                             }
                             if is_open {
                                 div { class: "agent-detail",
+                                    div { class: "ad-sec",
+                                        div { class: "ad-title", "Version" }
+                                        div { class: "ad-row",
+                                            span { class: "k", "Installed" }
+                                            div { class: "v",
+                                                span { class: "plain strong",
+                                                    match d.as_ref() {
+                                                        Some(d) if d.installed() => d.version.clone().map(|v| format!("v{v}")).unwrap_or("Installed (its version isn't known)".into()),
+                                                        Some(_) => "Not installed".to_string(),
+                                                        None => "Looking…".to_string(),
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if let Some(vs) = versions {
+                                            div { class: "ad-row",
+                                                span { class: "k", "Latest" }
+                                                div { class: "v",
+                                                    div { class: "row",
+                                                        span { class: "plain",
+                                                            match (&latest, checking) {
+                                                                (Some(v), _) => format!("v{v}"),
+                                                                (None, true) => "Looking it up…".to_string(),
+                                                                (None, false) => "Not looked up yet".to_string(),
+                                                            }
+                                                        }
+                                                        if newer.is_some() { span { class: "status-pill new", "Newer" } }
+                                                        else if latest.is_some() && installed && d.as_ref().is_some_and(|d| d.version.is_some()) { span { class: "status-pill ok", Icon { i: I::Check, size: 11 } "Up to date" } }
+                                                        div { class: "grow" }
+                                                        button { class: "ghost-btn", disabled: checking, onclick: move |_| crate::agent_versions::check_now(),
+                                                            Icon { i: I::Refresh, size: 11 } "Check now"
+                                                        }
+                                                    }
+                                                    div { class: "h", "From {larrier_agents::updates::source_label(&vs.source)}" }
+                                                }
+                                            }
+                                        }
+                                        if let Some(c) = update_cmd.clone() {
+                                            div { class: "ad-row",
+                                                span { class: "k", "Update" }
+                                                div { class: "v",
+                                                    div { class: "row",
+                                                        span { class: "cmd mono", title: "{c.shown}", "{c.shown}" }
+                                                        div { class: "grow" }
+                                                        button { class: if newer.is_some() { "primary-btn" } else { "ghost-btn" }, disabled: running,
+                                                            onclick: move |_| crate::agent_versions::run(app, k11.clone(), false),
+                                                            Icon { i: I::ArrowUp, size: 12 }
+                                                            if let Some(v) = &newer { "Update to v{v}" } else { "Update" }
+                                                        }
+                                                    }
+                                                    div { class: "h", "As {spec.vendor} says to update it; Larrier runs it and shows what it prints." }
+                                                }
+                                            }
+                                        } else if installed && versions.is_some() {
+                                            div { class: "ad-row",
+                                                span { class: "k", "Update" }
+                                                div { class: "v", span { class: "plain faint", "Larrier can't update it itself: update it as its site says." } }
+                                            }
+                                        }
+                                        if let Some(c) = install_cmd.clone().filter(|_| d.is_some()) {
+                                            div { class: "ad-row",
+                                                span { class: "k", "Install" }
+                                                div { class: "v",
+                                                    div { class: "row",
+                                                        span { class: "cmd mono", title: "{c.shown}", "{c.shown}" }
+                                                        div { class: "grow" }
+                                                        button { class: "primary-btn", disabled: running,
+                                                            onclick: move |_| crate::agent_versions::run(app, k12.clone(), true),
+                                                            Icon { i: I::Download, size: 12 } "Install"
+                                                        }
+                                                    }
+                                                    div { class: "h", "Its official installer; Larrier runs it and shows what it prints." }
+                                                }
+                                            }
+                                        }
+                                        if let Some(j) = job.clone() {
+                                            div { class: "ad-row",
+                                                span { class: "k", if j.installing { "Installing" } else { "Updating" } }
+                                                div { class: "v",
+                                                    div { class: "plain",
+                                                        match j.ok {
+                                                            None => rsx! { span { class: "row", super::loaders::Orbit { size: 12 } span { class: "mono", "{j.shown}" } } },
+                                                            Some(true) => rsx! { span { class: "ok-c", "Done: " span { class: "mono", "{j.shown}" } } },
+                                                            Some(false) => rsx! { span { class: "err-c", "Didn't go through: " span { class: "mono", "{j.shown}" } } },
+                                                        }
+                                                    }
+                                                    // Newest at the bottom, kept in view.
+                                                    div { class: "ad-log mono",
+                                                        if j.log.is_empty() { div { class: "faint", "Nothing printed yet" } }
+                                                        for (i, l) in j.log.iter().enumerate().rev() {
+                                                            div { key: "{i}", "{l}" }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     div { class: "ad-sec",
                                         div { class: "ad-title", "Running" }
                                         div { class: "ad-row",
@@ -417,7 +544,7 @@ fn Agents() -> Element {
                                         }
                                     }
                                     div { class: "ad-sec",
-                                        div { class: "ad-title", if installed { "Accounts" } else { "Install" } }
+                                        div { class: "ad-title", if installed { "Accounts" } else { "Or install it yourself" } }
                                         if !installed {
                                             for (lbl, cmd) in spec.install.iter() {
                                                 div { key: "{lbl}", class: "ad-row",

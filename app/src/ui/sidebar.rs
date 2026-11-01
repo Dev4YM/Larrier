@@ -386,8 +386,16 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                         _ => rsx! {},
                     }
                 }
-                button { class: "icon-btn", title: "Settings (Ctrl+,)", onclick: move |_| app.open_settings(SettingsTab::General),
-                    Icon { i: I::Settings, size: 16, stroke: 1.5 }
+                {
+                    // Agents with a newer version: a dot, and Settings opens on them.
+                    let outdated = crate::agent_versions::outdated(&app);
+                    rsx! {
+                        button { class: "icon-btn gear", title: if outdated > 0 { "Settings (Ctrl+,) · agent updates available" } else { "Settings (Ctrl+,)" },
+                            onclick: move |_| app.open_settings(if outdated > 0 { SettingsTab::Agents } else { SettingsTab::General }),
+                            Icon { i: I::Settings, size: 16, stroke: 1.5 }
+                            if outdated > 0 { span { class: "gear-dot" } }
+                        }
+                    }
                 }
             }
             div {

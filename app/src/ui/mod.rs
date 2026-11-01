@@ -80,6 +80,8 @@ pub fn Root() -> Element {
         crate::automations::start(app);
         app.detect_agents();
         crate::agent_models::start(app);
+        // Agents' latest versions, for Settings → Agents to offer updates.
+        crate::agent_versions::start();
         // After an update, say once what's new.
         {
             let last = app.config.peek().settings.last_version.clone();

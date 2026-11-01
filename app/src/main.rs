@@ -2,6 +2,7 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
 mod agent_models;
+mod agent_versions;
 mod automations;
 mod browser_chrome;
 mod browser_control;

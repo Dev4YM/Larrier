@@ -29,6 +29,98 @@ pub fn paste_into_focused() {
     document::eval(&js);
 }
 
+/// The app's commands for the system menu bar (macOS), with the same ids
+/// [`system_command`] reads back.
+pub fn system_menu() -> dioxus::desktop::muda::Menu {
+    use dioxus::desktop::muda::accelerator::{Accelerator, Code, Modifiers};
+    use dioxus::desktop::muda::{Menu, MenuItem, PredefinedMenuItem as P, Submenu};
+    let cmd = Modifiers::SUPER;
+    let item = |id: &str, label: &str, key: Option<(Modifiers, Code)>| MenuItem::with_id(id, label, true, key.map(|(m, c)| Accelerator::new(Some(m), c)));
+    let sep = P::separator;
+    let menu = |title: &str, items: &[&dyn dioxus::desktop::muda::IsMenuItem]| Submenu::with_items(title, true, items).expect("menu");
+    let app = menu(
+        "Larrier",
+        &[
+            &item("about", "About Larrier", None),
+            &sep(),
+            &item("settings", "Settings…", Some((cmd, Code::Comma))),
+            &sep(),
+            &P::services(None),
+            &sep(),
+            &P::hide(None),
+            &P::hide_others(None),
+            &P::show_all(None),
+            &sep(),
+            &item("quit", "Quit Larrier", Some((cmd, Code::KeyQ))),
+        ],
+    );
+    let file = menu(
+        "File",
+        &[
+            &item("new-agent", "New Agent", Some((cmd, Code::KeyN))),
+            &item("open-folder", "Open Folder…", Some((cmd, Code::KeyO))),
+            &sep(),
+            &item("import-all", "Import Sessions from All Agents", Some((cmd | Modifiers::SHIFT, Code::KeyI))),
+            &item("import-file", "Import File…", None),
+            &item("export", "Export Agent…", None),
+            &sep(),
+            &P::close_window(None),
+        ],
+    );
+    let edit = menu("Edit", &[&P::undo(None), &P::redo(None), &sep(), &P::cut(None), &P::copy(None), &P::paste(None), &P::select_all(None)]);
+    let view = menu(
+        "View",
+        &[
+            &item("palette", "Command Palette", Some((cmd, Code::KeyK))),
+            &sep(),
+            &item("toggle-sidebar", "Toggle Sidebar", Some((cmd, Code::KeyB))),
+            &item("toggle-panel", "Toggle Side Panel", Some((cmd | Modifiers::SHIFT, Code::KeyJ))),
+            &sep(),
+            &item("zoom-in", "Zoom In", Some((cmd, Code::Equal))),
+            &item("zoom-out", "Zoom Out", Some((cmd, Code::Minus))),
+            &item("zoom-reset", "Actual Size", Some((cmd, Code::Digit0))),
+            &sep(),
+            &P::fullscreen(None),
+        ],
+    );
+    let window = menu("Window", &[&P::minimize(None), &P::maximize(None), &sep(), &P::bring_all_to_front(None)]);
+    let help = menu(
+        "Help",
+        &[&item("docs", "Documentation", None), &item("spec", "Larrier Session Format", None), &item("shortcuts", "Keyboard Shortcuts", None), &sep(), &item("issue", "Report an Issue", None)],
+    );
+    #[cfg(target_os = "macos")]
+    {
+        window.set_as_windows_menu_for_nsapp();
+        help.set_as_help_menu_for_nsapp();
+    }
+    Menu::with_items(&[&app, &file, &edit, &view, &window, &help]).expect("menu bar")
+}
+
+/// The command a system menu item stands for.
+fn system_command(id: &str) -> Option<Cmd> {
+    Some(match id {
+        "about" => Cmd::About,
+        "settings" => Cmd::Settings,
+        "quit" => Cmd::Exit,
+        "new-agent" => Cmd::NewAgent,
+        "open-folder" => Cmd::OpenFolder,
+        "import-all" => Cmd::ImportAll,
+        "import-file" => Cmd::ImportFile,
+        "export" => Cmd::Export,
+        "palette" => Cmd::Palette,
+        "toggle-sidebar" => Cmd::ToggleSidebar,
+        "toggle-panel" => Cmd::TogglePanel,
+        "zoom-in" => Cmd::Zoom(1),
+        "zoom-out" => Cmd::Zoom(-1),
+        "zoom-reset" => Cmd::Zoom(0),
+        "docs" => Cmd::Docs,
+        "spec" => Cmd::Spec,
+        "shortcuts" => Cmd::Shortcuts,
+        "issue" => Cmd::Issue,
+        _ => return None,
+    })
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Cmd {
     NewAgent,
@@ -182,14 +274,24 @@ fn entries(menu: &str) -> Vec<Entry> {
 pub fn MenuBar() -> Element {
     let mut app = use_app();
     let open = app.ui.read().menubar;
-    let names = ["File", "Edit", "View", "Help"];
+    // macOS: the menus are in the system menu bar; this bar only holds the
+    // traffic lights and moves the window.
+    let names: &[&'static str] = if crate::platform::SYSTEM_MENU_BAR { &[] } else { &["File", "Edit", "View", "Help"] };
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    dioxus::desktop::use_muda_event_handler(move |e| {
+        if let Some(c) = system_command(e.id.0.as_str()) {
+            run(app, c);
+        }
+    });
     rsx! {
-        div { class: "menubar",
-            div { class: "app-mark", title: "Larrier",
-                span { class: "mark ink", dangerous_inner_html: crate::logo::MARK_SVG }
-                span { class: "mark paper", dangerous_inner_html: crate::logo::MARK_LIGHT_SVG }
+        div { class: if crate::platform::SYSTEM_MENU_BAR { "menubar system" } else { "menubar" },
+            if !crate::platform::SYSTEM_MENU_BAR {
+                div { class: "app-mark", title: "Larrier",
+                    span { class: "mark ink", dangerous_inner_html: crate::logo::MARK_SVG }
+                    span { class: "mark paper", dangerous_inner_html: crate::logo::MARK_LIGHT_SVG }
+                }
             }
-            for (i, n) in names.into_iter().enumerate() {
+            for (i, n) in names.iter().copied().enumerate() {
                 div { key: "{n}", style: "position: relative; display: flex;",
                     button {
                         class: if open == Some(n) { "mb-item open" } else { "mb-item" },
@@ -214,7 +316,7 @@ pub fn MenuBar() -> Element {
                                     Some((label, kb, cmd)) => rsx! {
                                         button { key: "{j}", class: "menu-item", onclick: move |_| run(app, cmd),
                                             span { "{label}" }
-                                            if !kb.is_empty() { span { class: "kb", "{kb}" } }
+                                            if !kb.is_empty() { span { class: "kb", {crate::platform::keys(kb)} } }
                                         }
                                     },
                                 }

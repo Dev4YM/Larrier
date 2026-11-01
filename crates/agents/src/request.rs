@@ -581,7 +581,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         run_as: session.run_as.clone().filter(|_| *agent == AgentKind::ClaudeCode),
         browser: crate::browser::server()
             .map(|s| s.for_chat(&session.id))
-            .filter(|_| cfg.settings.browser_tools)
+            .filter(|_| cfg.settings.browser_tools && crate::browser::SUPPORTED)
             .filter(|_| matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex) || protocol == Protocol::Acp),
     })
 }

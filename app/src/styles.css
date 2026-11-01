@@ -1849,3 +1849,6 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
   font-size: 11px; display: inline-flex; align-items: center; justify-content: center; }
 .icon-btn.gear { position: relative; }
 .gear-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 2px var(--sidebar, var(--bg)); }
+
+/* macOS: the traffic lights sit over the bar's left end; the menus are in the system menu bar. */
+.menubar.system { padding-left: 78px; }

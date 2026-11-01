@@ -18,6 +18,11 @@ use serde_json::{json, Value};
 /// The MCP server's name as agents know it (`mcp__larrier_browser__…`).
 pub const SERVER_NAME: &str = "larrier_browser";
 
+/// Agents can use the browser here: its pages need a DevTools port, which
+/// WebView2 and Chrome have (Windows) and macOS's and Linux's web engines
+/// don't.
+pub const SUPPORTED: bool = cfg!(windows);
+
 /// How an agent starts the browser server: Larrier's own program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Server {

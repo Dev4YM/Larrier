@@ -227,7 +227,7 @@ pub fn TabMenu() -> Element {
                 onclick: move |_| { if enabled { close(); f(); } },
                 span { class: "muted", Icon { i: icon, size: 14 } }
                 span { "{label}" }
-                if !kb.is_empty() { span { class: "kb", "{kb}" } }
+                if !kb.is_empty() { span { class: "kb", {crate::platform::keys(kb)} } }
             }
         }
     };
@@ -756,7 +756,7 @@ pub fn GlobalMenu() -> Element {
                 },
                 span { class: "muted", Icon { i: icon, size: 14 } }
                 span { "{label}" }
-                if !kb.is_empty() { span { class: "kb", "{kb}" } }
+                if !kb.is_empty() { span { class: "kb", {crate::platform::keys(kb)} } }
             }
         }
     };

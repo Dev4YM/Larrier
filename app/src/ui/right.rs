@@ -117,7 +117,7 @@ pub fn RightPane(id: String) -> Element {
                                         onclick: move |_| { plus.set(false); app.ui.write().open_panel(t, false); },
                                         span { class: "muted", Icon { i, size: 15, stroke: 1.5 } }
                                         span { "{label}" }
-                                        span { class: "kb", "{kb}" }
+                                        span { class: "kb", {crate::platform::keys(kb)} }
                                     }
                                 }
                             }
@@ -717,7 +717,7 @@ fn BrowserTab() -> Element {
                         div { class: "d", "{e}" }
                     } else {
                         div { class: "t", "Larrier's browser" }
-                        div { class: "d", "Type an address above. Agents browse here with their browser tools, in the same pages you see." }
+                        div { class: "d", if larrier_agents::browser::SUPPORTED { "Type an address above. Agents browse here with their browser tools, in the same pages you see." } else { "Type an address above to browse here." } }
                     }
                 }
             }

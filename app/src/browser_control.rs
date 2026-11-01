@@ -65,7 +65,10 @@ fn target_of(id: u64) -> Option<String> {
     #[cfg(windows)]
     return crate::browser_chrome::target_of(id);
     #[cfg(not(windows))]
-    None
+    {
+        let _ = id;
+        None
+    }
 }
 
 /// One request, on the UI thread. An agent's tools work in its chat's

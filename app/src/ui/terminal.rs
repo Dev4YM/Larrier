@@ -896,6 +896,9 @@ const paste = () => dioxus.send({{ t: 'paste' }});
 term.attachCustomKeyEventHandler(e => {{
   if (e.type !== 'keydown') return true;
   const k = (e.key || '').toLowerCase();
+  // macOS copies and pastes with Cmd (Ctrl+C stays the shell's interrupt).
+  if (e.metaKey && k === 'c') {{ copy(); return false; }}
+  if (e.metaKey && k === 'v') {{ paste(); return false; }}
   if (e.ctrlKey && e.shiftKey && k === 'c') {{ copy(); return false; }}
   if (e.ctrlKey && e.shiftKey && k === 'v') {{ paste(); return false; }}
   if (e.ctrlKey && !e.shiftKey && k === 'c' && term.hasSelection()) {{ copy(); return false; }}

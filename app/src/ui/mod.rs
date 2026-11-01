@@ -11,7 +11,7 @@ mod home;
 pub mod loaders;
 pub mod mentions;
 mod meters;
-mod menubar;
+pub mod menubar;
 mod agent_models;
 mod models;
 mod overlays;
@@ -181,6 +181,10 @@ pub fn Root() -> Element {
 
     // Bridge: system theme + global keyboard shortcuts from the webview.
     use_future(move || async move {
+        // Tooltips name shortcuts the way macOS writes them (⌘K, not Ctrl+K).
+        if cfg!(target_os = "macos") {
+            document::eval(r#"window.__larrierKeys = (s) => s.replace(/Ctrl\+/g, '⌘').replace(/Shift\+/g, '⇧').replace(/Alt\+/g, '⌥');"#);
+        }
         let mut ev = document::eval(
             r#"
             const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -581,6 +585,41 @@ pub fn Root() -> Element {
                 .observe(document.body, { childList: true, subtree: true });
               window.addEventListener('resize', () => document.querySelectorAll('.menu, .mention-menu').forEach(fit));
             }
+            // Fast typing: a field's text comes back from Larrier after each
+            // key, and when that lags behind the keys (a slow machine, a
+            // busy webview) an older text would land on newer typing and
+            // eat characters. Text the user has already typed past isn't
+            // put back (Larrier's own changes, like clearing after sending
+            // or inserting an object, still are).
+            if (!window.__larrierTypeGuard) {
+              window.__larrierTypeGuard = true;
+              const guard = (el) => {
+                if (el.__lguard) return;
+                el.__lguard = true;
+                const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
+                if (!d || !d.set) return;
+                const typed = [];
+                el.addEventListener('input', () => {
+                  const now = performance.now();
+                  typed.push({ v: d.get.call(el), t: now });
+                  while (typed.length && now - typed[0].t > 2000) typed.shift();
+                }, true);
+                Object.defineProperty(el, 'value', {
+                  configurable: true,
+                  get() { return d.get.call(el); },
+                  set(v) {
+                    const cur = d.get.call(el);
+                    const last = typed[typed.length - 1];
+                    const stale = v !== '' && v !== cur && last && last.v === cur && cur.startsWith(v) && typed.some((e) => e.v === v);
+                    if (!stale) d.set.call(el, v);
+                  },
+                });
+              };
+              document.addEventListener('focusin', (e) => {
+                const el = e.target;
+                if (el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'search' || el.type === '')))) guard(el);
+              }, true);
+            }
             // Larrier's own tooltips instead of the system's: a hovered
             // element's title moves to data-tip and shows in a bubble.
             if (!window.__larrierTips) {
@@ -617,7 +656,7 @@ pub fn Root() -> Element {
                   const root = document.querySelector('.larrier-root');
                   tip.classList.toggle('dark', !!root && root.getAttribute('data-theme') === 'dark');
                   tip.classList.toggle('still', !!root && root.classList.contains('no-motion'));
-                  tip.textContent = el.getAttribute('data-tip');
+                  tip.textContent = window.__larrierKeys ? window.__larrierKeys(el.getAttribute('data-tip')) : el.getAttribute('data-tip');
                   tip.style.left = '0px';
                   tip.style.top = '0px';
                   place(el);
@@ -1443,7 +1482,8 @@ pub fn WindowControls() -> Element {
     let w1 = window.clone();
     let w2 = window.clone();
     let w3 = window.clone();
-    if cfg!(target_os = "macos") {
+    // macOS has its traffic lights and Linux the system's frame.
+    if !crate::platform::DRAWS_CAPTION {
         return rsx! {};
     }
     rsx! {
@@ -1653,7 +1693,7 @@ pub fn Kbd(keys: Vec<&'static str>) -> Element {
     rsx! {
         span { class: "kbd",
             for k in keys {
-                span { "{k}" }
+                span { {crate::platform::key(k)} }
             }
         }
     }

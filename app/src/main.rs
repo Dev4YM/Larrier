@@ -17,6 +17,7 @@ mod logos;
 mod markdown;
 mod models_sync;
 mod notify;
+mod platform;
 mod quota;
 mod spell;
 mod state;
@@ -120,6 +121,8 @@ fn main() {
     if let Some(code) = headless(&args) {
         std::process::exit(code);
     }
+    // macOS / Linux: the agents and their tools as a terminal finds them.
+    platform::adopt_login_path();
     install::tidy();
     let start = if args.iter().any(|a| a == "--uninstall") {
         Start::Uninstall
@@ -143,12 +146,19 @@ fn main() {
             .with_title("Larrier")
             .with_inner_size(LogicalSize::new(1440.0, 900.0))
             .with_min_inner_size(LogicalSize::new(560.0, 420.0)),
-    )
-    .with_decorations(false);
+    );
+    // Windows: no system frame (Larrier draws the bar and its buttons).
+    // macOS: the traffic lights over Larrier's own top bar. Linux: the
+    // system's frame, which every window manager can move and resize.
     #[cfg(windows)]
     {
         use dioxus::desktop::tao::platform::windows::WindowBuilderExtWindows;
-        window = window.with_undecorated_shadow(true);
+        window = window.with_decorations(false).with_undecorated_shadow(true);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
+        window = window.with_titlebar_transparent(true).with_fullsize_content_view(true).with_title_hidden(true);
     }
     if start != Start::App {
         // The installer and uninstaller: a small window with the system's frame.
@@ -161,7 +171,9 @@ fn main() {
     let cfg = Config::new()
         .with_window(window.with_window_icon(Some(app_icon())))
         .with_icon(app_icon())
-        .with_menu(None)
+        // macOS keeps the app's commands (and Edit's, which copy and paste
+        // need there) in the system menu bar; elsewhere Larrier draws its own.
+        .with_menu(if platform::SYSTEM_MENU_BAR && start == Start::App { Some(ui::menubar::system_menu()) } else { None })
         .with_disable_context_menu(true)
         .with_background_color(bg)
         .with_data_directory(root.join("webview"))

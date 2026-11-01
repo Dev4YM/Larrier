@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 
 use dioxus::core::spawn_forever;
 use dioxus::desktop::wry::dpi::{PhysicalPosition, PhysicalSize};
-use dioxus::desktop::wry::{NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows};
+use dioxus::desktop::wry::{NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder};
 use dioxus::prelude::*;
 
 /// One page tab as the UI shows it.
@@ -511,10 +511,15 @@ fn build_pending() {
             .with_url(&url)
             .with_bounds(bounds(area, false))
             .with_devtools(true)
-            .with_hotkeys_zoom(true)
-            // Its DevTools port is for the agents; pages aren't told the
-            // browser is automated (it's the user's own browsing too).
-            .with_additional_browser_args("--remote-debugging-port=0 --disable-blink-features=AutomationControlled --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
+            .with_hotkeys_zoom(true);
+        // Its DevTools port is for the agents; pages aren't told the browser
+        // is automated (it's the user's own browsing too).
+        #[cfg(windows)]
+        let made = {
+            use dioxus::desktop::wry::WebViewBuilderExtWindows;
+            made.with_additional_browser_args("--remote-debugging-port=0 --disable-blink-features=AutomationControlled --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
+        };
+        let made = made
             // Which Larrier tab a page is in, for the agents' tools.
             .with_initialization_script(format!("Object.defineProperty(window, '__larrierTab', {{ value: {id} }});"))
             .with_initialization_script(include_str!("browser_annotate.js").replace("__LARRIER_TOKEN__", annotate_token()))

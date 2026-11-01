@@ -1165,7 +1165,7 @@ pub fn Composer(
                                                         span { "{b.label()}" }
                                                         span { class: "sub", "{b.description()}" }
                                                     }
-                                                    if !kb.is_empty() { span { class: "kb", "{kb}" } }
+                                                    if !kb.is_empty() { span { class: "kb", {crate::platform::keys(kb)} } }
                                                 }
                                             }
                                         }

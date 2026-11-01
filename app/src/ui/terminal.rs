@@ -1,5 +1,5 @@
 //! Real terminals for the side panel: a PTY per terminal (portable-pty,
-//! ConPTY on Windows) rendered with xterm.js, like Cursor's terminal tab.
+//! ConPTY on Windows) rendered with xterm.js.
 //!
 //! Terminals live in a global registry keyed by session id, so they keep
 //! running when the panel, tab or session changes. Each terminal keeps the

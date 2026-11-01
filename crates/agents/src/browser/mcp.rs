@@ -1,9 +1,9 @@
 //! `Larrier mcp-browser`: an MCP server on stdio that gives an agent
 //! Larrier's browser: the real browser views in Larrier's Browser tab, so
 //! the user watches (and can use) the very pages the agent works in. The
-//! tools follow Claude in Chrome's: tabs, navigate, computer (mouse, keys,
-//! screenshots), read_page and find (refs), form_input, page text,
-//! JavaScript, console and network logs, resizing, uploads and GIFs.
+//! tools: tabs, navigate, computer (mouse, keys, screenshots), read_page and
+//! find (refs), form_input, page text, JavaScript, console and network logs,
+//! resizing, uploads and GIFs.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};

@@ -1,6 +1,5 @@
 //! Customize: every agent's MCP servers, skills, subagents, rules, commands,
-//! hooks and plugins on one page (modeled on Cursor's Customize screen, but
-//! across all installed harnesses).
+//! hooks and plugins on one page, across all installed harnesses.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

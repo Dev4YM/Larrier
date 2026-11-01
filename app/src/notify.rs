@@ -1,9 +1,8 @@
 //! System integration: native notifications, the completion chime, the
 //! system tray icon, window size / position restore and recovery of agents
-//! that were still running when Larrier closed.
-//!
-//! Mirrors Cursor's Settings → General (Notifications, System Tray Icon,
-//! Completion Sound, Window Restoration, Continue Interrupted Agents).
+//! that were still running when Larrier closed (Settings → General:
+//! Notifications, System Tray Icon, Completion Sound, Window Restoration,
+//! Continue Interrupted Agents).
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,6 +1,6 @@
-//! Files panel, modeled on Cursor's: open-file tabs with language icons,
-//! a breadcrumb with back / forward, quick open, a lazy file tree and a
-//! virtualized, syntax-highlighted viewer with line numbers.
+//! Files panel: open-file tabs with language icons, a breadcrumb with
+//! back / forward, quick open, a lazy file tree and a virtualized,
+//! syntax-highlighted viewer with line numbers.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};

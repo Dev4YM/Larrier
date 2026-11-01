@@ -54,7 +54,7 @@ impl View {
 
 /// A subagent chat open next to its session. A window shows one session:
 /// its own tab always comes first and is never replaced; its subagents open
-/// beside it, VS Code style: a single click opens a preview tab (italic)
+/// beside it as tabs: a single click opens a preview tab (italic)
 /// that the next one replaces, and double-click keeps it. Another session
 /// never joins as a tab; it opens side by side instead.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]

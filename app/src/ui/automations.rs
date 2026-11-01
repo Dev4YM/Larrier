@@ -1,5 +1,5 @@
-//! Automations page: scheduled and on-commit agent runs, Cursor style
-//! (header + New Automation, hero, Mine / Runs table, template gallery).
+//! Automations page: scheduled and on-commit agent runs (header + New
+//! Automation, hero, Mine / Runs table, template gallery).
 
 use chrono::{Datelike, Local, Timelike};
 use dioxus::prelude::*;

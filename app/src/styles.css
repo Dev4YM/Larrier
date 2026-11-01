@@ -1,5 +1,5 @@
-/* Larrier — agents window.
-   Tokens and metrics follow Cursor's Agents Window (Cursor 3). */
+/* Larrier — the desktop app's styles.
+   Theme tokens first (light, dark), then the window, part by part. */
 
 .app[data-theme="light"] {
   --win: #f2f1ed;            /* sidebar + chat pane */
@@ -547,8 +547,8 @@ select.input { cursor: pointer; padding-right: 4px; }
 .scroll-bottom { position: absolute; bottom: 8px; right: 14px; z-index: 4; }
 
 /* ====================================================================
-   v2 — layout of the shipping Cursor Agents Window (menu bar, repo tree
-   sidebar, title chip, "On <repo>" tools, pill composer).
+   Window layout: menu bar, project tree sidebar, title chip,
+   "On <repo>" tools and the pill composer.
    ==================================================================== */
 
 .app { flex-direction: column; font-size: 13px; line-height: 18px; }
@@ -977,7 +977,7 @@ button:not(:disabled), [role="button"], [role="tab"], a[href], .chat-row, .repo-
 .ctab.static, .chat-usage, .env-chip[style*="cursor: default"] { cursor: default; }
 button:disabled, .menu-item.disabled { cursor: not-allowed; }
 
-/* Prompt card: flat like Cursor's — a hairline border and the faintest lift. */
+/* Prompt card: flat — a hairline border and the faintest lift. */
 .user-card { box-shadow: none; border-color: var(--border); }
 .user-card:hover { border-color: var(--border-2); }
 .user-card:not(.expanded)::after { height: 22px; }
@@ -995,7 +995,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .chat-col.fixed { flex: 0 0 var(--chat-w, 760px); max-width: 70%; }
 .pill-btn.active-blue { border-color: var(--blue); color: var(--blue); }
 
-/* Sidebar repo rows, Cursor style: chevron and "+ new agent" on hover. */
+/* Sidebar repo rows: chevron and "+ new agent" on hover. */
 .repo-row { position: relative; cursor: pointer; user-select: none; }
 .repo-row .ic { width: 16px; height: 16px; align-items: center; justify-content: center; flex-shrink: 0; }
 .repo-row .ic-rest, .repo-row .ic-chev { display: flex; align-items: center; justify-content: center; }
@@ -1365,7 +1365,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .pv-line.ctx { opacity: .72; }
 
 /* With the session rail, the header runs the whole width and the rail sits
-   under it, like Cursor's; folded, the rail is a floating card of tools. */
+   under it; folded, the rail is a floating card of tools. */
 .agent-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chat-col.bare .sub-layer { top: 0; }
 .rail-wrap > .tools-col.collapsed { align-self: flex-start; width: auto; margin: 2px 10px 0 auto; padding: 4px; gap: 2px;
@@ -1735,7 +1735,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .meter-pop .foot { border-top: 1px solid var(--border); margin: 0 -8px; padding-top: 4px; }
 .meter-pop .ctx-total .big { font-size: 18px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
 .meter-pop .ctx-total .s { color: var(--fg-3); }
-/* One line, its parts flush (like Cursor's): only the line's ends are round. */
+/* One line, its parts flush: only the line's ends are round. */
 .ctx-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--fg-3) 16%, transparent); }
 .ctx-bar .part { min-width: 2px; height: 100%; transition: opacity .15s ease; }
 .ctx-bar.has-hot .part { opacity: .3; }

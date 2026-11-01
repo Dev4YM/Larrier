@@ -1,7 +1,6 @@
-//! Rendering of an LSF conversation the way Cursor's Agents Window does it:
-//! sticky prompt cards, quiet "Read / Searched / Thought" steps grouped into
-//! "Explored …", command cards, edit cards with inline diff previews, plans
-//! and live streaming state.
+//! Rendering of an LSF conversation: sticky prompt cards, quiet "Read /
+//! Searched / Thought" steps grouped into "Explored …", command cards, edit
+//! cards with inline diff previews, plans and live streaming state.
 //!
 //! Built for very long chats: only the newest turns are mounted (older ones
 //! load as you scroll up), and each turn re-renders only when its own
@@ -308,7 +307,7 @@ pub fn Transcript(id: String) -> Element {
     let tid3 = tid.clone();
     rsx! {
         if nav.len() > 1 {
-            // The prompt timeline, like Cursor's: a dash per prompt. Anywhere
+            // The prompt timeline: a dash per prompt. Anywhere
             // in its strip the nearest dash lights up with a card (prompt,
             // the answer it got, when); a click jumps there.
             div { class: "turn-nav", "data-for": "{tid}",
@@ -802,7 +801,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                     app.request_edit(Some((mid_c.clone(), text2.clone(), atts_e.clone())));
                 },
                 ondoubleclick: move |e| { e.stop_propagation(); expanded.toggle(); },
-                // Images first, as small thumbnails (click to view), like Cursor.
+                // Images first, as small thumbnails (click to view).
                 if !images.is_empty() {
                     div { class: "msg-images",
                         for (i, src) in images.into_iter().enumerate() {
@@ -1321,7 +1320,7 @@ fn ExploreGroup(tools: Vec<ToolCall>) -> Element {
     if tools.len() == 1 {
         return rsx! { Step { tool: tools[0].clone() } };
     }
-    // "internet.rs, state.rs, 2 searches" (Cursor's wording).
+    // "internet.rs, state.rs, 2 searches".
     let mut names: Vec<String> = Vec::new();
     let mut reads = 0;
     for t in tools.iter().filter(|t| t.kind == ToolKind::Read) {

@@ -1,6 +1,6 @@
 [package]
 name = "larrier-app"
-description = "Larrier desktop: the agents window"
+description = "Larrier: one desktop app for every coding agent and AI chat"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

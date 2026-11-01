@@ -1,6 +1,6 @@
-//! The prompt composer, shaped like Cursor's: a pill with a "+" menu, the
-//! input, one agent + model picker (brand logos) and send / stop, with the
-//! branch and environment pickers underneath.
+//! The prompt composer: a pill with a "+" menu, the input, one agent +
+//! model picker (brand logos) and send / stop, with the branch and
+//! environment pickers underneath.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -1344,9 +1344,9 @@ Effort: {}", c.efforts.iter().map(|e| larrier_agents::models::effort_label(e)).c
 
 /// Agent + model picker: enabled agents on the left, the hovered agent's
 /// models on the right; typing searches every model each agent offers. A
-/// model's Edit button opens its properties (context, effort, Fast), like
-/// Cursor's. Fixed size so it never jumps while you browse; it folds into
-/// one column on narrow windows.
+/// model's Edit button opens its properties (context, effort, Fast).
+/// Fixed size so it never jumps while you browse; it folds into one column
+/// on narrow windows.
 #[component]
 fn ModelPicker(
     open: Signal<bool>,

@@ -1,5 +1,5 @@
 //! The window's menu bar: app mark, File / Edit / View / Help, drag area and
-//! caption buttons — drawn by Larrier, like Cursor on Windows.
+//! caption buttons, drawn by Larrier itself (the window has no system frame).
 
 use dioxus::prelude::*;
 use larrier_core::Theme;

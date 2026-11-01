@@ -1,7 +1,6 @@
 //! The agent view: tab strip header, transcript + composer column (two side
 //! by side in a split), the "On <repo>" tool list, the side panel (Changes /
-//! Browser / Terminal / Files) and drop targets for dragged chats — laid out
-//! like Cursor's Agents Window.
+//! Browser / Terminal / Files) and drop targets for dragged chats.
 
 use std::path::Path;
 
@@ -82,8 +81,8 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
         return rsx! { div { class: "empty-state", "Loading…" } };
     }
     // With the session rail, the header runs the whole width and the rail
-    // sits under it, like Cursor's; beside a panel or a second chat, each
-    // column keeps its own header.
+    // sits under it; beside a panel or a second chat, each column keeps its
+    // own header.
     let rail = split.is_none() && !right_open;
     let col_class = format!(
         "chat-col primary{}{}{}",

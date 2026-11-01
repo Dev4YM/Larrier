@@ -514,7 +514,7 @@ pub enum UpdateChannel {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SidebarGroup {
-    /// Ready for Review / In Progress, then by workspace (Cursor style).
+    /// Ready for Review / In Progress, then by workspace.
     #[default]
     Status,
     Workspace,

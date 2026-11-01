@@ -28,7 +28,7 @@ fn tab_icon(t: SettingsTab) -> I {
     }
 }
 
-/// Settings navigation — takes the sidebar's place, like Cursor.
+/// Settings navigation — takes the sidebar's place while Settings is open.
 #[component]
 pub fn SettingsNav() -> Element {
     let app = use_app();

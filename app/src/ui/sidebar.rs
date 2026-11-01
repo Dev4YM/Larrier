@@ -1,7 +1,6 @@
-//! Left sidebar, laid out like Cursor's Agents Window: navigation, pinned
-//! agents, then every project with its agents nested underneath (or every
-//! agent, or projects with their agents grouped by harness). Chats without
-//! a project live in Home.
+//! Left sidebar: navigation, pinned agents, then every project with its
+//! agents nested underneath (or every agent, or projects with their agents
+//! grouped by harness). Chats without a project live in Home.
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;

@@ -568,6 +568,17 @@ fn Accounts() -> Element {
                                 Icon { i: match a.auth { AccountAuth::ApiKey { .. } => I::Key, AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 15 }
                                 div { class: "lbl",
                                     div { class: "t", "{a.label}" }
+                                    // Who it's signed in as, so two logins can't be mixed up.
+                                    {
+                                        let (ok, email) = crate::state::signed_in_as(&a);
+                                        rsx! {
+                                            if !matches!(a.auth, AccountAuth::ApiKey { .. } | AccountAuth::Env { .. }) {
+                                                div { class: if ok { "acct-who ok" } else { "acct-who off" },
+                                                    {match (ok, email) { (true, Some(e)) => format!("Signed in as {e}"), (true, None) => "Signed in".to_string(), (false, _) => "Not signed in".to_string() }}
+                                                }
+                                            }
+                                        }
+                                    }
                                     div { class: "d",
                                         "{a.auth.label()}"
                                         match &a.auth {
@@ -585,12 +596,10 @@ fn Accounts() -> Element {
                                         "Make default"
                                     }
                                 }
-                                if let AccountAuth::ConfigDir { path } = &a.auth {
-                                    if let (Some(var), Some(login)) = (spec.home_env, spec.login_command) {
-                                        button { class: "ghost-btn", style: "height: 24px;",
-                                            onclick: { let p = path.clone(); move |_| { let cmd = if cfg!(windows) { format!("set {var}={p}&& {login}") } else { format!("{var}='{p}' {login}") }; let _ = crate::state::open_terminal(&p, &cmd); } },
-                                            "Sign in"
-                                        }
+                                if matches!(a.auth, AccountAuth::ConfigDir { .. }) && spec.login_command.is_some() {
+                                    button { class: "ghost-btn", style: "height: 24px;", title: "Opens the agent's login for this account's own folder",
+                                        onclick: { let a2 = a.clone(); move |_| app.sign_in(&a2) },
+                                        {if crate::state::signed_in_as(&a).0 { "Sign in again" } else { "Sign in" }}
                                     }
                                 }
                                 button { class: "icon-btn", title: "Remove account",

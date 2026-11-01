@@ -1829,6 +1829,20 @@ impl App {
     }
 
     /// Open the session in the agent's own CLI in a terminal window.
+    /// Sign `account` in: its agent's login in a terminal, in its own folder.
+    /// The browser decides which account it signs in to.
+    pub fn sign_in(self, account: &larrier_core::Account) {
+        let Some(login) = account.agent.spec().login_command else {
+            return self.toast(format!("{} signs in from its own app", account.agent.display_name()));
+        };
+        let cmd = as_account(&account.agent, Some(account), login);
+        let cwd = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
+        match open_terminal(&cwd, &cmd) {
+            Ok(()) => self.toast(format!("Sign in to “{}” in the terminal. In the browser, use the account you want for it, switching there if it shows another.", account.label)),
+            Err(e) => self.toast_err(format!("Could not open a terminal: {e}")),
+        }
+    }
+
     pub fn open_in_terminal(self, id: &str) {
         let Some(s) = self.peek_session(id, |s| s.clone()) else { return };
         let cwd = s.cwd().unwrap_or_else(|| ".".into());
@@ -1845,6 +1859,13 @@ impl App {
         if cmd.is_empty() {
             return self.toast("This agent has no CLI to open.");
         }
+        // As the chat's account: a session in an account's own folder is
+        // found only there.
+        let cmd = {
+            let cfg = self.config.peek();
+            let acc = s.account_id.as_deref().and_then(|a| cfg.account(a)).or_else(|| cfg.default_account(&s.agent)).cloned();
+            as_account(&s.agent, acc.as_ref(), &cmd)
+        };
         match open_terminal(&cwd, &cmd) {
             Ok(()) => self.toast(format!("Opened: {cmd}")),
             Err(e) => self.toast_err(format!("Could not open a terminal: {e}")),
@@ -2372,6 +2393,46 @@ pub fn account_homes(cfg: &Config) -> Vec<(AgentKind, PathBuf, String)> {
             _ => None,
         })
         .collect()
+}
+
+/// `cmd` as typed in a terminal, run as `account` when it signs in from a
+/// folder of its own (that folder's variable set first). Keys never go on a
+/// command line.
+pub fn as_account(agent: &AgentKind, account: Option<&larrier_core::Account>, cmd: &str) -> String {
+    match (account.map(|a| &a.auth), agent.spec().home_env) {
+        (Some(AccountAuth::ConfigDir { path }), Some(var)) => {
+            if cfg!(windows) {
+                format!("set {var}={path}&& {cmd}")
+            } else {
+                format!("{var}='{path}' {cmd}")
+            }
+        }
+        _ => cmd.to_string(),
+    }
+}
+
+/// Whether an account is signed in, and as whom when the agent says.
+pub fn signed_in_as(account: &larrier_core::Account) -> (bool, Option<String>) {
+    let home = dirs::home_dir().unwrap_or_default();
+    let dir = match &account.auth {
+        AccountAuth::ConfigDir { path } => Some(PathBuf::from(path)),
+        AccountAuth::SystemLogin => None,
+        _ => return (true, None),
+    };
+    match account.agent {
+        AgentKind::ClaudeCode => {
+            let env = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from);
+            let root = dir.clone().or(env.clone()).unwrap_or_else(|| home.join(".claude"));
+            let json = if dir.is_some() || env.is_some() { root.join(".claude.json") } else { home.join(".claude.json") };
+            let email = std::fs::read_to_string(json).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).and_then(|v| v["oauthAccount"]["emailAddress"].as_str().map(String::from));
+            (root.join(".credentials.json").is_file(), email)
+        }
+        AgentKind::Codex => {
+            let root = dir.or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from)).unwrap_or_else(|| home.join(".codex"));
+            (root.join("auth.json").is_file(), None)
+        }
+        _ => (true, None),
+    }
 }
 
 /// Config dir for accounts that use a separate login directory.

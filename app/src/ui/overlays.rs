@@ -598,13 +598,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
         app.ui.write().modal = None;
         match &a {
             // Sign in inside the account's folder.
-            AccountAuth::ConfigDir { path } if needs_login => {
-                if let (Some(var), Some(login)) = (k2.spec().home_env, k2.spec().login_command) {
-                    let cmd = if cfg!(windows) { format!("set {var}={path}&& {login}") } else { format!("{var}='{path}' {login}") };
-                    let _ = crate::state::open_terminal(&path, &cmd);
-                    app.toast("Finish signing in in the terminal window");
-                }
-            }
+            AccountAuth::ConfigDir { .. } if needs_login => app.sign_in(&acc),
             AccountAuth::ConfigDir { .. } => app.toast("Account added · bringing in its sessions"),
             _ => app.toast("Account added"),
         }

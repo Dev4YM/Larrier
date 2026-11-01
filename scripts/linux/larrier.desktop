@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Larrier
+GenericName=Coding agents
+Comment=One desktop app for every coding agent and AI chat
+Exec=larrier %U
+Icon=larrier
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=larrier
+Keywords=agent;ai;chat;claude;codex;cursor;

@@ -2,7 +2,8 @@
 .SYNOPSIS
   Cut a Larrier release: bump the version, write its changelog section,
   commit and tag it, build and check the Windows program, and (with
-  -Publish) push and publish it on GitHub. Works without GitHub Actions.
+  -Publish) push and publish it on GitHub. The tag starts the Release
+  workflow, which adds the macOS and Linux programs.
 
 .DESCRIPTION
   Versions follow Semantic Versioning (https://semver.org). The version
@@ -229,9 +230,16 @@ if ($LASTEXITCODE -eq 0) { $auth = @('-c', 'credential.helper=', '-c', 'credenti
 Invoke-Git @auth push -q origin HEAD:main | Out-Null
 Invoke-Git @auth push -q origin $tag | Out-Null
 if (-not $SkipBuild) {
-    $ghArgs = @('release', 'create', $tag, (Join-Path $dist $asset), (Join-Path $dist "$asset.sha256"), '--title', "Larrier $next", '--notes-file', $notesFile, '--verify-tag')
-    $ghArgs += $(if ($preview) { '--prerelease' } else { '--latest' })
+    # The Release workflow (macOS and Linux builds) may have created the
+    # release already: then the Windows program is added to it.
+    & gh release view $tag *> $null
+    if ($LASTEXITCODE -eq 0) {
+        $ghArgs = @('release', 'upload', $tag, (Join-Path $dist $asset), (Join-Path $dist "$asset.sha256"), '--clobber')
+    } else {
+        $ghArgs = @('release', 'create', $tag, (Join-Path $dist $asset), (Join-Path $dist "$asset.sha256"), '--title', "Larrier $next", '--notes-file', $notesFile, '--verify-tag')
+        $ghArgs += $(if ($preview) { '--prerelease' } else { '--latest' })
+    }
     & gh @ghArgs
-    if ($LASTEXITCODE -ne 0) { Fail "gh release create failed; the tag is pushed, so retry: gh $($ghArgs -join ' ')" }
+    if ($LASTEXITCODE -ne 0) { Fail "gh release failed; the tag is pushed, so retry: gh $($ghArgs -join ' ')" }
 }
 Write-Host "Published Larrier $next" -ForegroundColor Green

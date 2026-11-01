@@ -1,0 +1,5 @@
+# What runs on macOS and Linux keeps Unix line endings, even in a Windows
+# checkout: a script copied into Docker or WSL with CRLF endings fails.
+*.sh       text eol=lf
+*.desktop  text eol=lf
+Dockerfile text eol=lf

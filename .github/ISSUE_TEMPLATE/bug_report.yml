@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in Larrier doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Started a chat with Codex in a project
+        2. Sent a follow-up while it was running
+        3. Expected it to steer the turn; it was dropped instead
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Larrier version
+      description: Settings → About, or `Larrier.exe --version`.
+      placeholder: Larrier 0.1.32 (c513e06, 2026-11-01)
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and its version
+      description: If it involves an agent, which one and its version (Settings → Agents).
+      placeholder: Codex 0.166.0
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 24H2
+  - type: textarea
+    id: more
+    attributes:
+      label: Screenshots or logs
+      description: Anything that helps. Remove tokens, emails and private paths first.

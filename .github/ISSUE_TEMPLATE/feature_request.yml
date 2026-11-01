@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest something Larrier should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The task or situation, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you'd like it to work. Sketches and screenshots welcome.
+  - type: input
+    id: agents
+    attributes:
+      label: Agents involved
+      placeholder: Claude Code, OpenCode

@@ -1048,7 +1048,6 @@ pub fn Composer(
                         button { class: if model_menu() { "picker open" } else { "picker" }, title: "{agent.display_name()}",
                             onclick: move |_| { model_query.set(String::new()); model_menu.set(true); },
                             if let Some(svg) = model_logo_svg { Logo { svg, size: 14 } }
-                            span { class: "lb sub", "{agent.display_name()}" }
                             span { class: "lb", "{model_text}" }
                             if !effort_text.is_empty() { span { class: "lb sub eff", "{effort_text}" } }
                             span { class: "chev", Icon { i: I::ChevronDown, size: 12 } }
@@ -1259,10 +1258,10 @@ Effort: {}", c.efforts.iter().map(|e| larrier_agents::models::effort_label(e)).c
 }
 
 /// Agent + model picker: enabled agents on the left, the hovered agent's
-/// models on the right; typing searches every model each agent offers. The
-/// effort row under it sets the reasoning effort (and Cursor's speed). Fixed
-/// size so it never jumps while you browse; it folds into one column on
-/// narrow windows.
+/// models on the right; typing searches every model each agent offers. A
+/// model's Edit button opens its properties (context, effort, Fast), like
+/// Cursor's. Fixed size so it never jumps while you browse; it folds into
+/// one column on narrow windows.
 #[component]
 fn ModelPicker(
     open: Signal<bool>,
@@ -1276,12 +1275,31 @@ fn ModelPicker(
     let app = use_app();
     let mut query = use_signal(String::new);
     let mut browse = use_signal(|| agent.clone());
+    // The model whose properties are open (agent, id, where its Edit was).
+    let mut edit = use_signal(|| None::<(AgentKind, String, f64, f64)>);
     let is_open = open();
     let a0 = agent.clone();
     use_effect(use_reactive!(|is_open| {
         if is_open {
             browse.set(a0.clone());
             query.set(String::new());
+        }
+        edit.set(None);
+    }));
+    // Beside its Edit button: to the right when there's room, else to the
+    // left, never over the button.
+    let edit_at = edit().map(|(_, _, x, y)| (x, y));
+    use_effect(use_reactive!(|edit_at| {
+        if edit_at.is_some() {
+            document::eval(
+                "requestAnimationFrame(() => { const m = document.getElementById('mp-edit'); const b = document.querySelector('.mp-row.editing .mp-edit-btn:not(.mp-reset)'); if (!m || !b) return;
+                  const r = b.getBoundingClientRect(), vw = innerWidth, vh = innerHeight, pad = 8;
+                  m.style.maxHeight = (vh - pad * 2) + 'px';
+                  const w = m.offsetWidth, h = Math.min(m.scrollHeight, vh - pad * 2);
+                  let left = r.right + 8; if (left + w > vw - pad) left = r.left - w - 8;
+                  let top = r.top - 10; if (top + h > vh - pad) top = vh - pad - h;
+                  m.style.left = Math.max(pad, left) + 'px'; m.style.top = Math.max(pad, top) + 'px'; });",
+            );
         }
     }));
     let agents = pickable_agents(&app, &agent);
@@ -1315,13 +1333,13 @@ fn ModelPicker(
     };
     let typed = query.read().trim().to_string();
     let cur_name = cur_meta.as_ref().map(|m| m.1.clone()).unwrap_or_else(|| cur.display_name().to_string());
-    // Effort (and speed) of the model in use, when browsing its agent.
+    // The model in use and its effort and speed (its Edit menu checks them).
     let family = now.family.clone().or(now.model.clone());
-    let fam_choice = family.as_deref().and_then(|f| crate::agent_models::choices(&app, &agent).into_iter().find(|c| c.id == f));
-    let efforts = fam_choice.as_ref().map(|c| c.efforts.clone()).unwrap_or_default();
-    let has_fast = fam_choice.as_ref().map(|c| c.fast).unwrap_or(false);
-    let show_effort = cur == agent && q.is_empty() && (!efforts.is_empty() || has_fast);
-    let (cur_effort, cur_fast, effort_default) = (now.effort.clone(), now.fast, now.effort_from_agent && effort.is_none());
+    let (cur_effort, cur_fast) = (now.effort.clone(), now.fast);
+    let cur_choices = crate::agent_models::choices(&app, &cur);
+    let editable = |id: &Option<String>| -> bool {
+        id.as_ref().and_then(|id| cur_choices.iter().find(|c| &c.id == id)).is_some_and(|c| !c.efforts.is_empty() || c.fast || c.context.is_some())
+    };
     rsx! {
         Dropdown { open, up, right: true, class: "model-picker",
             div { class: "menu-search",
@@ -1385,14 +1403,35 @@ fn ModelPicker(
                                 let k = cur.clone();
                                 let m2 = row.id.clone();
                                 rsx! {
-                                    button { key: "{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{row.tip}",
+                                    button { key: "{row_key}", class: "{cls}", title: "{row.tip}",
                                         onclick: move |_| onpick.call((k.clone(), m2.clone())),
                                         span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } else { Icon { i: I::Sparkle, size: 13, stroke: 1.5 } } }
                                         span { class: "mp-name",
-                                            span { class: "ellipsis", "{row.label}" }
+                                            span { class: "mp-label", "{row.label}" }
                                             if !row.note.is_empty() { span { class: "mp-note", "{row.note}" } }
                                         }
                                         if !row.meta.is_empty() { span { class: "mp-meta", "{row.meta}" } }
+                                        if custom {
+                                            span { class: "mp-edit-btn mp-reset", role: "button", title: "Back to its default effort and options",
+                                                onclick: move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    edit.set(None);
+                                                    onpick.call((k4.clone(), m4.clone()));
+                                                    oneffort.call((None, false));
+                                                },
+                                                Icon { i: I::Undo, size: 12 }
+                                            }
+                                        }
+                                        if can_edit {
+                                            span { class: "mp-edit-btn", role: "button", title: "Context, effort and options",
+                                                onclick: move |e: MouseEvent| {
+                                                    e.stop_propagation();
+                                                    let p = e.client_coordinates();
+                                                    edit.set(if editing { None } else { Some((k3.clone(), m3.clone(), p.x, p.y)) });
+                                                },
+                                                "Edit"
+                                            }
+                                        }
                                         span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
                                     }
                                 }
@@ -1413,7 +1452,7 @@ fn ModelPicker(
                                     onclick: move |_| onpick.call((k2.clone(), m2.clone())),
                                     span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } }
                                     span { class: "mp-name",
-                                        span { class: "ellipsis", "{row.label}" }
+                                        span { class: "mp-label", "{row.label}" }
                                         span { class: "mp-note", "{name}" }
                                     }
                                     if !row.meta.is_empty() { span { class: "mp-meta", "{row.meta}" } }
@@ -1439,29 +1478,64 @@ fn ModelPicker(
                     }
                 }
             }
-            if show_effort {
-                div { class: "mp-effort",
-                    span { class: "lbl", Icon { i: I::Brain, size: 13 } "Effort" }
-                    div { class: "seg",
-                        for e in efforts.clone() {
-                            {
-                                let on = cur_effort.as_deref() == Some(e.as_str());
-                                let e2 = e.clone();
-                                rsx! {
-                                    button { key: "{e}", class: if on && effort_default { "on dflt" } else if on { "on" } else { "" },
-                                        title: if on && effort_default { "The default" } else { "" },
-                                        onclick: move |_| oneffort.call((Some(e2.clone()), cur_fast)),
-                                        {larrier_agents::models::effort_label(&e)}
+            // A model's properties: its context, effort and options.
+            if let Some((ek, eid, _, _)) = edit() {
+                {
+                    let choice = crate::agent_models::choices(&app, &ek).into_iter().find(|c| c.id == eid);
+                    let using = ek == agent && (model.as_deref() == Some(eid.as_str()) || family.as_deref() == Some(eid.as_str()));
+                    let (sel_effort, sel_fast) = if using { (cur_effort.clone(), cur_fast) } else { (choice.as_ref().and_then(|c| c.default_effort.clone()), false) };
+                    let efforts = choice.as_ref().map(|c| c.efforts.clone()).unwrap_or_default();
+                    let has_fast = choice.as_ref().is_some_and(|c| c.fast);
+                    let context = choice.as_ref().and_then(|c| c.context);
+                    let pick = move |e: Option<String>, fast: bool| {
+                        let mut ed = edit;
+                        ed.set(None);
+                        onpick.call((ek.clone(), Some(eid.clone())));
+                        oneffort.call((e, fast));
+                    };
+                    let pick2 = pick.clone();
+                    rsx! {
+                        div { class: "mp-edit-backdrop", onclick: move |e| { e.stop_propagation(); edit.set(None); } }
+                        div { id: "mp-edit", class: "menu mp-edit", role: "menu", onclick: move |e| e.stop_propagation(),
+                            if let Some(t) = context {
+                                div { class: "menu-label", "Context" }
+                                div { class: "menu-item checked static", title: "The model's context window",
+                                    span { "{larrier_core::models::tokens_short(t)}" }
+                                    span { class: "check", Icon { i: I::Check, size: 13 } }
+                                }
+                            }
+                            if !efforts.is_empty() {
+                                if context.is_some() { div { class: "menu-sep" } }
+                                div { class: "menu-label", "Effort" }
+                                for e in efforts.clone() {
+                                    {
+                                        let on = sel_effort.as_deref() == Some(e.as_str());
+                                        let e2 = e.clone();
+                                        let pick = pick.clone();
+                                        rsx! {
+                                            button { key: "{e}", class: if on { "menu-item checked" } else { "menu-item" },
+                                                onclick: move |_| pick(Some(e2.clone()), sel_fast),
+                                                span { {larrier_agents::models::effort_label(&e)} }
+                                                span { class: "check", style: if on { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
-                    if has_fast {
-                        button { class: if cur_fast { "fast on" } else { "fast" }, title: "Faster responses, at a higher price",
-                            onclick: { let ce = cur_effort.clone(); move |_| oneffort.call((ce.clone(), !cur_fast)) },
-                            Icon { i: I::Zap, size: 12 }
-                            "Fast"
+                            if has_fast {
+                                if context.is_some() || !efforts.is_empty() { div { class: "menu-sep" } }
+                                div { class: "menu-label", "Options" }
+                                {
+                                    let se = sel_effort.clone();
+                                    rsx! {
+                                        button { class: "menu-item", title: "Faster responses, at a higher price",
+                                            onclick: move |_| pick2(se.clone(), !sel_fast),
+                                            span { "Fast" }
+                                            span { class: if sel_fast { "toggle on sm" } else { "toggle sm" } }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

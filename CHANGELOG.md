@@ -5,6 +5,19 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.24 — 2026-11-01
+
+### New
+
+- Add a folder you already sign in from as an account
+- Model names come first; each model has Edit and Reset
+- The agent's mode sits beside the environment, always
+- Search grows out of its icon
+
+### Fixed
+
+- Menus don't flash scrollbars; a clearer environment menu
+- The prompt timeline marks the prompt you're reading
 ## 0.1.23 — 2026-11-01
 
 ### Fixed

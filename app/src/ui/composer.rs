@@ -678,6 +678,7 @@ pub fn Composer(
                 };
                 text.set(String::new());
                 mentions.set(Vec::new());
+                crate::keep::set_input(&crate::keep::key(sid.as_deref()), crate::keep::Input::default());
                 match (cmd, acc) {
                     ("/login", Some(acc)) => app.sign_in(&acc),
                     (_, acc) => {
@@ -696,6 +697,13 @@ pub fn Composer(
         at.set(Vec::new());
         mentions.set(Vec::new());
         let editing = q_edit.read().clone();
+        // Sent: nothing is kept for this box any more. Done now, before the
+        // view moves on to the new chat (which would list what the New Agent
+        // box still kept as a draft); editing a queued message keeps the
+        // message set aside, which goes back in the box below.
+        if editing.is_none() {
+            crate::keep::set_input(&crate::keep::key(sid.as_deref()), crate::keep::Input::default());
+        }
         if let Some((qid, draft, draft_atts, draft_chips)) = editing {
             q_edit.set(None);
             if let Some(id) = &sid {

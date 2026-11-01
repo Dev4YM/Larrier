@@ -105,11 +105,26 @@ struct TurnRow {
     ended: chrono::DateTime<chrono::Utc>,
 }
 
+/// Where a chat was scrolled to when left (kept unless it was at the
+/// bottom): a turn, counted from the first, and how far its top was above
+/// the view's.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Scrolled {
+    turn: usize,
+    offset: f64,
+}
+
 #[component]
 pub fn Transcript(id: String) -> Element {
     let app = use_app();
-    let mut at_bottom = use_signal(|| true);
-    let mut shown = use_signal(|| TURN_WINDOW);
+    // Opened where it was left (in a past launch too), else at the bottom.
+    let kept = use_hook(|| crate::keep::value::<Scrolled>(&id, "scroll"));
+    let mut at_bottom = use_signal(|| kept.is_none());
+    let mut shown = use_signal(|| {
+        let total = app.with_session(&id, |s| turn_spans(&s.messages).len()).unwrap_or(0);
+        kept.map(|k| total.saturating_sub(k.turn)).unwrap_or(0).max(TURN_WINDOW)
+    });
+    let mut scroll_gen = use_signal(|| 0u64);
     // Messages sent into the turn that are being taken back.
     let taking_back = crate::state::use_ui(|u| u.unsteering.clone())();
     let Some(sig) = app.session_sig(&id) else { return rsx! {} };
@@ -251,6 +266,25 @@ pub fn Transcript(id: String) -> Element {
                     }});
                 }}
                 if (el.__current) requestAnimationFrame(el.__current);
+                // Opening a chat that was left scrolled up: back to that spot.
+                if (el.dataset.fresh !== '0' && el.dataset.anchor && !el.__restored) {{
+                    el.__restored = true;
+                    const [t, o] = el.dataset.anchor.split(':').map(Number);
+                    const at = () => el.querySelectorAll('.transcript-inner > .turn')[t - Number(el.dataset.first || 0)];
+                    // The turn's top `o` px above the view's top, again for
+                    // a moment while what's above it settles, unless the
+                    // user scrolls meanwhile.
+                    const put = () => {{ const turn = at(); if (turn) el.scrollTop += turn.getBoundingClientRect().top - el.getBoundingClientRect().top + o; }};
+                    if (at()) {{
+                        el.dataset.fresh = '0';
+                        put();
+                        const since = performance.now();
+                        let n = 0;
+                        const again = () => {{ if ((el.__userAt || 0) > since) return; put(); if (++n < 12) setTimeout(again, 80); }};
+                        setTimeout(again, 80);
+                        return;
+                    }}
+                }}
                 const fresh = el.dataset.fresh !== '0';
                 const near = el.scrollHeight - el.scrollTop - el.clientHeight < 260;
                 if (!fresh && !near) return;
@@ -307,17 +341,40 @@ pub fn Transcript(id: String) -> Element {
                 }
             }
         }
-        div { class: "transcript", id: "{tid}", "data-fresh": "1",
-            onscroll: move |e| {
-                let d = e.data();
-                let near = (d.scroll_height() as f64 - d.scroll_top() - d.client_height() as f64) < 120.0;
-                if near != at_bottom() { at_bottom.set(near); }
-                // Load earlier turns before the user reaches the top; scroll
-                // anchoring keeps the view steady while they mount.
-                if d.scroll_top() < 600.0 && first > 0 {
-                    let want = total - first + TURN_WINDOW;
-                    if shown() < want {
-                        shown.set(want);
+        div { class: "transcript", id: "{tid}", "data-fresh": "1", "data-first": "{first}",
+            "data-anchor": kept.map(|k| format!("{}:{}", k.turn, k.offset)).unwrap_or_default(),
+            onscroll: {
+                let (sid0, tid0) = (id.clone(), tid.clone());
+                move |e: ScrollEvent| {
+                    let d = e.data();
+                    let near = (d.scroll_height() as f64 - d.scroll_top() - d.client_height() as f64) < 120.0;
+                    if near != at_bottom() { at_bottom.set(near); }
+                    // Where it's scrolled to is kept once it settles.
+                    scroll_gen += 1;
+                    let gen = *scroll_gen.peek();
+                    let (sid, tid) = (sid0.clone(), tid0.clone());
+                    spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                        if *scroll_gen.peek() != gen {
+                            return;
+                        }
+                        let js = format!(
+                            "return (() => {{ const el = document.getElementById('{tid}'); if (!el) return null; if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) return {{ bottom: true }}; const top = el.getBoundingClientRect().top; const turns = [...el.querySelectorAll('.transcript-inner > .turn')]; for (let i = 0; i < turns.length; i++) {{ const r = turns[i].getBoundingClientRect(); if (r.bottom > top) return {{ turn: Number(el.dataset.first || 0) + i, offset: top - r.top }}; }} return null; }})()"
+                        );
+                        let Ok(v) = document::eval(&js).join::<serde_json::Value>().await else { return };
+                        if v.get("bottom").is_some() {
+                            crate::keep::set_value(&sid, "scroll", &None::<Scrolled>);
+                        } else if let Ok(s) = serde_json::from_value::<Scrolled>(v) {
+                            crate::keep::set_value(&sid, "scroll", &Some(s));
+                        }
+                    });
+                    // Load earlier turns before the user reaches the top; scroll
+                    // anchoring keeps the view steady while they mount.
+                    if d.scroll_top() < 600.0 && first > 0 {
+                        let want = total - first + TURN_WINDOW;
+                        if shown() < want {
+                            shown.set(want);
+                        }
                     }
                 }
             },

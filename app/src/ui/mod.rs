@@ -22,7 +22,7 @@ mod settings;
 pub mod setup;
 mod sidebar;
 mod tasks;
-mod terminal;
+pub mod terminal;
 mod transcript;
 pub(crate) mod usage;
 
@@ -121,6 +121,8 @@ pub fn Root() -> Element {
                 }
             });
         }
+        // Back where the window was when Larrier closed.
+        app.restore_layout();
         // `larrier-desktop --open <session-id>` opens a session directly.
         let args: Vec<String> = std::env::args().collect();
         if let Some(id) = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1)) {
@@ -156,6 +158,23 @@ pub fn Root() -> Element {
     use_hook(move || {
         crate::browser_host::set_app(app);
         crate::browser_control::start();
+    });
+
+    // Where the window is, the follow-ups waiting and each chat's browser
+    // tabs are kept for the next launch as they change.
+    let layout = use_memo(move || app.layout());
+    use_effect(move || crate::keep::set_layout(&layout.read()));
+    use_effect(move || crate::keep::set_queues(&app.queue.read()));
+    // The side panel of the chat shown, as it is now (not only once left).
+    let panel = use_memo(move || app.view.read().session_id().map(|id| (id.to_string(), crate::keep::Panel::of(&app.ui.read()))));
+    use_effect(move || {
+        if let Some((id, p)) = panel() {
+            crate::keep::set_panel(&id, p);
+        }
+    });
+    use_effect(move || {
+        let _ = crate::browser_host::STATE.read();
+        crate::browser_host::keep();
     });
 
     // Bridge: system theme + global keyboard shortcuts from the webview.

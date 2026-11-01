@@ -68,6 +68,60 @@ impl State {
 }
 
 pub static STATE: GlobalSignal<State> = Signal::global(State::default);
+
+/// A chat's browser as kept between launches: its pages (address, title)
+/// and the one it showed.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Kept {
+    pages: Vec<(String, String)>,
+    active: Option<usize>,
+}
+
+/// Chats whose kept tabs are back (or had none to bring back).
+fn restored() -> std::sync::MutexGuard<'static, std::collections::HashSet<String>> {
+    static SET: OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    SET.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Bring back the tabs `owner`'s browser had when Larrier last closed, the
+/// first time it's shown or opens a page.
+pub fn restore(owner: &str) {
+    if owner.is_empty() || !restored().insert(owner.to_string()) {
+        return;
+    }
+    let Some(k) = crate::keep::value::<Kept>(owner, "browser") else { return };
+    let mut ids = Vec::new();
+    for (url, title) in k.pages {
+        if let Some(id) = new_tab_in(Some(owner), &url) {
+            if let Some(t) = STATE.write().tabs.iter_mut().find(|t| t.id == id) {
+                t.title = title;
+            }
+            ids.push(id);
+        }
+    }
+    if let Some(id) = k.active.and_then(|i| ids.get(i)) {
+        activate(*id);
+    }
+}
+
+/// Keep each chat's tabs for the next launch (those of chats not shown
+/// since Larrier started stay as they were kept).
+pub fn keep() {
+    let st = STATE.peek();
+    let mut owners: Vec<String> = restored().iter().cloned().collect();
+    for t in &st.tabs {
+        if !owners.contains(&t.owner) {
+            owners.push(t.owner.clone());
+        }
+    }
+    for o in owners.iter().filter(|o| !o.is_empty()) {
+        let mine: Vec<&Tab> = st.tabs.iter().filter(|t| &t.owner == o).collect();
+        let active = st.active_of(o).and_then(|a| mine.iter().position(|t| t.id == a));
+        let k = Kept { pages: mine.iter().map(|t| (t.url.clone(), t.title.clone())).collect(), active };
+        // A browser with no tabs left keeps nothing.
+        crate::keep::set_value(o, "browser", &(!k.pages.is_empty()).then_some(k));
+    }
+}
 /// A picture of the page, shown in its place while it steps aside for a
 /// menu or dialog of the app's (base64 JPEG).
 pub static SNAPSHOT: GlobalSignal<Option<String>> = Signal::global(|| None);
@@ -377,6 +431,8 @@ pub fn new_tab_in(owner: Option<&str>, url: &str) -> Option<u64> {
     // Started here, inside the UI's runtime (the builder isn't).
     events();
     let owner = owner.map(String::from).unwrap_or_else(|| STATE.peek().owner.clone());
+    // Its kept tabs first, so a new one goes after them.
+    restore(&owner);
     let shown = owner == STATE.peek().owner;
     let id = with_host(|h| {
         let id = h.next;

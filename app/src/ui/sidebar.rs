@@ -156,7 +156,8 @@ fn by_agent(items: &[SessionSummary]) -> Vec<(AgentKind, Vec<SessionSummary>)> {
 pub fn Sidebar(#[props(default)] parked: bool) -> Element {
     let mut app = use_app();
     let side_open = use_ui(|u| u.sidebar_open)();
-    let mut searching = use_signal(|| false);
+    // A search left typed (in a past launch too) stays open.
+    let mut searching = use_signal(|| !app.ui.peek().sidebar_query.trim().is_empty());
     let mut dragging = use_signal(|| false);
     let mut last_press = use_signal(|| None::<std::time::Instant>);
     let query_raw = use_ui(|u| u.sidebar_query.clone())();
@@ -169,6 +170,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
         (c.settings.sidebar_group, c.settings.sidebar_sort, c.settings.show_archived, c.settings.project_order.clone())
     };
     let mut filter_menu = use_signal(|| false);
+    let mut scroll_gen = use_signal(|| 0u64);
     // A harness turned off in Settings takes its chats out of the list too.
     let off: Vec<larrier_core::AgentKind> = app.config.read().agents.iter().filter(|a| !a.enabled).map(|a| a.kind.clone()).collect();
     let all: Vec<SessionSummary> = all.into_iter().filter(|s| (show_archived || !s.archived) && !off.contains(&s.agent)).collect();
@@ -266,6 +268,22 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                 }
             }
             div { class: "side-scroll",
+                // Scrolled where it was left, in a past launch too.
+                onmounted: move |_| {
+                    if let Some(y) = crate::keep::value::<f64>(crate::keep::WINDOW, "sidebar.scroll") {
+                        document::eval(&format!("requestAnimationFrame(() => {{ const s = document.querySelector('.side-scroll'); if (s) s.scrollTop = {y}; }})"));
+                    }
+                },
+                onscroll: move |e| {
+                    scroll_gen += 1;
+                    let (gen, y) = (*scroll_gen.peek(), e.data().scroll_top());
+                    spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                        if *scroll_gen.peek() == gen {
+                            crate::keep::set_value(crate::keep::WINDOW, "sidebar.scroll", &(y > 0.0).then_some(y));
+                        }
+                    });
+                },
                 div { class: "side-nav",
                     button { class: if view == View::Home { "nav-row on" } else { "nav-row" }, onclick: move |_| app.new_agent(),
                         span { class: "ic", Icon { i: I::SquarePen, size: 16, stroke: 1.5 } }
@@ -454,7 +472,7 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
                         AgentSub { key: "{a.id()}", pkey: rkey.clone(), agent: a.clone(), items: list, ctx: ctx.clone() }
                     }
                 } else {
-                    Rows { items: items.clone(), ctx: ctx.clone() }
+                    Rows { group: rkey.clone(), items: items.clone(), ctx: ctx.clone() }
                 }
             }
         }
@@ -467,6 +485,7 @@ fn AgentSub(pkey: String, agent: AgentKind, items: Vec<SessionSummary>, ctx: Sid
     let mut app = use_app();
     let key = format!("{pkey}|{}", agent.id());
     let k2 = key.clone();
+    let group = key.clone();
     let open = !use_ui(move |u| u.repo_closed.contains(&k2))();
     let count = items.iter().filter(|s| s.id != DRAFT_ID).count();
     rsx! {
@@ -479,24 +498,26 @@ fn AgentSub(pkey: String, agent: AgentKind, items: Vec<SessionSummary>, ctx: Sid
                 span { class: "cnt", "{count}" }
             }
             super::Collapse { open,
-                Rows { items: items.clone(), ctx: ctx.clone() }
+                Rows { group, items: items.clone(), ctx: ctx.clone() }
             }
         }
     }
 }
 
-/// A list of chats, the first few then "More".
+/// A list of chats, the first few then "More" (shown all from then on).
 #[component]
-fn Rows(items: Vec<SessionSummary>, ctx: SideCtx) -> Element {
-    let mut more = use_signal(|| false);
-    let shown: Vec<SessionSummary> = if more() { items.clone() } else { items.iter().take(PAGE).cloned().collect() };
+fn Rows(group: String, items: Vec<SessionSummary>, ctx: SideCtx) -> Element {
+    let mut app = use_app();
+    let g = group.clone();
+    let more = use_ui(move |u| u.expanded_sections.contains(&g))();
+    let shown: Vec<SessionSummary> = if more { items.clone() } else { items.iter().take(PAGE).cloned().collect() };
     let hidden = items.len().saturating_sub(shown.len());
     rsx! {
         for s in shown {
             ChatRow { key: "{s.id}", s: s.clone(), ctx: ctx.clone(), logo: false }
         }
         if hidden > 0 {
-            button { class: "show-more", onclick: move |_| more.set(true), "More" }
+            button { class: "show-more", onclick: move |_| { app.ui.write().expanded_sections.insert(group.clone()); }, "More" }
         }
     }
 }

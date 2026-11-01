@@ -22,8 +22,9 @@ const SKIP_INDEX: &[&str] = &[".git", "node_modules", "target", "dist", "build",
 
 // ------------------------------------------------------------------ tab state
 
-/// Open tabs + navigation history for one session (kept across re-mounts).
-#[derive(Clone, Debug, Default, PartialEq)]
+/// Open tabs + navigation history for one session (kept across re-mounts
+/// and launches).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Tabs {
     files: Vec<String>,
     /// The tab a single click opened; the next one replaces it.
@@ -40,7 +41,10 @@ fn tab_store() -> &'static Mutex<HashMap<String, Tabs>> {
 
 fn with_tabs<R>(sid: &str, f: impl FnOnce(&mut Tabs) -> R) -> R {
     let mut map = tab_store().lock().unwrap();
-    f(map.entry(sid.to_string()).or_default())
+    let t = map.entry(sid.to_string()).or_insert_with(|| crate::keep::value(sid, "files").unwrap_or_default());
+    let out = f(t);
+    crate::keep::set_value(sid, "files", &(*t != Tabs::default()).then_some(&*t));
+    out
 }
 
 /// Show a file. A file that is open is shown; otherwise the preview tab is
@@ -345,11 +349,11 @@ fn human_bytes(n: u64) -> String {
 pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
     let mut app = use_app();
     let mut rev = use_signal(|| 0u64);
-    let mut tree_open = use_signal(|| true);
+    let mut tree_open = crate::keep::use_kept(&session_id, "files.tree", || true);
     let mut quick = use_signal(String::new);
     let mut quick_open = use_signal(|| false);
     let mut hl = use_signal(|| 0usize);
-    let expanded: Signal<BTreeSet<String>> = use_signal(BTreeSet::new);
+    let expanded: Signal<BTreeSet<String>> = crate::keep::use_kept(&session_id, "files.dirs", BTreeSet::new);
     let mut dirs: Signal<HashMap<String, Vec<Entry>>> = use_signal(HashMap::new);
     let mut scroll_top = use_signal(|| 0.0f64);
     let mut view_h = use_signal(|| 900.0f64);
@@ -366,6 +370,14 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
         if let Some(r) = r0 {
             let entries = read_dir_sorted(&r);
             dirs.write().insert(r, entries);
+        }
+        // Folders left open (in a past launch too) list their files again.
+        let open: Vec<String> = expanded.peek().iter().cloned().collect();
+        for d in open {
+            if Path::new(&d).is_dir() {
+                let entries = read_dir_sorted(&d);
+                dirs.write().insert(d, entries);
+            }
         }
     });
 

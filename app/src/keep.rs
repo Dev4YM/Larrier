@@ -1,23 +1,30 @@
-//! What each chat keeps between visits and launches: the message being
-//! typed (text, objects, images and files) and its side panel. The new
+//! What Larrier keeps between visits and launches. Each chat: the message
+//! being typed (text, objects, images and files), its follow-ups waiting
+//! to be sent, its side panel and what its tabs hold (browser pages,
+//! terminals, open files, the commit message, where it was scrolled to).
+//! The window: the chat or page shown, its tabs and the chat beside it,
+//! the way back and forward, the sidebar, a prompt being edited. The new
 //! agent screen keeps its message too, with its picks (agent, model,
 //! project); once left with something in it, it shows in the sidebar as a
 //! draft.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use larrier_core::Part;
+use larrier_core::{AgentKind, Part};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::state::{Draft, PanelTab, RightTab, Ui};
+use crate::state::{ChatTab, Draft, EditState, PanelTab, Queued, RightTab, Ui, View};
 use crate::ui::mentions::{MentionChip, CLOSE, OPEN};
 
 /// The new agent screen's key.
 pub const HOME: &str = "new";
+/// The key of what the window itself keeps (its sidebar's scroll).
+pub const WINDOW: &str = "window";
 /// The sidebar row of the new agent draft.
 pub const DRAFT_ID: &str = "draft:new";
 
@@ -87,6 +94,40 @@ impl Panel {
     }
 }
 
+/// Where the window was: what it showed and how its sidebar was.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Layout {
+    #[serde(default)]
+    pub view: Option<View>,
+    /// Subagent tabs beside their chats.
+    #[serde(default)]
+    pub tabs: Vec<ChatTab>,
+    /// The chat shown side by side.
+    #[serde(default)]
+    pub split: Option<String>,
+    #[serde(default)]
+    pub history: Vec<View>,
+    #[serde(default)]
+    pub hist_pos: usize,
+    #[serde(default = "yes")]
+    pub sidebar_open: bool,
+    #[serde(default)]
+    pub sidebar_query: String,
+    /// Sidebar lists showing all their chats ("More").
+    #[serde(default)]
+    pub expanded: BTreeSet<String>,
+    /// The agent Settings → Models was on.
+    #[serde(default)]
+    pub models_agent: Option<AgentKind>,
+    /// A prompt being edited in place.
+    #[serde(default)]
+    pub editing: Option<EditState>,
+}
+
+fn yes() -> bool {
+    true
+}
+
 /// The new agent draft's row in the sidebar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HomeRow {
@@ -110,6 +151,14 @@ struct Kept {
     /// When the new agent screen was left with its message.
     #[serde(default)]
     draft_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    layout: Option<Layout>,
+    /// Follow-ups waiting to be sent, by chat.
+    #[serde(default)]
+    queues: HashMap<String, Vec<Queued>>,
+    /// What each chat's tabs hold, by chat and name (see [`value`]).
+    #[serde(default)]
+    chats: HashMap<String, BTreeMap<String, serde_json::Value>>,
 }
 
 fn kept() -> &'static Mutex<Kept> {
@@ -253,12 +302,95 @@ pub fn set_panel(key: &str, panel: Panel) {
 pub fn forget(key: &str) {
     {
         let Ok(mut k) = kept().lock() else { return };
-        let had = k.inputs.remove(key).is_some() | k.panels.remove(key).is_some();
+        let had = k.inputs.remove(key).is_some() | k.panels.remove(key).is_some() | k.queues.remove(key).is_some() | k.chats.remove(key).is_some();
         if !had {
             return;
         }
     }
     save();
+}
+
+pub fn layout() -> Option<Layout> {
+    kept().lock().ok().and_then(|k| k.layout.clone())
+}
+
+pub fn set_layout(layout: &Layout) {
+    {
+        let Ok(mut k) = kept().lock() else { return };
+        if k.layout.as_ref() == Some(layout) {
+            return;
+        }
+        k.layout = Some(layout.clone());
+    }
+    save();
+}
+
+/// Follow-ups that were waiting to be sent when Larrier closed.
+pub fn queues() -> HashMap<String, Vec<Queued>> {
+    kept().lock().ok().map(|k| k.queues.clone()).unwrap_or_default()
+}
+
+pub fn set_queues(queues: &HashMap<String, Vec<Queued>>) {
+    {
+        let Ok(mut k) = kept().lock() else { return };
+        let now: HashMap<String, Vec<Queued>> = queues.iter().filter(|(_, v)| !v.is_empty()).map(|(id, v)| (id.clone(), v.clone())).collect();
+        if k.queues == now {
+            return;
+        }
+        k.queues = now;
+    }
+    save();
+}
+
+/// Something a chat's tab holds (`name`: "browser", "terminals", …).
+pub fn value<T: DeserializeOwned>(key: &str, name: &str) -> Option<T> {
+    let v = kept().lock().ok()?.chats.get(key)?.get(name)?.clone();
+    serde_json::from_value(v).ok()
+}
+
+/// Keep `v` as `name` of chat `key`; an empty value (nothing typed, no
+/// tabs) isn't kept.
+pub fn set_value<T: Serialize>(key: &str, name: &str, v: &T) {
+    let Ok(v) = serde_json::to_value(v) else { return };
+    let empty = match &v {
+        serde_json::Value::Null => true,
+        serde_json::Value::String(s) => s.is_empty(),
+        serde_json::Value::Array(a) => a.is_empty(),
+        serde_json::Value::Object(o) => o.is_empty(),
+        _ => false,
+    };
+    {
+        let Ok(mut k) = kept().lock() else { return };
+        if empty {
+            let Some(m) = k.chats.get_mut(key) else { return };
+            if m.remove(name).is_none() {
+                return;
+            }
+            if m.is_empty() {
+                k.chats.remove(key);
+            }
+        } else {
+            let m = k.chats.entry(key.to_string()).or_default();
+            if m.get(name) == Some(&v) {
+                return;
+            }
+            m.insert(name.to_string(), v);
+        }
+    }
+    save();
+}
+
+/// State of a component that's kept for chat `key` as `name`: it starts
+/// as it was left (even in a past launch) and is kept as it changes.
+pub fn use_kept<T>(key: &str, name: &'static str, init: impl FnOnce() -> T) -> Signal<T>
+where
+    T: Serialize + DeserializeOwned + Clone + PartialEq + 'static,
+{
+    let k = key.to_string();
+    let sig = use_signal(|| value::<T>(&k, name).unwrap_or_else(init));
+    let k = key.to_string();
+    use_effect(move || set_value(&k, name, &*sig.read()));
+    sig
 }
 
 #[cfg(test)]
@@ -278,5 +410,28 @@ mod tests {
         assert!(Input { text: "  \n".into(), ..Default::default() }.is_empty());
         let back: Input = serde_json::from_str(&serde_json::to_string(&i).unwrap()).unwrap();
         assert_eq!(back, i);
+    }
+
+    #[test]
+    fn where_the_window_was_reads_back() {
+        let l = Layout {
+            view: Some(View::Subagent { session: "s1".into(), tool: "t1".into() }),
+            tabs: vec![ChatTab { view: View::Subagent { session: "s1".into(), tool: "t1".into() }, preview: true }],
+            split: Some("s2".into()),
+            history: vec![View::Home, View::Settings(crate::state::SettingsTab::Models), View::Agent("s1".into())],
+            hist_pos: 2,
+            sidebar_open: false,
+            sidebar_query: "fix".into(),
+            expanded: ["p1".to_string()].into_iter().collect(),
+            models_agent: Some(AgentKind::Codex),
+            editing: None,
+        };
+        let back: Layout = serde_json::from_str(&serde_json::to_string(&l).unwrap()).unwrap();
+        assert_eq!(back, l);
+        // What an older Larrier kept still reads (with the sidebar open).
+        let old: Kept = serde_json::from_str(r#"{"inputs":{},"panels":{}}"#).unwrap();
+        assert!(old.layout.is_none() && old.chats.is_empty());
+        let none: Layout = serde_json::from_str("{}").unwrap();
+        assert!(none.sidebar_open);
     }
 }

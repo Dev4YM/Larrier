@@ -154,7 +154,7 @@ pub fn RightPane(id: String) -> Element {
                             }
                         }
                     },
-                    RightTab::Changes => rsx! { ChangesTab { id: id.clone(), cwd: cwd.clone() } },
+                    RightTab::Changes => rsx! { ChangesTab { key: "c-{id}", id: id.clone(), cwd: cwd.clone() } },
                     RightTab::Browser => rsx! { BrowserTab {} },
                     RightTab::Terminal => rsx! { super::terminal::TerminalPanel { key: "t-{id}", session_id: id.clone(), cwd: cwd.clone() } },
                     RightTab::Files => rsx! { super::files::FilesPanel { key: "f-{id}", session_id: id.clone(), cwd: cwd.clone() } },
@@ -179,8 +179,9 @@ struct GitState {
 fn ChangesTab(id: String, cwd: Option<String>) -> Element {
     let app = use_app();
     let mut nonce = use_signal(|| 0u32);
-    let mut view_agent = use_signal(|| false);
-    let mut commit_msg = use_signal(String::new);
+    // Local Changes or Agent Edits, and the commit message, kept per chat.
+    let mut view_agent = crate::keep::use_kept(&id, "changes.agent", || false);
+    let mut commit_msg = crate::keep::use_kept(&id, "changes.commit", String::new);
     let mut busy = use_signal(|| false);
     // Only what this tab shows, memoized: streaming text never re-renders it.
     let id_m = id.clone();
@@ -607,6 +608,10 @@ fn BrowserTab() -> Element {
     use crate::browser_host as host;
     let st = host::STATE();
     let active = st.active.and_then(|id| st.tabs.iter().find(|t| t.id == id).cloned());
+    // The chat's tabs from when Larrier last closed come back the first
+    // time its browser is shown.
+    let owner = use_memo(|| host::STATE.read().owner.clone());
+    use_effect(move || host::restore(&owner()));
     let mut input = use_signal(String::new);
     let mut editing = use_signal(|| false);
     // The address follows the page unless the user is typing one.

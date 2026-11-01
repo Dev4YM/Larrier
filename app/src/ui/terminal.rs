@@ -5,6 +5,9 @@
 //! running when the panel, tab or session changes. Each terminal keeps the
 //! last ~512 KB of raw output; when a view (re)mounts, the buffer is replayed
 //! into a fresh xterm instance and live output streams in after it.
+//!
+//! Across launches a chat's terminals come back as they were left (name,
+//! folder and the end of their output), each with a new shell under it.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -21,6 +24,8 @@ use crate::icons::{Icon, I};
 use crate::state::{use_app, use_ui};
 
 const SCROLLBACK_BYTES: usize = 512 * 1024;
+/// How much of a terminal's output is kept for the next launch.
+const KEEP_BYTES: usize = 64 * 1024;
 
 const XTERM_JS: &str = include_str!("../../assets/xterm/xterm.js");
 const XTERM_CSS: &str = include_str!("../../assets/xterm/xterm.css");
@@ -49,6 +54,10 @@ struct Inner {
     viewers: u32,
     /// Terminal queries waiting for a live view to answer them.
     queries: Vec<Vec<u8>>,
+    /// Brought back from a past launch: its shell starts once it's shown,
+    /// so it goes on below what it printed then (the view answers where its
+    /// cursor is).
+    deferred: bool,
 }
 
 /// Queries a shell sends to its terminal and the reply we give when no
@@ -316,6 +325,87 @@ fn start(t: &Arc<Term>) -> anyhow::Result<()> {
 
 /// Open a new terminal for a session, select it and start its shell.
 fn open_terminal(session_id: &str, cwd: Option<String>, title: Option<String>) -> Arc<Term> {
+    open_terminal_with(session_id, cwd, title, Vec::new(), false)
+}
+
+/// A chat's terminals as kept between launches.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Kept {
+    terms: Vec<KeptTerm>,
+    selected: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+struct KeptTerm {
+    title: String,
+    cwd: Option<String>,
+    /// The end of its output (base64), from the start of a line.
+    tail: String,
+}
+
+/// Keep every chat's terminals that are open now for the next launch
+/// (every few seconds, and as Larrier closes). Chats whose terminals
+/// weren't opened since Larrier started stay as they were kept.
+pub fn keep_all() {
+    let reg = registry();
+    for (sid, s) in reg.iter() {
+        let terms: Vec<KeptTerm> = s
+            .list
+            .iter()
+            .map(|t| {
+                let g = t.lock();
+                let mut from = g.data.len().saturating_sub(KEEP_BYTES);
+                if from > 0 {
+                    from = g.data[from..].iter().position(|b| *b == b'\n').map(|i| from + i + 1).unwrap_or(from);
+                }
+                KeptTerm { title: g.title.clone(), cwd: g.cwd.clone(), tail: base64::engine::general_purpose::STANDARD.encode(&g.data[from..]) }
+            })
+            .collect();
+        let selected = s.selected.and_then(|id| s.list.iter().position(|t| t.id == id));
+        crate::keep::set_value(sid, "terminals", &(!terms.is_empty()).then_some(Kept { terms, selected }));
+    }
+}
+
+/// Bring back the terminals a chat had when Larrier last closed (once):
+/// each shows the end of what it printed, then a new shell in its folder.
+fn restore(session_id: &str) -> bool {
+    static DONE: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    if !DONE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).insert(session_id.to_string()) {
+        return false;
+    }
+    let Some(k) = crate::keep::value::<Kept>(session_id, "terminals").filter(|k| !k.terms.is_empty()) else { return false };
+    let mut ids = Vec::new();
+    for kt in k.terms {
+        let mut history = base64::engine::general_purpose::STANDARD.decode(kt.tail.as_bytes()).unwrap_or_default();
+        if !history.is_empty() {
+            // Out of a full-screen program it was left in (leaving one that
+            // isn't open would move the cursor home), plain colors, then a
+            // line saying so.
+            let find = |pat: &[u8]| history.windows(pat.len()).rposition(|w| w == pat);
+            if find(b"\x1b[?1049h") > find(b"\x1b[?1049l") {
+                history.extend_from_slice(b"\x1b[?1049l");
+            }
+            history.extend_from_slice(b"\x1b[0m\r\n\x1b[2m-- Restored after Larrier restarted: a new shell --\x1b[0m\r\n");
+        }
+        ids.push(open_terminal_with(session_id, kt.cwd, Some(kt.title), history, true).id);
+    }
+    if let Some(id) = k.selected.and_then(|i| ids.get(i)) {
+        select(session_id, *id);
+    }
+    true
+}
+
+/// [`open_terminal`], showing `history` before the shell's own output;
+/// `defer` starts the shell once the terminal is shown.
+fn open_terminal_with(session_id: &str, cwd: Option<String>, title: Option<String>, history: Vec<u8>, defer: bool) -> Arc<Term> {
+    // What's open is kept every few seconds (see `keep_all`).
+    static KEEPER: OnceLock<()> = OnceLock::new();
+    KEEPER.get_or_init(|| {
+        let _ = std::thread::Builder::new().name("keep-terminals".into()).spawn(|| loop {
+            std::thread::sleep(Duration::from_secs(5));
+            keep_all();
+        });
+    });
     let (_, _, shell_name) = shell();
     let t = Arc::new(Term {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
@@ -325,7 +415,7 @@ fn open_terminal(session_id: &str, cwd: Option<String>, title: Option<String>) -
             pid: None,
             alive: false,
             exit_code: None,
-            data: Vec::new(),
+            data: history,
             base: 0,
             writer: None,
             master: None,
@@ -334,11 +424,14 @@ fn open_terminal(session_id: &str, cwd: Option<String>, title: Option<String>) -
             generation: 0,
             viewers: 0,
             queries: Vec::new(),
+            deferred: defer,
         }),
         notify: tokio::sync::Notify::new(),
     });
-    if let Err(e) = start(&t) {
-        t.push(format!("\x1b[31mCould not start a shell: {e}\x1b[0m\r\n").as_bytes());
+    if !defer {
+        if let Err(e) = start(&t) {
+            t.push(format!("\x1b[31mCould not start a shell: {e}\x1b[0m\r\n").as_bytes());
+        }
     }
     let mut reg = registry();
     let s = reg.entry(session_id.to_string()).or_default();
@@ -427,7 +520,7 @@ pub fn TerminalPanel(session_id: String, cwd: Option<String>) -> Element {
     let cwd0 = cwd.clone();
     let opened_for_agent = agent.is_some();
     use_hook(move || {
-        if count(&sid0) == 0 && !opened_for_agent {
+        if count(&sid0) == 0 && !restore(&sid0) && !opened_for_agent {
             open_terminal(&sid0, cwd0, None);
         }
     });
@@ -888,7 +981,16 @@ fn XTerm(term_id: u64, dark: bool) -> Element {
                 m = rx.recv::<Value>() => match m {
                     Ok(v) => match v["t"].as_str() {
                         Some("in") => input(&t, v["data"].as_str().unwrap_or("")),
-                        Some("resize") => t.resize(v["cols"].as_u64().unwrap_or(80) as u16, v["rows"].as_u64().unwrap_or(24) as u16),
+                        Some("resize") => {
+                            t.resize(v["cols"].as_u64().unwrap_or(80) as u16, v["rows"].as_u64().unwrap_or(24) as u16);
+                            // A terminal brought back: its shell starts now, at its size.
+                            let go = std::mem::take(&mut t.lock().deferred);
+                            if go {
+                                if let Err(e) = start(&t) {
+                                    t.push(format!("\x1b[31mCould not start a shell: {e}\x1b[0m\r\n").as_bytes());
+                                }
+                            }
+                        }
                         Some("copy") => {
                             if let Some(s) = v["text"].as_str() {
                                 app.copy_text(s);
@@ -975,6 +1077,7 @@ mod tests {
                 generation: 0,
                 viewers: 0,
                 queries: Vec::new(),
+                deferred: false,
             }),
             notify: tokio::sync::Notify::new(),
         };

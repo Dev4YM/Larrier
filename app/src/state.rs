@@ -25,7 +25,7 @@ pub fn store() -> &'static Store {
     STORE.get_or_init(|| Store::open_default().expect("cannot open Larrier data directory"))
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum View {
     Home,
     Agent(String),
@@ -57,13 +57,13 @@ impl View {
 /// beside it, VS Code style: a single click opens a preview tab (italic)
 /// that the next one replaces, and double-click keeps it. Another session
 /// never joins as a tab; it opens side by side instead.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ChatTab {
     pub view: View,
     pub preview: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum SettingsTab {
     Profile,
     General,
@@ -250,7 +250,7 @@ pub struct TabCtx {
 
 /// Editing a past prompt. Only one prompt is edited at a time; switching
 /// away from changed text asks to keep editing or discard first.
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct EditState {
     pub msg: Option<String>,
     pub original: String,
@@ -262,6 +262,7 @@ pub struct EditState {
     pub original_attachments: Vec<Part>,
     /// A switch waiting for "Discard": the prompt to edit next, or `None`
     /// to just stop editing.
+    #[serde(skip)]
     pub confirm: Option<Option<EditTarget>>,
 }
 
@@ -289,7 +290,7 @@ pub enum UpdateState {
 }
 
 /// A follow-up waiting for the agent to finish its current turn.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Queued {
     pub id: u64,
     pub text: String,
@@ -482,7 +483,7 @@ impl App {
             toasts: root_signal(Vec::new()),
             sync_status: root_signal(String::new()),
             draft: root_signal(draft),
-            queue: root_signal(HashMap::new()),
+            queue: root_signal(crate::keep::queues()),
             steering: root_signal(HashMap::new()),
             stopping: root_signal(HashMap::new()),
             tabs: root_signal(Vec::new()),
@@ -769,6 +770,74 @@ impl App {
                 self.set_view(v);
             }
             _ => self.new_agent(),
+        }
+    }
+
+    /// Bring back where the window was when Larrier closed: the chat or
+    /// page shown (its side panel and browser with it), its tabs, the chat
+    /// beside it, the way back and forward, the sidebar and a prompt being
+    /// edited. Chats deleted since are left out.
+    pub fn restore_layout(mut self) {
+        let Some(l) = crate::keep::layout() else { return };
+        let app = self;
+        let exists = move |v: &View| v.session_id().map_or(true, |id| app.is_loaded(id) || store().exists(id));
+        let view = l.view.clone().filter(|v| exists(v)).filter(|v| v.session_id().map_or(true, |id| self.ensure_loaded(id))).unwrap_or(View::Home);
+        let (mut history, mut pos) = (Vec::new(), 0);
+        for (i, v) in l.history.into_iter().enumerate() {
+            if !exists(&v) || history.last() == Some(&v) {
+                continue;
+            }
+            history.push(v);
+            if i <= l.hist_pos {
+                pos = history.len() - 1;
+            }
+        }
+        if history.get(pos) != Some(&view) {
+            history.push(view.clone());
+            pos = history.len() - 1;
+        }
+        {
+            let mut ui = self.ui.write();
+            ui.history = history;
+            ui.hist_pos = pos;
+            ui.sidebar_open = l.sidebar_open;
+            ui.sidebar_query = l.sidebar_query;
+            ui.expanded_sections = l.expanded;
+            if l.models_agent.is_some() {
+                ui.models_agent = l.models_agent;
+            }
+        }
+        self.tabs.set(l.tabs.into_iter().filter(|t| exists(&t.view)).collect());
+        let split = l.split.filter(|id| Some(id.as_str()) != view.session_id() && view.session_id().is_some()).filter(|id| store().exists(id) && self.ensure_loaded(id));
+        if view != View::Home {
+            self.set_view(view);
+        }
+        self.split.set(split);
+        // The prompt being edited, if its chat is on screen.
+        if let Some(ed) = l.editing.filter(|e| e.msg.is_some()) {
+            let id = ed.msg.clone().unwrap_or_default();
+            let shown = [self.view.peek().session_id().map(String::from), self.split.peek().clone()].into_iter().flatten().any(|s| self.peek_session(&s, |s| s.messages.iter().any(|m| m.id == id)).unwrap_or(false));
+            if shown {
+                self.editing.set(ed);
+            }
+        }
+    }
+
+    /// Where the window is, for the next launch.
+    pub fn layout(&self) -> crate::keep::Layout {
+        let ui = self.ui.read();
+        let ed = self.editing.read();
+        crate::keep::Layout {
+            view: Some(self.view.read().clone()),
+            tabs: self.tabs.read().clone(),
+            split: self.split.read().clone(),
+            history: ui.history.clone(),
+            hist_pos: ui.hist_pos,
+            sidebar_open: ui.sidebar_open,
+            sidebar_query: ui.sidebar_query.clone(),
+            expanded: ui.expanded_sections.clone(),
+            models_agent: ui.models_agent.clone(),
+            editing: ed.msg.is_some().then(|| EditState { confirm: None, ..ed.clone() }),
         }
     }
 
@@ -2287,6 +2356,7 @@ pub fn save_async(s: Session) {
 
 /// Wait (briefly) until every queued save is on disk — used when closing.
 pub fn flush_saves() {
+    crate::ui::terminal::keep_all();
     crate::keep::flush();
     let (ack_tx, ack_rx) = mpsc::channel();
     if let Ok(tx) = saver().lock() {

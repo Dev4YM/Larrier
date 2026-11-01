@@ -5,6 +5,13 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.29 — 2026-11-01
+
+### Fixed
+
+- A message you sent from New Agent isn't left as a draft
+- Back leaves Settings for where you were
+- The website opens in your browser; Usage is called Usage
 ## 0.1.28 — 2026-11-01
 
 ### New

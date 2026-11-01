@@ -39,7 +39,7 @@ with the program and its SHA-256.
 Pushing a `v*` tag runs the Release workflow
 (`.github/workflows/release.yml`). It builds on GitHub's runners for every
 system the release doesn't have a program for yet (Windows on
-`windows-latest`, both Macs on `macos-14`, Linux on `ubuntu-22.04`) and
+`windows-latest`, both Macs on `macos-15`, Linux on `ubuntu-22.04`) and
 adds them to the release, creating it with the changelog notes if the
 script didn't. A release cut without the script (a tag pushed by hand, or
 the workflow run with a tag) gets all four programs from the workflow.

@@ -143,8 +143,11 @@ able to write there (Applications and `~/.local/bin` both work). A copy
 installed by root or a package manager is updated the same way you
 installed it.
 
-While the repository is private, updates need a GitHub token:
-`LARRIER_GITHUB_TOKEN`, `GITHUB_TOKEN`, or a signed-in GitHub CLI.
+Updates come from the public GitHub releases and need no account. When
+Larrier finds a GitHub token (`LARRIER_GITHUB_TOKEN`, `GITHUB_TOKEN`, or a
+signed-in GitHub CLI) it sends it along, which raises GitHub's limit on
+requests. A copy that updates from a private fork (`LARRIER_UPDATE_REPO`)
+needs one.
 
 ## Your data
 

@@ -10,9 +10,8 @@
 //! (see `crate::version`).
 //!
 //! The repository is `Dev4YM/Larrier` (`LARRIER_UPDATE_REPO` overrides it,
-//! `LARRIER_UPDATE_API` points at another API root, e.g. for tests). A
-//! private repository needs a token: `LARRIER_GITHUB_TOKEN`, `GITHUB_TOKEN`
-//! or GitHub CLI's login.
+//! `LARRIER_UPDATE_API` points at another API root, e.g. for tests). Its
+//! releases are public: no account or token is used.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -35,8 +34,6 @@ pub struct Release {
     pub page: String,
     pub asset_name: String,
     asset_url: String,
-    asset_api: String,
-    sha_api: Option<String>,
     sha_url: Option<String>,
     pub size: u64,
 }
@@ -62,25 +59,6 @@ fn repo() -> String {
     std::env::var("LARRIER_UPDATE_REPO").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| REPO.into())
 }
 
-/// A token for a private repository, if there is one.
-fn token() -> Option<String> {
-    for v in ["LARRIER_GITHUB_TOKEN", "GITHUB_TOKEN"] {
-        if let Some(t) = std::env::var(v).ok().filter(|t| !t.trim().is_empty()) {
-            return Some(t.trim().to_string());
-        }
-    }
-    let mut cmd = std::process::Command::new("gh");
-    cmd.args(["auth", "token"]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let out = cmd.output().ok()?;
-    let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (out.status.success() && !t.is_empty()).then_some(t)
-}
-
 fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder().user_agent(concat!("Larrier/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(15)).build()?)
 }
@@ -101,8 +79,6 @@ pub fn parse_release(v: &Value) -> Option<Release> {
         page: v["html_url"].as_str().unwrap_or("").to_string(),
         asset_name: name,
         asset_url: asset["browser_download_url"].as_str().unwrap_or("").to_string(),
-        asset_api: asset["url"].as_str().unwrap_or("").to_string(),
-        sha_api: sha.and_then(|s| s["url"].as_str()).map(String::from),
         sha_url: sha.and_then(|s| s["browser_download_url"].as_str()).map(String::from),
         size: asset["size"].as_u64().unwrap_or(0),
     })
@@ -110,14 +86,10 @@ pub fn parse_release(v: &Value) -> Option<Release> {
 
 async fn get_json(path: &str) -> Result<Value> {
     let url = format!("{}/repos/{}/{path}", api_root().trim_end_matches('/'), repo());
-    let mut req = client()?.get(&url).header("Accept", "application/vnd.github+json");
-    if let Some(t) = token() {
-        req = req.bearer_auth(t);
-    }
-    let resp = req.send().await.context("reaching GitHub")?;
+    let resp = client()?.get(&url).header("Accept", "application/vnd.github+json").send().await.context("reaching GitHub")?;
     match resp.status().as_u16() {
         200 => {}
-        404 => bail!("No releases found for {} (a private repository needs a GitHub token)", repo()),
+        404 => bail!("No releases found for {}", repo()),
         s => bail!("GitHub answered {s}"),
     }
     resp.json().await.context("reading the releases")
@@ -159,15 +131,9 @@ pub fn cache_dir() -> PathBuf {
     }
 }
 
-/// Fetch a release asset: the browser URL, or the API URL with a token
-/// (private repositories).
-async fn fetch(api: &str, browser: &str) -> Result<reqwest::Response> {
-    let c = client()?;
-    let req = match token() {
-        Some(t) if !api.is_empty() => c.get(api).bearer_auth(t).header("Accept", "application/octet-stream"),
-        _ => c.get(browser),
-    };
-    let resp = req.send().await.context("downloading the update")?;
+/// Fetch a release asset from its public download link.
+async fn fetch(url: &str) -> Result<reqwest::Response> {
+    let resp = client()?.get(url).send().await.context("downloading the update")?;
     if !resp.status().is_success() {
         bail!("the download answered {}", resp.status());
     }
@@ -180,7 +146,7 @@ pub async fn download(rel: &Release, mut progress: impl FnMut(u64, u64)) -> Resu
     let dir = cache_dir().join(&rel.version);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let path = dir.join(install::EXE_NAME);
-    let mut resp = fetch(&rel.asset_api, &rel.asset_url).await?;
+    let mut resp = fetch(&rel.asset_url).await?;
     let total = resp.content_length().unwrap_or(rel.size);
     let mut hasher = Sha256::new();
     let mut bytes: Vec<u8> = Vec::with_capacity(total as usize);
@@ -190,15 +156,11 @@ pub async fn download(rel: &Release, mut progress: impl FnMut(u64, u64)) -> Resu
         progress(bytes.len() as u64, total);
     }
     let got = hex(&hasher.finalize());
-    match (&rel.sha_api, &rel.sha_url) {
-        (api, Some(url)) => {
-            let want = fetch(api.as_deref().unwrap_or(""), url).await?.text().await?;
-            let want = want.split_whitespace().next().unwrap_or("").to_lowercase();
-            if want != got {
-                bail!("The download doesn't match its published checksum");
-            }
-        }
-        _ => bail!("The release has no checksum for its program"),
+    let Some(url) = &rel.sha_url else { bail!("The release has no checksum for its program") };
+    let want = fetch(url).await?.text().await?;
+    let want = want.split_whitespace().next().unwrap_or("").to_lowercase();
+    if want != got {
+        bail!("The download doesn't match its published checksum");
     }
     if cfg!(windows) {
         let tmp = path.with_extension("exe.part");

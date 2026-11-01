@@ -45,8 +45,7 @@ the kernel keyring in front of it).
 Larrier itself connects to:
 
 - **GitHub** (`api.github.com`, release downloads): checking for and
-  downloading Larrier updates, with your GitHub token when one is set or
-  GitHub CLI is signed in (it raises GitHub's request limit).
+  downloading Larrier updates, anonymously (no GitHub account or token).
 - **Where agents publish releases** (npm, PyPI, GitHub, the agents' install
   scripts): looking up agents' latest versions.
 - **Model providers you configure** for API chat.

@@ -661,6 +661,37 @@ pub fn Composer(
         if t.trim().is_empty() && a.is_empty() {
             return;
         }
+        // Claude Code's own sign-in commands aren't for the model: they run
+        // in a terminal, as this chat's account.
+        let run_agent = match &sid {
+            Some(id) => app.peek_session(id, |s| (s.agent.clone(), s.account_id.clone())),
+            None => {
+                let d = app.draft.read();
+                Some((d.agent.clone(), d.account_id.clone()))
+            }
+        };
+        if let Some((AgentKind::ClaudeCode, acc_id)) = run_agent.filter(|_| a.is_empty()) {
+            if let cmd @ ("/login" | "/logout") = t.trim() {
+                let acc = {
+                    let cfg = app.config.peek();
+                    acc_id.as_deref().and_then(|i| cfg.account(i)).or_else(|| cfg.default_account(&AgentKind::ClaudeCode)).cloned()
+                };
+                text.set(String::new());
+                mentions.set(Vec::new());
+                match (cmd, acc) {
+                    ("/login", Some(acc)) => app.sign_in(&acc),
+                    (_, acc) => {
+                        let line = crate::state::as_account(&AgentKind::ClaudeCode, acc.as_ref(), &format!("claude {cmd}"));
+                        let home = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
+                        match crate::state::open_terminal(&home, &line) {
+                            Ok(()) => app.toast(format!("{cmd} runs in the terminal, for {}", acc.map(|a| format!("“{}”", a.label)).unwrap_or_else(|| "your current login".into()))),
+                            Err(e) => app.toast_err(format!("Could not open a terminal: {e}")),
+                        }
+                    }
+                }
+                return;
+            }
+        }
         text.set(String::new());
         at.set(Vec::new());
         mentions.set(Vec::new());

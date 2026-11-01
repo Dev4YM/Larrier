@@ -11,6 +11,7 @@ pub mod git;
 pub mod models;
 pub mod harness;
 pub mod request;
+pub mod updates;
 
 pub use detect::{detect_all, Detected};
 pub use engine::TurnRecorder;

@@ -88,11 +88,12 @@ def rounded(size, radius):
 
 def compose(shot_path, out_path, width, seed):
     shot = Image.open(shot_path).convert("RGB")
-    win_w = int(width * 0.8125)
+    # The window fills most of the frame; a thin band of backdrop frames it.
+    win_w = int(width * 0.92)
     win_h = round(shot.height * win_w / shot.width)
     shot = shot.resize((win_w, win_h), Image.LANCZOS)
     pad_x = (width - win_w) // 2
-    pad_top = int(win_h * 0.16)
+    pad_top = int(win_h * 0.065)
     height = pad_top * 2 + win_h
     canvas = backdrop(width, height, seed).convert("RGBA")
 

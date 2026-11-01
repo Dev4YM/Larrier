@@ -4,7 +4,7 @@
 mod stats;
 
 use std::collections::{BTreeSet, HashMap};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -539,23 +539,48 @@ pub struct QuotaState {
 pub static QUOTAS: GlobalSignal<Option<QuotaState>> = Signal::global(|| None);
 pub static QUOTA_BUSY: GlobalSignal<bool> = Signal::global(|| false);
 
+/// When the limits were last asked for.
+static LAST_CHECK: Mutex<Option<Instant>> = Mutex::new(None);
+/// Checks in a row that couldn't reach an account (each waits longer).
+static FAILED_CHECKS: AtomicU64 = AtomicU64::new(0);
+/// A turn just ended: worth a fresh look.
+static TURN_ENDED: AtomicBool = AtomicBool::new(false);
+/// Plan panels open right now.
+static PANELS_OPEN: AtomicU64 = AtomicU64::new(0);
+
+fn since_check() -> Duration {
+    LAST_CHECK.lock().ok().and_then(|l| l.map(|t| t.elapsed())).unwrap_or(Duration::MAX)
+}
+
 /// Refresh plan limits in the background — at most every three minutes
 /// unless `force`.
 pub fn refresh_quotas(app: App, force: bool) {
-    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    check(app, force, if force { Duration::ZERO } else { Duration::from_secs(180) });
+}
+
+/// Ask for the limits again (afresh, not from the last answer) unless they
+/// were asked for within `gap`.
+fn check(app: App, fresh: bool, gap: Duration) {
     {
-        let Ok(mut last) = LAST.lock() else { return };
-        if !force && last.map(|t| t.elapsed() < Duration::from_secs(180)).unwrap_or(false) {
+        let Ok(mut last) = LAST_CHECK.lock() else { return };
+        if last.map(|t| t.elapsed() < gap).unwrap_or(false) {
             return;
         }
         *last = Some(Instant::now());
     }
+    tracing::info!("plan limits: checking{}", if fresh { " afresh" } else { "" });
     let cfg = app.config.peek().clone();
     let agents = plan_agents(&cfg, &app.detected.peek());
     *QUOTA_BUSY.write() = true;
     dioxus::core::spawn_forever(async move {
-        let r = tokio::task::spawn_blocking(move || crate::quota::fetch_all(&cfg, &agents, force)).await;
+        let r = tokio::task::spawn_blocking(move || crate::quota::fetch_all(&cfg, &agents, fresh)).await;
         if let Ok(mut list) = r {
+            let failed = list.iter().any(|q| q.windows.is_empty() && q.note.as_deref().is_some_and(|n| n.starts_with("Couldn't load")));
+            if failed {
+                FAILED_CHECKS.fetch_add(1, Ordering::Relaxed);
+            } else {
+                FAILED_CHECKS.store(0, Ordering::Relaxed);
+            }
             // A check that failed (rate-limited, offline) keeps the limits
             // known before it, saying so.
             if let Some(before) = QUOTAS.peek().as_ref() {
@@ -572,6 +597,51 @@ pub fn refresh_quotas(app: App, force: bool) {
         }
         *QUOTA_BUSY.write() = false;
     });
+}
+
+/// Keep the plan limits current while Larrier is open: every two minutes
+/// while an agent works or a plan panel is open, every five otherwise, and
+/// soon after a turn ends. A check that couldn't reach an account waits
+/// longer before the next (up to fifteen minutes), so a busy usage service
+/// isn't asked again and again.
+pub fn keep_fresh(app: App) {
+    // LARRIER_LIMITS_EVERY (seconds) sets one pace for tests.
+    let pace = std::env::var("LARRIER_LIMITS_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10);
+    dioxus::core::spawn_forever(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let watching = !app.running.peek().is_empty() || PANELS_OPEN.load(Ordering::Relaxed) > 0;
+            let every = Duration::from_secs(pace.unwrap_or(if watching { 120 } else { 300 }));
+            let every = (every * 2u32.pow(FAILED_CHECKS.load(Ordering::Relaxed).min(3) as u32)).min(Duration::from_secs(900));
+            let since = since_check();
+            let after_turn = since >= Duration::from_secs(45) && TURN_ENDED.swap(false, Ordering::Relaxed);
+            if since >= every || after_turn {
+                check(app, true, Duration::from_secs(45));
+            }
+        }
+    });
+}
+
+/// A turn ended: the limits are looked at again soon.
+pub fn turn_ended() {
+    TURN_ENDED.store(true, Ordering::Relaxed);
+}
+
+/// A plan panel opened: up-to-date numbers now, and while it stays open.
+fn panel_opened(app: App) {
+    PANELS_OPEN.fetch_add(1, Ordering::Relaxed);
+    check(app, true, Duration::from_secs(30));
+}
+
+fn panel_closed() {
+    let _ = PANELS_OPEN.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+}
+
+/// Counts a plan panel as open while it's shown.
+pub fn use_panel_watch() {
+    let app = use_app();
+    use_hook(move || panel_opened(app));
+    use_drop(panel_closed);
 }
 
 /// A window's usage reported by a running agent: update the cached plan

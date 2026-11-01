@@ -95,6 +95,8 @@ pub fn PlanRing(agent: AgentKind, account_id: Option<String>, usage: Option<Usag
 #[component]
 fn PlanPanel(agent: AgentKind, quota: Option<Quota>, usage: Option<Usage>, cost: Option<f64>) -> Element {
     let app = use_app();
+    // Fresh numbers when it opens, and every two minutes while it's open.
+    super::usage::use_panel_watch();
     let windows: Vec<Window> = quota.as_ref().map(|q| q.windows.clone()).unwrap_or_default();
     let busy = QUOTA_BUSY();
     let name = agent.display_name();

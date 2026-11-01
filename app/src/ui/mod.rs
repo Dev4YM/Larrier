@@ -83,6 +83,8 @@ pub fn Root() -> Element {
         }
         // Sessions other apps are writing update here as they change.
         crate::live::start(app);
+        // Plan limits stay current on their own.
+        usage::keep_fresh(app);
         // Installed and portable copies look for a newer release when they
         // start, then every ten minutes. The clock decides when, so a
         // computer that slept looks as it wakes; a look that couldn't reach

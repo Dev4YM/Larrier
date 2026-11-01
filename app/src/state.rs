@@ -1271,6 +1271,9 @@ impl App {
                 }
                 // After the user's own stop the queue waits, as when a turn
                 // ends.
+                if resting {
+                    crate::ui::usage::turn_ended();
+                }
                 if resting && app.stopping.write().remove(&id) != Some(false) {
                     if let Some(n) = app.take_queued(&id) {
                         app.send_into_turn(&id, n);
@@ -1301,6 +1304,8 @@ impl App {
             });
             app.running.write().remove(&id);
             app.permissions.write().remove(&id);
+            // What the turn used shows in the plan's limits soon.
+            crate::ui::usage::turn_ended();
             if app.idle.peek().contains(&id) {
                 app.idle.write().remove(&id);
             }

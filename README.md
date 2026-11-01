@@ -85,9 +85,18 @@ Download yours from the
 | System | Download | Then |
 |---|---|---|
 | Windows 10 / 11 | `Larrier-<version>-windows-x64.exe` | Run it: it installs itself, for you or for everyone. |
-| macOS 11+ (Apple silicon) | `Larrier-<version>-macos-arm64.zip` | Unzip, drag Larrier.app to Applications, right-click → Open the first time. |
+| macOS 11+ (Apple silicon) | `Larrier-<version>-macos-arm64.zip` | Unzip, drag Larrier.app to Applications, allow it once (below). |
 | macOS 11+ (Intel) | `Larrier-<version>-macos-x64.zip` | The same. |
 | Linux (x64) | `Larrier-<version>-linux-x64.tar.gz` | Unpack and run `./larrier/install.sh` (needs WebKitGTK 4.1). |
+
+> [!NOTE]
+> **Larrier isn't signed.** The Windows program has no code-signing
+> certificate, and the Mac app isn't notarized by Apple, so the first launch
+> needs your OK. On Windows, click SmartScreen's **More info → Run anyway**.
+> On macOS 15 and newer, use **System Settings → Privacy & Security → Open
+> Anyway**; on macOS 11 to 14, right-click → **Open**. Every download has a
+> `.sha256` to check it against:
+> [docs/install.md](docs/install.md#larrier-isnt-signed) shows how.
 
 Every copy keeps itself up to date from GitHub releases. Details for each
 system are in [docs/install.md](docs/install.md).

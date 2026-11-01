@@ -59,6 +59,17 @@ Each platform can also be built by hand with `scripts/build.ps1` or
 Each has a `.sha256` beside it; installed copies check the download against
 it before updating, and pick the asset for their own system.
 
+## Signing
+
+Releases aren't code-signed. The Windows program has no Authenticode
+signature, so SmartScreen warns about it, and Smart App Control blocks it.
+The Mac app is signed ad hoc by `build.sh` (Apple silicon runs no unsigned
+code at all) and isn't notarized, so Gatekeeper asks once. Signing would
+take a code-signing certificate for Windows (`signtool` in `build.ps1`) and
+an Apple Developer ID with `notarytool` for macOS, each kept as a secret of
+the Release workflow. Until then [install.md](install.md#larrier-isnt-signed)
+tells people how to open Larrier and check what they downloaded.
+
 - The version's changelog section as release notes. Versions with a suffix
   (`-beta.1`) are published as pre-releases and only reach the Preview
   channel.

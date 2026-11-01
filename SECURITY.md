@@ -38,6 +38,11 @@ anything an agent does with the permissions you grant it.
 - Agent folders are read-only for Larrier, except for writing a session an
   agent will resume.
 - Updates are only installed after their SHA-256 matches the published one.
+- Releases aren't code-signed: no Windows code-signing certificate, no Apple
+  Developer ID or notarization. A download can be checked against the
+  `.sha256` published beside it. Those checksums come from the same
+  release, so they detect a broken or swapped file, not a compromised
+  release; building from source avoids trusting the prebuilt programs.
 
 See [docs/privacy.md](docs/privacy.md) for everything Larrier stores, reads
 and connects to.

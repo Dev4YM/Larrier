@@ -14,9 +14,44 @@ program for each, from the
 
 Each comes with a `.sha256` file to check the download against.
 
+## Larrier isn't signed
+
+Larrier's programs aren't code-signed. The Windows program carries no
+code-signing certificate, and the Mac app is signed ad hoc, without an
+Apple Developer ID, and isn't notarized by Apple. So Windows and macOS warn
+the first time you open a download; the steps for each are below. Updates
+Larrier installs itself don't ask again: Larrier downloads them, not a
+browser, so they carry no download mark.
+
+To make sure a download is the published one, compare its SHA-256 with the
+first word of its `.sha256` file:
+
+```powershell
+(Get-FileHash .\Larrier-<version>-windows-x64.exe -Algorithm SHA256).Hash
+```
+
+```bash
+shasum -a 256 Larrier-<version>-macos-arm64.zip      # macOS
+```
+
+```bash
+sha256sum Larrier-<version>-linux-x64.tar.gz         # Linux
+```
+
+The checksums are published with the release, so they catch a broken or
+swapped download, not a release replaced on GitHub as a whole. To trust no
+prebuilt program at all, build Larrier yourself ([building.md](building.md)).
+
 ## Windows
 
-Run `Larrier-<version>-windows-x64.exe`. The program installs itself:
+Run `Larrier-<version>-windows-x64.exe`. Because it isn't signed, Microsoft
+Defender SmartScreen may stop it with **Windows protected your PC**: click
+**More info**, then **Run anyway**. On Windows 11 with Smart App Control
+turned on, unsigned programs are blocked without that choice; Larrier can't
+start there unless Smart App Control is off (Windows Security → App &
+browser control).
+
+The program installs itself:
 
 - **Just for me:** no administrator rights. The app goes to
   `%LOCALAPPDATA%\Programs\Larrier`, everything else stays in your profile.
@@ -34,10 +69,21 @@ WebView2, which Larrier draws with, is part of Windows 10 and 11.
 
 1. Unzip `Larrier-<version>-macos-<arch>.zip` and drag **Larrier.app** to
    Applications (or anywhere you like).
-2. The first time, **right-click Larrier.app → Open** and confirm. Releases
-   aren't notarized by Apple yet, so a plain double-click is refused once;
-   after that it opens normally. (Or run
-   `xattr -dr com.apple.quarantine /Applications/Larrier.app`.)
+2. The first time, macOS refuses to open it, because it isn't notarized.
+   Allow it once; after that it opens normally:
+   - **macOS 15 (Sequoia) and newer:** open Larrier.app and click **Done**
+     when macOS refuses. Then go to **System Settings → Privacy & Security**,
+     scroll to **Security**, click **Open Anyway** next to Larrier and
+     confirm with your password or Touch ID.
+   - **macOS 11 to 14:** right-click Larrier.app → **Open**, then **Open**
+     again.
+
+   If macOS says Larrier "is damaged", or there's no **Open Anyway** button,
+   remove the download mark in Terminal and open it again:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Larrier.app
+   ```
 
 Larrier's menus are in the menu bar, and shortcuts use ⌘ where Windows and
 Linux use Ctrl. To uninstall, move Larrier.app to the Trash; your sessions

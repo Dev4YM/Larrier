@@ -582,8 +582,19 @@ fn AddAccountModal(kind: AgentKind) -> Element {
         let mut acc = Account::new(k2.clone(), name, a.clone());
         acc.id = id;
         let first = app.config.read().accounts_for(&k2).is_empty();
-        acc.is_default = first;
-        app.update_config(|c| c.accounts.push(acc.clone()));
+        // Another login added first keeps the agent on the one it ran with:
+        // that stays, as an account of its own, the default; the new one
+        // can be made default.
+        let keep_current = first && matches!(auth(), AuthKind::Dir | AuthKind::Existing);
+        acc.is_default = first && !keep_current;
+        app.update_config(|c| {
+            if keep_current {
+                let mut cur = Account::new(k2.clone(), "Current login".to_string(), AccountAuth::SystemLogin);
+                cur.is_default = true;
+                c.accounts.push(cur);
+            }
+            c.accounts.push(acc.clone());
+        });
         app.ui.write().modal = None;
         match &a {
             // Sign in inside the account's folder.

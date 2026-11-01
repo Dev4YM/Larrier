@@ -803,6 +803,10 @@ pub fn Composer(
                         }
                     }
                     EnvPicker { open: env_menu, worktree, is_repo, session: false, label: env_text.to_string() }
+                    for (gi, g) in groups.iter().enumerate() {
+                        ModeChip { key: "m{gi}", group: g.clone(), gi, plan: gi == 0 && Some(g.options[g.chosen].id) == plan_id, up: false,
+                            onpick: move |(g, v): (usize, Option<String>)| set_pick(g, v, None) }
+                    }
                 }
             }
             if !suggs.is_empty() {
@@ -1031,19 +1035,6 @@ pub fn Composer(
                         },
                     }
                     }
-                    // Shown only when a group is off its default (side by side
-                    // in the one grid cell).
-                    if groups.iter().any(|g| g.chosen != g.default) {
-                        div { class: "c-mode",
-                            for (gi, g) in groups.iter().enumerate().filter(|(_, g)| g.chosen != g.default) {
-                                span { key: "{gi}", class: "picker", style: "color: var(--blue); cursor: default;",
-                                    title: if gi == 0 { "{g.label} · Shift+Tab to change" } else { "{g.label}" },
-                                    Icon { i: if Some(g.options[g.chosen].id) == plan_id && gi == 0 { I::List } else if gi == 0 { I::Infinity } else { I::Lock }, size: 13 }
-                                    "{g.options[g.chosen].label}"
-                                }
-                            }
-                        }
-                    }
                     div { class: "menu-anchor c-model",
                         button { class: if model_menu() { "picker open" } else { "picker" }, title: "{agent.display_name()}",
                             onclick: move |_| { model_query.set(String::new()); model_menu.set(true); },
@@ -1154,6 +1145,10 @@ pub fn Composer(
                         span { class: "env-chip", style: "cursor: default;", title: "Current branch", Icon { i: I::GitBranch, size: 13, stroke: 1.5 } "{b}" }
                     }
                     EnvPicker { open: env_menu, worktree, is_repo, session: true, label: env_text.to_string() }
+                    for (gi, g) in groups.iter().enumerate() {
+                        ModeChip { key: "m{gi}", group: g.clone(), gi, plan: gi == 0 && Some(g.options[g.chosen].id) == plan_id, up: true,
+                            onpick: { let sid = session_id.clone(); move |(g, v): (usize, Option<String>)| set_pick(g, v, sid.clone()) } }
+                    }
                     div { class: "grow" }
                     super::meters::PlanRing {
                         agent: agent.clone(),
@@ -1402,6 +1397,20 @@ fn ModelPicker(
                                 let mlogo = row.logo_id.as_deref().and_then(model_logo);
                                 let k = cur.clone();
                                 let m2 = row.id.clone();
+                                let can_edit = editable(&row.id);
+                                let editing = edit().is_some_and(|(ek, eid, _, _)| ek == cur && Some(eid) == row.id);
+                                let (k3, m3) = (cur.clone(), row.id.clone().unwrap_or_default());
+                                let mut cls = String::from("menu-item mp-row");
+                                if checked {
+                                    cls.push_str(" checked");
+                                }
+                                if editing {
+                                    cls.push_str(" editing");
+                                }
+                                // The model in use, set off its defaults: Reset
+                                // takes it back to them.
+                                let custom = checked && can_edit && (effort.is_some() || cur_fast);
+                                let (k4, m4) = (cur.clone(), row.id.clone());
                                 rsx! {
                                     button { key: "{row_key}", class: "{cls}", title: "{row.tip}",
                                         onclick: move |_| onpick.call((k.clone(), m2.clone())),
@@ -1659,6 +1668,37 @@ fn ModeRow(label: &'static str, description: &'static str, is_default: bool, che
     }
 }
 
+/// One of the agent's mode groups beside the environment ("∞ Auto ▾"),
+/// always shown; it opens the group's options. Off its default it's blue.
+#[component]
+fn ModeChip(group: ModeGroupView, gi: usize, plan: bool, up: bool, onpick: EventHandler<(usize, Option<String>)>) -> Element {
+    let mut open = use_signal(|| false);
+    let g = group;
+    let chosen = g.options.get(g.chosen).map(|o| o.label).unwrap_or("");
+    let icon = if plan { I::List } else if gi == 0 { I::Infinity } else { I::Lock };
+    let tip = if gi == 0 { format!("{} · Shift+Tab to change", g.label) } else { g.label.to_string() };
+    rsx! {
+        div { class: "menu-anchor",
+            button { class: if g.chosen != g.default { "env-chip mode-chip changed" } else { "env-chip mode-chip" }, title: "{tip}", onclick: move |_| open.set(true),
+                Icon { i: icon, size: 13 }
+                span { "{chosen}" }
+                Icon { i: I::ChevronDown, size: 12 }
+            }
+            Dropdown { open, up,
+                div { class: "menu-label", "{g.label}" }
+                for (oi, o) in g.options.iter().enumerate() {
+                    {
+                        let v = pick_value(&g, oi);
+                        rsx! {
+                            ModeRow { key: "{o.id}", label: o.label, description: o.description, is_default: oi == g.default, checked: oi == g.chosen, number: None,
+                                onclick: move |_| { open.set(false); onpick.call((gi, v.clone())); } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// "This PC ▾" / "Worktree ▾" environment picker.
 #[component]

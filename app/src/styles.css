@@ -1775,5 +1775,8 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .mp-edit .menu-item.static:hover { background: none; }
 .mp-edit .toggle.sm { margin-left: auto; pointer-events: none; }
 
+/* The agent's modes beside the environment; blue when off their default. */
+.mode-chip.changed, .mode-chip.changed:hover { color: var(--blue); }
+
 /* Reset: an icon of its own beside Edit. */
 .mp-edit-btn.mp-reset { padding: 0; width: 20px; justify-content: center; }

@@ -1432,7 +1432,7 @@ fn ModelPicker(
                                         onclick: move |_| browse.set(k2.clone()),
                                         span { class: "lg", if let Some(svg) = logo { Logo { svg, size: 15 } } else { Icon { i: I::Bot, size: 14 } } }
                                         span { class: "nm ellipsis", "{name}" }
-                                        if using { span { class: "using", title: "In use" } }
+                                        if using { span { class: "using", title: "In use", Icon { i: I::Check, size: 13 } } }
                                     }
                                 }
                             }

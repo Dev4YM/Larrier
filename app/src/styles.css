@@ -1112,7 +1112,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .turn-nav { position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 8; padding: 24px 34px 24px 12px; display: flex; flex-direction: column; max-height: 76vh; }
 .tn-item { position: relative; display: flex; align-items: center; height: 8px; width: 26px; padding: 0; background: none; border: none; flex-shrink: 0; }
 .tn-dash { width: 8px; height: 2px; border-radius: 2px; background: var(--fg-4); transition: width .18s cubic-bezier(.2, .8, .2, 1), background-color .18s ease; }
-.tn-item.on .tn-dash { width: 15px; background: var(--fg); }
+.tn-item.on .tn-dash { background: var(--fg); }
 /* Hovering: the dash under the pointer is longest, its neighbours step
    down to the normal length (--d is the distance in dashes). */
 .turn-nav.scoping .tn-dash { width: max(8px, calc(20px - var(--d, 6) * 4px)); }

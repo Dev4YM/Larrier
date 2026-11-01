@@ -191,13 +191,17 @@ pub fn Transcript(id: String) -> Element {
                 if (!el.__wired) {{
                     el.__wired = true;
                     const nav = () => document.querySelector('.turn-nav[data-for="{tid2}"]');
+                    // The prompt read last: the last one above the middle of
+                    // the view, or at the very bottom, the last one in sight.
                     const current = () => {{
-                        const top = el.getBoundingClientRect().top + 48;
+                        const box = el.getBoundingClientRect();
+                        const line = box.top + el.clientHeight / 2;
+                        const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 4;
                         let cur = null;
-                        for (const t of el.querySelectorAll('.turn')) {{
-                            if (t.getBoundingClientRect().top > top) break;
-                            const m = t.querySelector('.user-msg[id^="m-"]');
-                            if (m) cur = m.id.slice(2);
+                        for (const m of el.querySelectorAll('.turn .user-msg[id^="m-"]')) {{
+                            const r = m.getBoundingClientRect();
+                            if (r.top <= line || (bottom && r.top < box.bottom)) cur = m.id.slice(2);
+                            else break;
                         }}
                         const n = nav(); if (!n) return;
                         if (!cur) {{ const first = n.querySelector('[data-uid]'); cur = first && first.dataset.uid; }}

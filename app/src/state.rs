@@ -2023,9 +2023,21 @@ impl App {
         };
         self.sync_status.set("Importing sessions…".into());
         spawn_forever(async move {
-            let report = tokio::task::spawn_blocking(move || larrier_formats::sync(store(), &agents)).await;
+            // Chats running here are left alone; the changed ones are loaded
+            // off the UI thread and swapped into any open view.
+            let report = tokio::task::spawn_blocking(move || {
+                let r = larrier_formats::sync_skipping(store(), &agents, &crate::live::is_busy);
+                let fresh: Vec<Session> = r.changed.iter().filter_map(|id| store().load(id).ok()).collect();
+                (r, fresh)
+            })
+            .await;
             match report {
-                Ok(r) => {
+                Ok((r, fresh)) => {
+                    for s in fresh {
+                        if !self.is_running(&s.id) {
+                            self.apply_external(s);
+                        }
+                    }
                     let msg = if r.imported + r.updated == 0 {
                         "Sessions up to date".to_string()
                     } else {

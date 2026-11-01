@@ -1840,30 +1840,29 @@ mod tests {
     #[test]
     fn narration_shows_as_text() {
         let (think, say) = (signature("thinking"), signature("narration"));
-        let ev = |e: Value| serde_json::json!({"type": "stream_event", "event": e, "parent_tool_use_id": null}).to_string();
-        let frame = |id: &str, content: Value, extra: Value| {
-            let mut v = serde_json::json!({"type": "assistant", "parent_tool_use_id": null, "message": {"id": id, "role": "assistant", "content": content}});
-            if let (Some(v), Some(x)) = (v.as_object_mut(), extra.as_object()) {
-                v.extend(x.clone());
-            }
-            v.to_string()
-        };
+        let ev = |e: &str| format!(r#"{{"type":"stream_event","event":{e},"parent_tool_use_id":null}}"#);
+        let block = |text: &str, sig: &str| format!(r#"{{"type":"thinking","thinking":"{text}","signature":"{sig}"}}"#);
+        let frame = |id: &str, blocks: &[String], extra: &str| format!(r#"{{"type":"assistant","parent_tool_use_id":null,"message":{{"id":"{id}","role":"assistant","content":[{}]}}{extra}}}"#, blocks.join(","));
+        let start = |i: u32| ev(&format!(r#"{{"type":"content_block_start","index":{i},"content_block":{{"type":"thinking","thinking":"","signature":""}}}}"#));
+        let delta = |i: u32, text: &str| ev(&format!(r#"{{"type":"content_block_delta","index":{i},"delta":{{"type":"thinking_delta","thinking":"{text}"}}}}"#));
+        let sig = |i: u32, sig: &str| ev(&format!(r#"{{"type":"content_block_delta","index":{i},"delta":{{"type":"signature_delta","signature":"{sig}"}}}}"#));
+        let stop = |i: u32| ev(&format!(r#"{{"type":"content_block_stop","index":{i}}}"#));
         let lines = [
-            ev(serde_json::json!({"type": "message_start", "message": {"id": "m1"}})),
-            ev(serde_json::json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}})),
-            ev(serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "A retry can race the first delivery."}})),
-            ev(serde_json::json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": think}})),
-            ev(serde_json::json!({"type": "content_block_stop", "index": 0})),
-            frame("m1", serde_json::json!([{"type": "thinking", "thinking": "A retry can race the first delivery.", "signature": think}]), Value::Null),
-            ev(serde_json::json!({"type": "content_block_start", "index": 1, "content_block": {"type": "thinking", "thinking": "", "signature": ""}})),
-            ev(serde_json::json!({"type": "content_block_delta", "index": 1, "delta": {"type": "thinking_delta", "thinking": "Agreed, the rings felt cheap."}})),
-            ev(serde_json::json!({"type": "content_block_delta", "index": 1, "delta": {"type": "signature_delta", "signature": say}})),
-            ev(serde_json::json!({"type": "content_block_stop", "index": 1})),
-            frame("m1", serde_json::json!([{"type": "thinking", "thinking": "Agreed, the rings felt cheap.", "signature": say}]), Value::Null),
+            ev(r#"{"type":"message_start","message":{"id":"m1"}}"#),
+            start(0),
+            delta(0, "A retry can race the first delivery."),
+            sig(0, &think),
+            stop(0),
+            frame("m1", &[block("A retry can race the first delivery.", &think)], ""),
+            start(1),
+            delta(1, "Agreed, the rings felt cheap."),
+            sig(1, &say),
+            stop(1),
+            frame("m1", &[block("Agreed, the rings felt cheap.", &say)], ""),
             // Whole frames: by the signature, and by Claude Code's list.
-            frame("m2", serde_json::json!([{"type": "thinking", "thinking": "Plan the tests.", "signature": think}, {"type": "thinking", "thinking": "Now the tests.", "signature": say}]), Value::Null),
-            frame("m3", serde_json::json!([{"type": "thinking", "thinking": "Check the lock."}, {"type": "thinking", "thinking": "The lock holds."}]), serde_json::json!({"narration_block_indexes": [1]})),
-            serde_json::json!({"type": "assistant", "parent_tool_use_id": "task1", "message": {"id": "s1", "content": [{"type": "thinking", "thinking": "Looking for writers.", "signature": say}]}}).to_string(),
+            frame("m2", &[block("Plan the tests.", &think), block("Now the tests.", &say)], ""),
+            frame("m3", &[r#"{"type":"thinking","thinking":"Check the lock."}"#.into(), r#"{"type":"thinking","thinking":"The lock holds."}"#.into()], r#","narration_block_indexes":[1]"#),
+            format!(r#"{{"type":"assistant","parent_tool_use_id":"task1","message":{{"id":"s1","content":[{}]}}}}"#, block("Looking for writers.", &say)),
         ];
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let mut p = ClaudeStream::default();

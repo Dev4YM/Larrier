@@ -29,9 +29,9 @@ enum Plan {
 /// One sync pass at a time, across full and live syncs.
 static SYNC_LOCK: Mutex<()> = Mutex::new(());
 
-pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
+pub fn sync(store: &Store, agents: &[AgentKind], skip: &dyn Fn(&str) -> bool) -> SyncReport {
     let infos: Vec<NativeSessionInfo> = agents.iter().flat_map(discover).collect();
-    let mut report = apply(store, infos, &|_| false);
+    let mut report = apply(store, infos, skip);
     report.removed = drop_copies(store);
     report
 }
@@ -74,6 +74,27 @@ pub fn drop_copies(store: &Store) -> usize {
 /// changed in Larrier.
 pub const IMPORTER_VERSION: u32 = 10;
 
+/// Sessions Larrier ran itself recorded Claude's narration as thinking
+/// before this version; linked records older than it are repaired once.
+const NARRATION_TOLD: u32 = 10;
+
+/// A chat Larrier ran itself, which is never re-imported: repaired once
+/// from its native transcript (narration it recorded as thinking, before
+/// `NARRATION_TOLD`). Returns the importer version its record carries now.
+fn repair_linked(store: &Store, r: &ImportRecord, info: &NativeSessionInfo, report: &mut SyncReport) -> u32 {
+    if r.importer >= NARRATION_TOLD || !store.exists(&r.session_id) {
+        report.skipped += 1;
+        return r.importer;
+    }
+    if crate::repair::narration(store, &r.session_id, &info.path) {
+        report.updated += 1;
+        report.changed.push(r.session_id.clone());
+    } else {
+        report.skipped += 1;
+    }
+    IMPORTER_VERSION
+}
+
 pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(&str) -> bool) -> SyncReport {
     let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut report = SyncReport::default();
@@ -97,9 +118,13 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
                 } else {
                     // Remember the source as seen, so it isn't looked at again
                     // until it changes.
-                    store.set_import_record(&key, ImportRecord { source_mtime: info.mtime_ms, source_len: info.size, ..r });
-                    report.skipped += 1;
+                    let importer = repair_linked(store, &r, &info, &mut report);
+                    store.set_import_record(&key, ImportRecord { source_mtime: info.mtime_ms, source_len: info.size, importer, ..r });
                 }
+            }
+            Some(r) if r.linked && !r.deleted && r.importer < NARRATION_TOLD && !skip(&r.session_id) => {
+                let importer = repair_linked(store, &r, &info, &mut report);
+                store.set_import_record(&key, ImportRecord { importer, ..r });
             }
             Some(r) if r.linked || r.deleted => report.skipped += 1,
             Some(r) if !r.session_id.is_empty() && skip(&r.session_id) => report.skipped += 1,
@@ -300,6 +325,49 @@ mod tests {
         let mut new = imported("plan");
         merge_user_state(&mut new, &old);
         assert_eq!(new.mode.as_deref(), Some("acceptEdits"));
+    }
+
+    /// A chat Larrier ran itself is never re-imported, but narration it
+    /// recorded as thinking is repaired from its transcript, once.
+    #[test]
+    fn larriers_own_chats_get_narration_back_once() {
+        use base64::Engine;
+        let native = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let store = Store::open(data.path()).unwrap();
+        let id = "51111111-2222-3333-4444-555555555555";
+        let mut sig = vec![0x08, 0x04, 0x12, 0x60, 0x0a, 0x11, 0x08, 0x13, 0x18, 0x02, 0x38, 0x01, 0x42, 9];
+        sig.extend_from_slice(b"narration");
+        sig.extend([7u8; 60]);
+        let sig = base64::engine::general_purpose::STANDARD.encode(sig);
+        let lines = [
+            serde_json::json!({"type": "user", "uuid": "u1", "parentUuid": null, "sessionId": id, "cwd": "/r", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": "go"}}).to_string(),
+            serde_json::json!({"type": "assistant", "uuid": "a1", "parentUuid": "u1", "sessionId": id, "timestamp": "2026-10-01T10:00:01Z", "message": {"id": "m1", "role": "assistant", "content": [{"type": "thinking", "thinking": "I'll start with the handler.", "signature": sig}]}}).to_string(),
+        ];
+        let f = native.path().join(format!("{id}.jsonl"));
+        std::fs::write(&f, lines.join("
+")).unwrap();
+        let info = crate::claude::file_info(&f).unwrap();
+
+        let mut s = Session::new(AgentKind::ClaudeCode, None);
+        s.push(larrier_core::Message::user_text("go"));
+        let mut a = larrier_core::Message::assistant(AgentKind::ClaudeCode, None);
+        a.parts.push(larrier_core::Part::Reasoning { text: "I'll start with the handler.".into(), duration_ms: None });
+        s.push(a);
+        store.save(&s).unwrap();
+        let key = import_key(&AgentKind::ClaudeCode, &info.native_id);
+        store.set_import_record(&key, ImportRecord::linked(&s.id));
+
+        // Running here: left alone for now.
+        let r = apply(&store, vec![info.clone()], &|_| true);
+        assert!(r.changed.is_empty());
+        let r = apply(&store, vec![info.clone()], &|_| false);
+        assert_eq!(r.changed, vec![s.id.clone()]);
+        assert_eq!(store.load(&s.id).unwrap().messages[1].parts, vec![larrier_core::Part::Text { text: "I'll start with the handler.".into() }]);
+        let rec = store.import_record(&key).unwrap();
+        assert!(rec.linked && rec.importer >= NARRATION_TOLD);
+        assert!(apply(&store, vec![info], &|_| false).changed.is_empty());
+        assert_eq!(store.list().len(), 1, "never imported as a second session");
     }
 
     /// An imported session once continued in Larrier (and so marked as

@@ -27,6 +27,7 @@ pub mod live;
 pub mod markdown;
 pub mod opencode;
 pub mod pi;
+mod repair;
 mod sync;
 pub mod util;
 
@@ -376,7 +377,12 @@ pub fn rewind(session: &Session, idx: usize, home: Option<&Path>) -> Rewind {
 
 /// Incrementally import new/changed native sessions into the store.
 pub fn sync(store: &Store, agents: &[AgentKind]) -> SyncReport {
-    sync::sync(store, agents)
+    sync::sync(store, agents, &|_| false)
+}
+
+/// [`sync`], leaving alone the sessions `busy(id)` says are running here.
+pub fn sync_skipping(store: &Store, agents: &[AgentKind], busy: &dyn Fn(&str) -> bool) -> SyncReport {
+    sync::sync(store, agents, busy)
 }
 
 #[cfg(test)]

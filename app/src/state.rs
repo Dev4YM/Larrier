@@ -747,6 +747,35 @@ impl App {
         self.view.set(v);
     }
 
+    /// Leave Settings for where you were before opening it (the newest
+    /// view in the history that isn't a settings page), else New Agent.
+    pub fn leave_settings(mut self) {
+        let target = {
+            let ui = self.ui.peek();
+            let upto = ui.hist_pos.min(ui.history.len().saturating_sub(1));
+            (0..=upto).rev().filter(|&i| i < ui.history.len()).find(|&i| !matches!(ui.history[i], View::Settings(_))).map(|i| (i, ui.history[i].clone()))
+        };
+        match target {
+            Some((i, v)) if v.session_id().map_or(true, |id| self.store_has(id)) => {
+                if let Some(id) = v.session_id() {
+                    if !self.ensure_loaded(id) {
+                        return self.new_agent();
+                    }
+                }
+                if v.is_tab() {
+                    self.ensure_tab(&v, false);
+                }
+                self.ui.write().hist_pos = i;
+                self.set_view(v);
+            }
+            _ => self.new_agent(),
+        }
+    }
+
+    fn store_has(&self, id: &str) -> bool {
+        self.is_loaded(id) || store().exists(id)
+    }
+
     pub fn can_go(&self, delta: isize) -> bool {
         let ui = self.ui.read();
         let target = ui.hist_pos as isize + delta;

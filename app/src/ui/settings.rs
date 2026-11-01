@@ -44,7 +44,7 @@ pub fn SettingsNav() -> Element {
             div { class: "side-top",
                 button { class: "nav-row back-row",
                     onclick: move |_| {
-                        if app.can_go(-1) { app.go(-1) } else { app.new_agent() }
+                        app.leave_settings();
                     },
                     Icon { i: I::ArrowLeft, size: 15, stroke: 1.5 }
                     "Back"

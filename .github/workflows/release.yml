@@ -1,11 +1,19 @@
-# Builds Larrier for Windows and publishes it as a GitHub release.
+# Builds Larrier for Windows, macOS and Linux and publishes them on a
+# GitHub release.
 #
 # Push a tag that matches the app version (`v0.2.0` for version 0.2.0 in
 # Cargo.toml; scripts/release.ps1 makes both), or run it by hand with that
-# tag. The release carries `Larrier-<version>-windows-x64.exe` — the app,
-# which installs itself — and its `.sha256`, with the version's section of
-# CHANGELOG.md as its notes. Versions with a suffix (`-beta.1`) are
-# published as previews. Installed copies update from the newest release.
+# tag. The release gets each platform's program and its `.sha256`:
+#
+#   Larrier-<version>-windows-x64.exe    the app, which installs itself
+#   Larrier-<version>-macos-arm64.zip    Larrier.app for Apple silicon
+#   Larrier-<version>-macos-x64.zip      Larrier.app for Intel Macs
+#   Larrier-<version>-linux-x64.tar.gz   the program, its launcher entry and install.sh
+#
+# with the version's section of CHANGELOG.md as its notes. Versions with a
+# suffix (`-beta.1`) are published as previews. A program the release
+# already has (scripts/release.ps1 publishes Windows' itself) isn't built
+# again. Installed copies update from the newest release.
 
 name: Release
 
@@ -21,71 +29,96 @@ on:
 permissions:
   contents: write
 
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
-  windows:
-    runs-on: windows-latest
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+  release:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ env.TAG }}
+
+      - name: The tag matches the app version
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version *= *"\(.*\)"/\1/p' Cargo.toml)
+          [ "v$version" = "$TAG" ] || { echo "Tag $TAG doesn't match the app version $version"; exit 1; }
+
+      - name: The release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 && exit 0
+          version=${TAG#v}
+          awk -v v="$version" '/^## /{p = ($2 == v)} p && !/^## /' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Larrier $version" > notes.md
+          case "$version" in *-*) kind=--prerelease ;; *) kind=--latest ;; esac
+          gh release create "$TAG" --title "Larrier $version" --notes-file notes.md $kind
+
+  build:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: macos-x64
+            os: macos-14
+            target: x86_64-apple-darwin
+          - name: linux-x64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Already published?
         id: published
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $names = gh release view $env:TAG --json assets --jq '.assets[].name' 2>$null
-          $done = [bool]($names | Where-Object { $_ -like '*-windows-x64.exe' })
-          "done=$($done.ToString().ToLower())" >> $env:GITHUB_OUTPUT
-          if ($done) { "The release already has its program (published from scripts/release.ps1)." }
+          names=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || true)
+          if echo "$names" | grep -q -- "-${{ matrix.name }}\.\(exe\|zip\|tar\.gz\)$"; then
+            echo "done=true" >> "$GITHUB_OUTPUT"
+            echo "The release already has its ${{ matrix.name }} program."
+          fi
+
+      - name: Linux libraries
+        if: steps.published.outputs.done != 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.published.outputs.done != 'true'
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         if: steps.published.outputs.done != 'true'
+        with:
+          key: ${{ matrix.name }}
 
-      - name: The tag matches the app version
-        if: steps.published.outputs.done != 'true'
+      - name: Build (Windows)
+        if: steps.published.outputs.done != 'true' && runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-          $version = ($meta.packages | Where-Object name -eq 'larrier-app').version
-          if ("v$version" -ne $env:TAG) { throw "Tag $env:TAG doesn't match the app version $version" }
-          "VERSION=$version" >> $env:GITHUB_ENV
+        run: ./scripts/build.ps1
 
-      - name: Build
-        if: steps.published.outputs.done != 'true'
-        run: cargo build --release --locked -p larrier-app
-
-      - name: Package
-        if: steps.published.outputs.done != 'true'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          $name = "Larrier-$env:VERSION-windows-x64.exe"
-          Copy-Item target/release/larrier-desktop.exe "dist/$name"
-          $hash = (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path "dist/$name.sha256" -Value "$hash  $name" -NoNewline -Encoding ascii
-          # This version's notes from the changelog.
-          $notes = (Get-Content CHANGELOG.md -Raw) -split "(?m)^## " | Where-Object { $_ -match "^$([regex]::Escape($env:VERSION))\s" } | Select-Object -First 1
-          $notes = if ($notes) { ($notes -split "`n", 2)[1].Trim() } else { "Larrier $env:VERSION" }
-          Set-Content -Path dist/notes.md -Value $notes -Encoding utf8
-          ./target/release/larrier-desktop.exe --version | Out-String
+      - name: Build (macOS, Linux)
+        if: steps.published.outputs.done != 'true' && runner.os != 'Windows'
+        run: ./scripts/build.sh ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
       - name: Publish
         if: steps.published.outputs.done != 'true'
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $assets = Get-ChildItem dist -Filter 'Larrier-*' | ForEach-Object FullName
-          gh release view $env:TAG *> $null
-          if ($LASTEXITCODE -ne 0) {
-            $kind = if ($env:VERSION.Contains('-')) { '--prerelease' } else { '--latest' }
-            gh release create $env:TAG --title "Larrier $env:VERSION" --notes-file dist/notes.md $kind
-          }
-          gh release upload $env:TAG $assets --clobber
+        run: gh release upload "$TAG" dist/Larrier-*-${{ matrix.name }}.* --clobber

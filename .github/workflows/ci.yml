@@ -1,4 +1,4 @@
-# Builds and tests every pull request on Windows, where Larrier ships.
+# Builds and tests every pull request on Windows, macOS and Linux.
 # Run it by hand from the Actions tab for any branch.
 
 name: CI
@@ -13,9 +13,20 @@ concurrency:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libdbus-1-dev
 
       - uses: dtolnay/rust-toolchain@stable
         with:

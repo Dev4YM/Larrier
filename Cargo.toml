@@ -4,7 +4,7 @@ members = ["crates/core", "crates/formats", "crates/agents", "crates/cli", "app"
 default-members = ["app"]
 
 [workspace.package]
-version = "0.1.26"
+version = "0.1.27"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Dev4YM/Larrier"

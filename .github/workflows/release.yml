@@ -54,7 +54,8 @@ jobs:
           awk -v v="$version" '/^## /{p = ($2 == v)} p && !/^## /' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Larrier $version" > notes.md
           case "$version" in *-*) kind=--prerelease ;; *) kind=--latest ;; esac
-          gh release create "$TAG" --title "Larrier $version" --notes-file notes.md $kind
+          # scripts/release.ps1 creates it at the same moment; theirs is fine.
+          gh release create "$TAG" --title "Larrier $version" --notes-file notes.md $kind || gh release view "$TAG" >/dev/null
 
   build:
     needs: release

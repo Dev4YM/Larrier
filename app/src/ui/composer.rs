@@ -980,11 +980,10 @@ pub fn Composer(
                                                 onclick: move |_| { if editing { cancel_edit(); } app.queue_remove(&s3, q.id); },
                                                 Icon { i: I::Trash, size: 13 }
                                             }
-                                            if running {
-                                                button { class: "icon-btn sm", title: "Stop the agent and send this now",
-                                                    onclick: move |_| app.queue_send(&s4, q.id, BusySend::Interrupt),
-                                                    Icon { i: I::Send, size: 13 }
-                                                }
+                                            // Waiting with the agent stopped (or after a restart): sent as is.
+                                            button { class: "icon-btn sm", title: if running { "Stop the agent and send this now" } else { "Send this now" },
+                                                onclick: move |_| app.queue_send(&s4, q.id, BusySend::Interrupt),
+                                                Icon { i: I::Send, size: 13 }
                                             }
                                         }
                                     }

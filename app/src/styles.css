@@ -1819,3 +1819,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .acct-who { font-size: 12px; margin-top: 1px; }
 .acct-who.ok { color: var(--green); }
 .acct-who.off { color: var(--amber, #b7791f); }
+
+/* An agent's own page lists its logins as Accounts does. */
+.ad-acc-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; font-size: 12.5px; }
+.ad-sec .set-card { margin: 0; }

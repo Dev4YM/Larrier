@@ -3,7 +3,7 @@
 
 use dioxus::prelude::*;
 use larrier_core::{
-    agent::catalog, config::CustomAgent, lsf::new_id, secrets, AccountAuth, AgentKind,
+    agent::catalog, config::CustomAgent, lsf::new_id, secrets, Account, AccountAuth, AgentKind,
     Protocol, Provider, ProviderKind, RunMode,
 };
 
@@ -417,7 +417,7 @@ fn Agents() -> Element {
                                         }
                                     }
                                     div { class: "ad-sec",
-                                        div { class: "ad-title", if installed { "Account" } else { "Install" } }
+                                        div { class: "ad-title", if installed { "Accounts" } else { "Install" } }
                                         if !installed {
                                             for (lbl, cmd) in spec.install.iter() {
                                                 div { key: "{lbl}", class: "ad-row",
@@ -432,22 +432,14 @@ fn Agents() -> Element {
                                                 }
                                             }
                                         }
-                                        if let Some(login) = spec.login_command {
-                                            div { class: "ad-row",
-                                                span { class: "k", "Sign in" }
-                                                div { class: "v row",
-                                                    span { class: "cmd mono", "{login}" }
-                                                    button { class: "ghost-btn", onclick: { let l = login.to_string(); move |_| { let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or(".".into()); let _ = crate::state::open_terminal(&home, &l); } }, "Open login" }
-                                                }
-                                            }
-                                        }
-                                        div { class: "ad-row",
-                                            span { class: "k", "Accounts" }
-                                            div { class: "v row",
-                                                span { class: "plain faint", "Run it under more than one login" }
+                                        // The same logins as in Settings → Accounts.
+                                        if installed {
+                                            div { class: "ad-acc-head",
+                                                span { class: "plain faint", "The logins {spec.name} runs as, as in Accounts" }
                                                 div { class: "grow" }
                                                 button { class: "ghost-btn", onclick: { let k = spec.kind.clone(); move |_| app.ui.write().modal = Some(Modal::AddAccount(k.clone())) }, Icon { i: I::Plus, size: 12 } "Add account" }
                                             }
+                                            AgentAccounts { kind: spec.kind.clone() }
                                         }
                                     }
                                     div { class: "ad-foot",
@@ -536,13 +528,11 @@ fn AddCustomAgent() -> Element {
 #[component]
 fn Accounts() -> Element {
     let mut app = use_app();
-    let cfg = app.config.read().clone();
     rsx! {
         h1 { "Accounts" }
         div { class: "sub", "Connect several logins or API keys per agent and choose which one each agent runs as." }
         for spec in catalog().iter().filter(|s| s.can_run && !s.binaries.is_empty()) {
             {
-                let accounts: Vec<_> = cfg.accounts_for(&spec.kind).into_iter().cloned().collect();
                 let k = spec.kind.clone();
                 rsx! {
                     div { key: "{spec.kind.id()}", class: "set-group-title",
@@ -553,55 +543,68 @@ fn Accounts() -> Element {
                             Icon { i: I::Plus, size: 11 } "Add"
                         }
                     }
-                    div { class: "set-card",
-                        if accounts.is_empty() {
-                            div { class: "set-row",
-                                div { class: "lbl",
-                                    div { class: "t", "Current login" }
-                                    div { class: "d", "Runs with whatever {spec.name} is signed into on this machine." }
+                    AgentAccounts { key: "acc-{spec.kind.id()}", kind: spec.kind.clone() }
+                }
+            }
+        }
+    }
+}
+
+/// An agent's logins, the same wherever they show (Accounts, and the
+/// agent's own page): who each is signed in as, which is the default, and
+/// signing in, choosing and removing.
+#[component]
+pub fn AgentAccounts(kind: AgentKind) -> Element {
+    let mut app = use_app();
+    let spec = kind.spec();
+    let accounts: Vec<Account> = app.config.read().accounts_for(&kind).into_iter().cloned().collect();
+    // With no accounts, the agent runs on whatever it's signed into.
+    let implicit = accounts.is_empty().then(|| Account::new(kind.clone(), "Current login".to_string(), AccountAuth::SystemLogin));
+    let rows: Vec<(Account, bool)> = match implicit {
+        Some(a) => vec![(a, true)],
+        None => accounts.into_iter().map(|a| (a, false)).collect(),
+    };
+    rsx! {
+        div { class: "set-card",
+            for (a, only) in rows {
+                {
+                    let (ok, email) = crate::state::signed_in_as(&a);
+                    let can_sign_in = spec.login_command.is_some() && matches!(a.auth, AccountAuth::ConfigDir { .. } | AccountAuth::SystemLogin);
+                    rsx! {
+                        div { key: "{a.id}", class: "set-row",
+                            Icon { i: match a.auth { AccountAuth::ApiKey { .. } => I::Key, AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 15 }
+                            div { class: "lbl",
+                                div { class: "t", "{a.label}" }
+                                // Who it's signed in as, so two logins can't be mixed up.
+                                if !matches!(a.auth, AccountAuth::ApiKey { .. } | AccountAuth::Env { .. }) {
+                                    div { class: if ok { "acct-who ok" } else { "acct-who off" },
+                                        {match (ok, email) { (true, Some(e)) => format!("Signed in as {e}"), (true, None) => "Signed in".to_string(), (false, _) => "Not signed in".to_string() }}
+                                    }
                                 }
-                                span { class: "status-pill missing", "default" }
+                                div { class: "d",
+                                    if only { "Whatever {spec.name} is signed into on this machine" } else { "{a.auth.label()}" }
+                                    match &a.auth {
+                                        AccountAuth::ApiKey { env_var, secret_ref } => rsx! { " · {env_var} = " span { class: "code-inline", {secrets::get(secret_ref).map(|v| secrets::mask(&v)).unwrap_or("missing".into())} } },
+                                        AccountAuth::ConfigDir { path } => rsx! { " · " span { class: "code-inline", "{path}" } },
+                                        _ => rsx! {},
+                                    }
+                                }
                             }
-                        }
-                        for a in accounts {
-                            div { key: "{a.id}", class: "set-row",
-                                Icon { i: match a.auth { AccountAuth::ApiKey { .. } => I::Key, AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 15 }
-                                div { class: "lbl",
-                                    div { class: "t", "{a.label}" }
-                                    // Who it's signed in as, so two logins can't be mixed up.
-                                    {
-                                        let (ok, email) = crate::state::signed_in_as(&a);
-                                        rsx! {
-                                            if !matches!(a.auth, AccountAuth::ApiKey { .. } | AccountAuth::Env { .. }) {
-                                                div { class: if ok { "acct-who ok" } else { "acct-who off" },
-                                                    {match (ok, email) { (true, Some(e)) => format!("Signed in as {e}"), (true, None) => "Signed in".to_string(), (false, _) => "Not signed in".to_string() }}
-                                                }
-                                            }
-                                        }
-                                    }
-                                    div { class: "d",
-                                        "{a.auth.label()}"
-                                        match &a.auth {
-                                            AccountAuth::ApiKey { env_var, secret_ref } => rsx! { " · {env_var} = " span { class: "code-inline", {secrets::get(secret_ref).map(|v| secrets::mask(&v)).unwrap_or("missing".into())} } },
-                                            AccountAuth::ConfigDir { path } => rsx! { " · " span { class: "code-inline", "{path}" } },
-                                            _ => rsx! {},
-                                        }
-                                    }
+                            if only || a.is_default {
+                                span { class: "status-pill ok", "Default" }
+                            } else {
+                                button { class: "ghost-btn", style: "height: 24px;",
+                                    onclick: { let id = a.id.clone(); let k = a.agent.clone(); move |_| app.update_config(|c| for x in c.accounts.iter_mut().filter(|x| x.agent == k) { x.is_default = x.id == id; }) },
+                                    "Make default"
                                 }
-                                if a.is_default {
-                                    span { class: "status-pill ok", "Default" }
-                                } else {
-                                    button { class: "ghost-btn", style: "height: 24px;",
-                                        onclick: { let id = a.id.clone(); let k = a.agent.clone(); move |_| app.update_config(|c| for x in c.accounts.iter_mut().filter(|x| x.agent == k) { x.is_default = x.id == id; }) },
-                                        "Make default"
-                                    }
+                            }
+                            if can_sign_in {
+                                button { class: "ghost-btn", style: "height: 24px;", title: "Opens {spec.name}'s login for this account",
+                                    onclick: { let a2 = a.clone(); move |_| app.sign_in(&a2) },
+                                    {if ok { "Sign in again" } else { "Sign in" }}
                                 }
-                                if matches!(a.auth, AccountAuth::ConfigDir { .. }) && spec.login_command.is_some() {
-                                    button { class: "ghost-btn", style: "height: 24px;", title: "Opens the agent's login for this account's own folder",
-                                        onclick: { let a2 = a.clone(); move |_| app.sign_in(&a2) },
-                                        {if crate::state::signed_in_as(&a).0 { "Sign in again" } else { "Sign in" }}
-                                    }
-                                }
+                            }
+                            if !only {
                                 button { class: "icon-btn", title: "Remove account",
                                     onclick: {
                                         let a2 = a.clone();

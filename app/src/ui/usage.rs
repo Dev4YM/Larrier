@@ -1,7 +1,7 @@
 //! Plan & Usage: plan limits per account, then tokens, spend and activity
 //! across the agents you use — computed from your local sessions.
 
-mod stats;
+pub(crate) mod stats;
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

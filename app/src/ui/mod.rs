@@ -15,6 +15,7 @@ mod menubar;
 mod agent_models;
 mod models;
 mod overlays;
+mod profile;
 mod request;
 mod right;
 mod settings;

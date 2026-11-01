@@ -1806,3 +1806,9 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 
 /* Reset: an icon of its own beside Edit. */
 .mp-edit-btn.mp-reset { padding: 0; width: 20px; justify-content: center; }
+
+/* The sidebar's profile row opens the profile. */
+.side-me { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border-radius: 8px; padding: 2px 6px 2px 2px; margin-left: -2px; text-align: left; }
+.side-me:hover { background: var(--hover); }
+.side-me .nm { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar { overflow: hidden; }

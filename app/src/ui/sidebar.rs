@@ -14,7 +14,7 @@ use dioxus::html::input_data::MouseButton;
 use super::{AgentGlyph, Dropdown, MenuItem};
 use crate::icons::{Icon, I};
 use crate::keep::DRAFT_ID;
-use crate::state::{project_key, rel_time, use_app, use_ui, user_name, CtxMenu, SettingsTab, View, HOME_KEY};
+use crate::state::{project_key, rel_time, use_app, use_ui, CtxMenu, SettingsTab, View, HOME_KEY};
 
 const PAGE: usize = 5;
 const OPEN_IF_ACTIVE_WITHIN_DAYS: i64 = 7;
@@ -217,8 +217,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
     // Room for the box beside the icon (up to Back), or a row of its own.
     let roomy = app.config.read().settings.sidebar_width >= 262;
     let focus_find = || document::eval("setTimeout(() => (document.querySelector('.side-find.open input') || document.querySelector('.side-find-row.open input'))?.focus(), 40)");
-    let name = user_name();
-    let initial = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    let name = crate::state::display_name(&app.config.read());
     let ctx = SideCtx { selected: selected.clone(), running: running.clone(), searching: !query.is_empty() };
 
     rsx! {
@@ -339,8 +338,10 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                 }
             }
             div { class: "side-profile",
-                div { class: "avatar", "{initial}" }
-                span { class: "nm", "{name}" }
+                button { class: "side-me", title: "Your profile", onclick: move |_| app.open_settings(SettingsTab::Profile),
+                    super::profile::Avatar { size: 30 }
+                    span { class: "nm", "{name}" }
+                }
                 // Only when there is an update: download it (the label slides
                 // out on hover), its progress, then Restart.
                 {
@@ -504,7 +505,7 @@ fn Rows(items: Vec<SessionSummary>, ctx: SideCtx) -> Element {
 /// with the message as it was left.
 #[component]
 fn DraftRow(s: SessionSummary, logo: bool) -> Element {
-    let mut app = use_app();
+    let app = use_app();
     let here = *app.view.read() == View::Home;
     let tip = format!("Draft · {}\n{}", s.agent.display_name(), s.title);
     rsx! {

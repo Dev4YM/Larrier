@@ -13,6 +13,7 @@ use crate::state::{store, use_app, Modal, SettingsTab, View};
 
 fn tab_icon(t: SettingsTab) -> I {
     match t {
+        SettingsTab::Profile => I::CircleUser,
         SettingsTab::General => I::Settings,
         SettingsTab::Appearance => I::Sun,
         SettingsTab::Usage => I::Cpu,
@@ -37,8 +38,7 @@ pub fn SettingsNav() -> Element {
     };
     let mut q = use_signal(String::new);
     let ql = q.read().to_lowercase();
-    let name = crate::state::user_name();
-    let initial = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    let name = crate::state::display_name(&app.config.read());
     rsx! {
         aside { class: "sidebar",
             div { class: "side-top",
@@ -73,8 +73,10 @@ pub fn SettingsNav() -> Element {
                 }
             }
             div { class: "side-profile",
-                div { class: "avatar", "{initial}" }
-                span { class: "nm", "{name}" }
+                button { class: "side-me", title: "Your profile", onclick: move |_| app.set_view(View::Settings(SettingsTab::Profile)),
+                    super::profile::Avatar { size: 30 }
+                    span { class: "nm", "{name}" }
+                }
             }
         }
     }
@@ -93,6 +95,7 @@ pub fn SettingsView(tab: SettingsTab) -> Element {
                         SettingsTab::General => rsx! { General {} },
                         SettingsTab::Appearance => rsx! { Appearance {} },
                         SettingsTab::Usage => rsx! { super::usage::UsageView {} },
+                        SettingsTab::Profile => rsx! { super::profile::ProfileView {} },
                         SettingsTab::SourceControl => rsx! { SourceControl {} },
                         SettingsTab::Agents => rsx! { Agents {} },
                         SettingsTab::Accounts => rsx! { Accounts {} },

@@ -65,6 +65,7 @@ pub struct ChatTab {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SettingsTab {
+    Profile,
     General,
     Appearance,
     Usage,
@@ -79,7 +80,8 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 11] = [
+    pub const ALL: [SettingsTab; 12] = [
+        SettingsTab::Profile,
         SettingsTab::General,
         SettingsTab::Appearance,
         SettingsTab::Usage,
@@ -94,6 +96,7 @@ impl SettingsTab {
     ];
     pub fn label(self) -> &'static str {
         match self {
+            SettingsTab::Profile => "Profile",
             SettingsTab::General => "General",
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Usage => "Plan & Usage",
@@ -2329,7 +2332,12 @@ pub fn image_src(part: &Part) -> Option<String> {
     }
 }
 
-/// Display name for the profile row: git's user.name, else the OS user.
+/// The name to show for the user: the one in their profile, else git's.
+pub fn display_name(cfg: &Config) -> String {
+    cfg.profile.name.clone().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(user_name)
+}
+
+/// Git's user.name, else the OS user.
 pub fn user_name() -> String {
     static NAME: OnceLock<Option<String>> = OnceLock::new();
     let git = NAME.get_or_init(|| {

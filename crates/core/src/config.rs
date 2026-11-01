@@ -24,6 +24,28 @@ pub struct Config {
     pub custom_agents: Vec<CustomAgent>,
     #[serde(default)]
     pub automations: Vec<crate::automation::Automation>,
+    #[serde(default)]
+    pub profile: Profile,
+}
+
+/// The person using Larrier, as they describe themselves (Settings ->
+/// Profile). Empty fields fall back (the name to git's `user.name`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Profile {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// What they do ("Founder", "Backend engineer").
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub website: Option<String>,
+    #[serde(default)]
+    pub about: String,
+    /// Their photo, kept in Larrier's data folder.
+    #[serde(default)]
+    pub photo: Option<String>,
 }
 
 fn config_version() -> u32 {
@@ -51,6 +73,7 @@ impl Default for Config {
             workspaces: Vec::new(),
             custom_agents: Vec::new(),
             automations: Vec::new(),
+            profile: Profile::default(),
         }
     }
 }

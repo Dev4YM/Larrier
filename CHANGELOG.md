@@ -5,6 +5,13 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.31 — 2026-11-01
+
+### New
+
+- A queued follow-up can be sent while the agent is stopped
+- Larrier opens as it was closed — chats, tabs, panels, browser, terminals
+- Pages keep their searches, filters and half-typed forms
 ## 0.1.30 — 2026-11-01
 
 ### New

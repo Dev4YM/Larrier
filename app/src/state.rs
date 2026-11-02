@@ -736,8 +736,7 @@ impl App {
                 crate::keep::set_panel(o, crate::keep::Panel::of(&self.ui.peek()));
             }
             if let Some(n) = &new {
-                let open = self.config.peek().settings.right_panel_open;
-                let panel = crate::keep::panel(n).unwrap_or_else(|| crate::keep::Panel::fresh(open));
+                let panel = crate::keep::panel(n).unwrap_or_else(|| crate::keep::Panel::fresh(&self.ui.peek()));
                 panel.apply(&mut self.ui.write());
                 crate::browser_host::set_owner(n);
             }

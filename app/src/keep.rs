@@ -81,10 +81,10 @@ impl Panel {
         Panel { open: ui.right_open, tab: ui.right_tab, tabs: ui.right_tabs.clone() }
     }
 
-    /// A chat that has none of its own yet: the Changes tab, open or closed
-    /// as last chosen.
-    pub fn fresh(open: bool) -> Panel {
-        Panel { open, tab: RightTab::Changes, tabs: vec![PanelTab { tab: RightTab::Changes, preview: false }] }
+    /// A chat that has none of its own yet takes the panel's tabs as they
+    /// are, closed: a new chat never opens the panel or changes its tab.
+    pub fn fresh(ui: &Ui) -> Panel {
+        Panel { open: false, tab: ui.right_tab, tabs: ui.right_tabs.clone() }
     }
 
     pub fn apply(self, ui: &mut Ui) {

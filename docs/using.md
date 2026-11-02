@@ -71,7 +71,8 @@ onto the chat area:
 ## The side panel
 
 "On ‹project›" lists **Changes · Browser · Terminal · Files**. Each chat
-keeps its own panel.
+keeps its own panel. A chat that has none yet starts with it closed, on
+the tabs you had; nothing opens it but you, or an agent using the browser.
 
 - **Changes:** Local Changes (git) and Agent Edits, file by file, with
   discard, commit, commit & push and Create PR (through `gh`). A

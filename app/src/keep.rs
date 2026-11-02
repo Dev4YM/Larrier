@@ -87,6 +87,13 @@ impl Panel {
         Panel { open: false, tab: ui.right_tab, tabs: ui.right_tabs.clone() }
     }
 
+    /// Open the panel on a tool, as a regular tab.
+    pub fn show(&mut self, tab: RightTab) {
+        self.open = true;
+        crate::state::show_tab(&mut self.tabs, tab, true);
+        self.tab = tab;
+    }
+
     pub fn apply(self, ui: &mut Ui) {
         ui.right_open = self.open;
         ui.right_tab = self.tab;
@@ -433,5 +440,19 @@ mod tests {
         assert!(old.layout.is_none() && old.chats.is_empty());
         let none: Layout = serde_json::from_str("{}").unwrap();
         assert!(none.sidebar_open);
+    }
+
+    #[test]
+    fn an_agents_browser_opens_as_a_regular_tab() {
+        let tab = |t, preview| PanelTab { tab: t, preview };
+        // The preview tab stays, and the browser is added beside it.
+        let mut p = Panel { open: false, tab: RightTab::Files, tabs: vec![tab(RightTab::Changes, false), tab(RightTab::Files, true)] };
+        p.show(RightTab::Browser);
+        assert_eq!((p.open, p.tab), (true, RightTab::Browser));
+        assert_eq!(p.tabs, [tab(RightTab::Changes, false), tab(RightTab::Files, true), tab(RightTab::Browser, false)]);
+        // A browser already shown as a preview is kept.
+        let mut p = Panel { open: true, tab: RightTab::Changes, tabs: vec![tab(RightTab::Changes, false), tab(RightTab::Browser, true)] };
+        p.show(RightTab::Browser);
+        assert_eq!(p.tabs, [tab(RightTab::Changes, false), tab(RightTab::Browser, false)]);
     }
 }

@@ -211,16 +211,8 @@ impl Ui {
     /// tab is replaced (or a tab added). `keep` opens it as a regular tab.
     pub fn open_panel(&mut self, tab: RightTab, keep: bool) {
         self.right_open = true;
-        if tab == RightTab::Home {
-            self.right_tab = RightTab::Home;
-            return;
-        }
-        if let Some(t) = self.right_tabs.iter_mut().find(|t| t.tab == tab) {
-            t.preview &= !keep;
-        } else if let Some(t) = self.right_tabs.iter_mut().find(|t| t.preview).filter(|_| !keep) {
-            t.tab = tab;
-        } else {
-            self.right_tabs.push(PanelTab { tab, preview: !keep });
+        if tab != RightTab::Home {
+            show_tab(&mut self.right_tabs, tab, keep);
         }
         self.right_tab = tab;
     }
@@ -238,6 +230,18 @@ impl Ui {
         if self.right_tab == tab {
             self.right_tab = self.right_tabs.get(i).or_else(|| i.checked_sub(1).and_then(|j| self.right_tabs.get(j))).map(|t| t.tab).unwrap_or(RightTab::Home);
         }
+    }
+}
+
+/// Put a side-panel tool among the tabs: a tab it has stays (made regular
+/// with `keep`), otherwise it takes the preview tab's place or is added.
+pub fn show_tab(tabs: &mut Vec<PanelTab>, tab: RightTab, keep: bool) {
+    if let Some(t) = tabs.iter_mut().find(|t| t.tab == tab) {
+        t.preview &= !keep;
+    } else if let Some(t) = tabs.iter_mut().find(|t| t.preview).filter(|_| !keep) {
+        t.tab = tab;
+    } else {
+        tabs.push(PanelTab { tab, preview: !keep });
     }
 }
 
@@ -1295,10 +1299,16 @@ impl App {
                             _ => {}
                         }
                         match e {
+                            // The agent's browser opens as a regular tab of its
+                            // chat's panel: now, or when the chat is next shown.
                             AgentEvent::ToolStart { tool } if !browsing && is_browser_tool(tool) => {
                                 browsing = true;
                                 if app.current_id().as_deref() == Some(id.as_str()) {
-                                    app.ui.write().open_panel(RightTab::Browser, false);
+                                    app.ui.write().open_panel(RightTab::Browser, true);
+                                } else {
+                                    let mut p = crate::keep::panel(&id).unwrap_or_else(|| crate::keep::Panel::fresh(&app.ui.peek()));
+                                    p.show(RightTab::Browser);
+                                    crate::keep::set_panel(&id, p);
                                 }
                             }
                             AgentEvent::Permission { request } => {

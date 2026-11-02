@@ -78,7 +78,8 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   discard, commit, commit & push and Create PR (through `gh`). A
   worktree's branch can be merged back from here.
 - **Browser:** a real browser in the panel. Agents can drive it through
-  Larrier's browser tools while you watch; annotate mode lets you point at
+  Larrier's browser tools while you watch (its tab opens as a regular tab,
+  not a preview); annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
 - **Terminal:** real terminals (your shell: PowerShell on Windows, `$SHELL`
   on macOS and Linux), plus read-only views of

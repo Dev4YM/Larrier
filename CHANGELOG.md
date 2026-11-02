@@ -5,6 +5,17 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.38 — 2026-11-02
+
+### New
+
+- One text size for all of Larrier's text
+
+### Fixed
+
+- Open menus, dialogs and tooltips without resizing them
+- Leave the side panel as it is when opening a new chat
+- Open an agent's browser as a regular tab
 ## 0.1.37 — 2026-11-01
 
 ### Fixed

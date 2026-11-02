@@ -1377,11 +1377,65 @@ pub fn second_press(last: &mut Option<std::time::Instant>) -> bool {
 
 /// CSS variables for the text sizes (Settings → Appearance → Text).
 pub fn text_size_vars(s: &larrier_core::Settings) -> String {
-    let t = &s.text_sizes;
-    format!(
-        "--fs: {}px; --fs-prompt: {}px; --fs-composer: {}px; --fs-steps: {}px; --fs-code: {}px; --fs-side: {}px; --fs-term: {}px;",
-        s.font_size, t.prompts, t.composer, t.steps, t.code, t.sidebar, t.terminal
-    )
+    TypeScale::of(s).vars()
+}
+
+/// Every kind of text's size and line height, set from the one text size
+/// and the density. Line heights are whole pixels, so rows, carets and the
+/// text drawn behind text boxes line up exactly at every size.
+#[derive(Debug, PartialEq)]
+pub struct TypeScale {
+    /// (CSS variable, px)
+    pub vars: Vec<(&'static str, f64)>,
+}
+
+impl TypeScale {
+    pub fn of(s: &larrier_core::Settings) -> TypeScale {
+        let b = s.text_size.px() as f64;
+        let compact = s.density == larrier_core::Density::Compact;
+        let lh = |px: f64, ratio: f64, min: f64| (px * ratio).round().max(min);
+        let (steps, code, note) = (b - 1.0, b - 2.0, b - 2.0);
+        TypeScale {
+            vars: vec![
+                // The agent's replies; headings and inline code scale with them.
+                ("fs", b),
+                ("lh", lh(b, if compact { 1.5 } else { 1.7 }, 0.0)),
+                // Your messages, and what you type.
+                ("fs-prompt", b),
+                ("lh-prompt", lh(b, if compact { 1.43 } else { 1.57 }, 0.0)),
+                ("fs-composer", b),
+                ("lh-composer", lh(b, 1.43, 0.0)),
+                // Tool steps, and the heads of tool cards a size below them.
+                ("fs-steps", steps),
+                ("lh-steps", lh(steps, 1.25, 16.0)),
+                ("fs-tool", steps - 1.0),
+                ("lh-tool", lh(steps - 1.0, 1.33, 16.0)),
+                // Code blocks, tool output and diffs.
+                ("fs-code", code),
+                ("lh-code", lh(code, 1.6, 0.0)),
+                ("fs-out", code - 1.0),
+                ("lh-out", lh(code - 1.0, 1.55, 0.0)),
+                ("fs-diff", code - 0.5),
+                ("lh-diff", lh(code - 0.5, 1.65, 0.0)),
+                // Thinking and other quiet text in the chat.
+                ("fs-note", note),
+                ("lh-note", lh(note, 1.55, 0.0)),
+                // Sidebar rows (and their times), and the terminal.
+                ("fs-side", b - 1.0),
+                ("fs-side-2", b - 2.0),
+                ("fs-term", b - 1.0),
+            ],
+        }
+    }
+
+    #[cfg(test)]
+    pub fn get(&self, var: &str) -> f64 {
+        self.vars.iter().find(|(k, _)| *k == var).map_or(0.0, |(_, v)| *v)
+    }
+
+    fn vars(&self) -> String {
+        self.vars.iter().map(|(k, v)| format!("--{k}: {v}px;")).collect::<Vec<_>>().join(" ")
+    }
 }
 
 /// Below this window width the sidebar floats over the content.
@@ -1911,6 +1965,44 @@ pub fn MenuItem(
             }
             if checked {
                 span { class: "check", Icon { i: I::Check, size: 13 } }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TypeScale;
+    use larrier_core::{Density, Settings, TextSize};
+
+    fn scale(t: TextSize, d: Density) -> TypeScale {
+        TypeScale::of(&Settings { text_size: t, density: d, ..Settings::default() })
+    }
+
+    #[test]
+    fn default_text_keeps_its_sizes() {
+        let s = scale(TextSize::Default, Density::Comfortable);
+        let got: Vec<f64> = ["fs", "lh", "fs-prompt", "lh-prompt", "fs-composer", "lh-composer", "fs-steps", "lh-steps", "fs-tool", "lh-tool", "fs-code", "fs-side", "fs-term"].iter().map(|v| s.get(v)).collect();
+        assert_eq!(got, [14.0, 24.0, 14.0, 22.0, 14.0, 20.0, 13.0, 16.0, 12.0, 16.0, 12.0, 13.0, 13.0]);
+    }
+
+    #[test]
+    fn every_step_grows_together_on_whole_pixels() {
+        for d in [Density::Comfortable, Density::Compact] {
+            let steps: Vec<TypeScale> = TextSize::ALL.iter().map(|t| scale(*t, d)).collect();
+            for s in &steps {
+                for (k, v) in &s.vars {
+                    if let Some(kind) = k.strip_prefix("lh") {
+                        assert_eq!(v.fract(), 0.0, "{k} = {v}");
+                        let fs = s.get(&format!("fs{kind}"));
+                        assert!(*v > fs, "{k} {v} isn't taller than its text {fs}");
+                    }
+                }
+            }
+            for w in steps.windows(2) {
+                for (k, v) in &w[1].vars {
+                    assert!(*v >= w[0].get(k), "{k} shrinks from {} to {v}", w[0].get(k));
+                }
             }
         }
     }

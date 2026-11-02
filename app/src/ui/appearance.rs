@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use dioxus::prelude::*;
-use larrier_core::{config::SidebarGroup, ButtonCorners, Density, Settings, TextSizes, Theme};
+use larrier_core::{config::SidebarGroup, ButtonCorners, Density, Settings, TextSize, Theme};
 
 use super::{Dropdown, Toggle};
 use crate::icons::{Icon, Lucide, I};
@@ -297,24 +297,6 @@ fn valid_css_color(v: &str) -> bool {
 /// CSS variables for a nested themed scope (preview / theme cards), the
 /// same way the window root applies the user's settings.
 
-/// One text size: what it changes, a sample at that size and − / +.
-#[component]
-fn SizeRow(title: &'static str, desc: &'static str, value: u32, min: u32, max: u32, sample: &'static str, onchange: EventHandler<u32>) -> Element {
-    let (font, text) = match sample {
-        "code" | "term" => ("var(--mono)", "let x = 42;"),
-        _ => ("var(--font)", "Aa"),
-    };
-    rsx! {
-        div { class: "set-row",
-            div { class: "lbl", div { class: "t", "{title}" } div { class: "d", "{desc}" } }
-            div { class: "ap-size",
-                span { class: "ap-size-sample", style: "font-family: {font}; font-size: {value}px;", "{text}" }
-                super::Stepper { value, min, max, onchange: move |v| onchange.call(v) }
-            }
-        }
-    }
-}
-
 /// Key that changes with an inline style, so Dioxus re-creates the element
 /// instead of patching it (patching keeps properties the new style dropped).
 fn style_key(style: &str) -> u64 {
@@ -432,7 +414,7 @@ pub fn AppearancePage() -> Element {
             "code_theme_dark": s.code_theme_dark,
             "ui_font": s.ui_font,
             "mono_font": s.mono_font,
-            "font_size": s.font_size,
+            "text_size": s.text_size,
             "density": s.density,
         });
         app.copy_text(&serde_json::to_string_pretty(&v).unwrap_or_default());
@@ -458,7 +440,7 @@ pub fn AppearancePage() -> Element {
             s.code_theme_dark = None;
             s.ui_font = None;
             s.mono_font = None;
-            s.font_size = d.font_size;
+            s.text_size = d.text_size;
             s.density = d.density;
             s.sidebar_right = d.sidebar_right;
             s.transcript_width = d.transcript_width;
@@ -627,49 +609,34 @@ pub fn AppearancePage() -> Element {
                     div { class: "set-group-title", Lucide { name: "type", size: 13 } "Text" }
                     div { class: "set-card",
                         div { class: "set-row",
+                            div { class: "lbl", div { class: "t", "Text Size" } div { class: "d", "Chat, code, sidebar and terminal text, kept in proportion." } }
+                            div { class: "seg",
+                                for t in TextSize::ALL {
+                                    button { key: "{t.label()}", class: seg(s.text_size == t), onclick: move |_| app.update_config(|c| c.settings.text_size = t), "{t.label()}" }
+                                }
+                            }
+                        }
+                        div { class: "set-row",
+                            div { class: "lbl", div { class: "t", "Zoom" } div { class: "d", "Everything in the window, icons and spacing too — Ctrl + / Ctrl − / Ctrl 0." } }
+                            div { class: "seg",
+                                for z in [0.8f64, 0.9, 1.0, 1.1, 1.25, 1.5] {
+                                    button { key: "{z}", class: seg((s.zoom - z).abs() < 0.01), onclick: move |_| app.update_config(|c| c.settings.zoom = z), "{(z * 100.0).round()}%" }
+                                }
+                            }
+                        }
+                        div { class: "set-row",
                             div { class: "lbl", div { class: "t", "Interface Font" } div { class: "d", "Menus, sidebar and transcripts." } }
                             FontPicker { mono: false, installed: fonts_ok.read().clone() }
                         }
-                        div { class: "ap-sample", style: "font-family: var(--font); font-size: {s.font_size}px;",
+                        div { class: "ap-sample", style: "font-family: var(--font); font-size: var(--fs);",
                             "The quick brown fox jumps over the lazy dog — 0123456789"
                         }
                         div { class: "set-row",
                             div { class: "lbl", div { class: "t", "Code Font" } div { class: "d", "Code blocks, diffs and terminals." } }
                             FontPicker { mono: true, installed: fonts_ok.read().clone() }
                         }
-                        div { class: "ap-sample mono", style: "font-family: var(--mono);",
+                        div { class: "ap-sample mono", style: "font-family: var(--mono); font-size: var(--fs-code);",
                             "fn main() {{ let ok = 0O1lI != \"{{}}[]\"; }} => -> != <="
-                        }
-                    }
-
-                    // ---------------------------------------------------- text sizes
-                    div { class: "set-group-title", Lucide { name: "a-large-small", size: 13 } "Text Sizes"
-                        if s.font_size != 14 || s.text_sizes != TextSizes::default() {
-                            button { class: "set-link", onclick: move |_| app.update_config(|c| { c.settings.font_size = 14; c.settings.text_sizes = TextSizes::default(); }), "Reset" }
-                        }
-                    }
-                    div { class: "set-card",
-                        SizeRow { title: "Replies", desc: "The agent's answers in the chat.", value: s.font_size, min: 11, max: 22,
-                            sample: "fs", onchange: move |v| app.update_config(|c| c.settings.font_size = v) }
-                        SizeRow { title: "Prompts", desc: "Your messages in the chat.", value: s.text_sizes.prompts, min: 11, max: 22,
-                            sample: "prompt", onchange: move |v| app.update_config(|c| c.settings.text_sizes.prompts = v) }
-                        SizeRow { title: "Composer", desc: "What you type before sending.", value: s.text_sizes.composer, min: 11, max: 22,
-                            sample: "composer", onchange: move |v| app.update_config(|c| c.settings.text_sizes.composer = v) }
-                        SizeRow { title: "Steps & Tools", desc: "Tool steps, commands and cards.", value: s.text_sizes.steps, min: 10, max: 20,
-                            sample: "steps", onchange: move |v| app.update_config(|c| c.settings.text_sizes.steps = v) }
-                        SizeRow { title: "Code", desc: "Code blocks, diffs and tool output.", value: s.text_sizes.code, min: 10, max: 20,
-                            sample: "code", onchange: move |v| app.update_config(|c| c.settings.text_sizes.code = v) }
-                        SizeRow { title: "Sidebar", desc: "Chat and project names.", value: s.text_sizes.sidebar, min: 11, max: 18,
-                            sample: "side", onchange: move |v| app.update_config(|c| c.settings.text_sizes.sidebar = v) }
-                        SizeRow { title: "Terminal", desc: "The built-in terminal (new terminals).", value: s.text_sizes.terminal, min: 10, max: 22,
-                            sample: "term", onchange: move |v| app.update_config(|c| c.settings.text_sizes.terminal = v) }
-                        div { class: "set-row",
-                            div { class: "lbl", div { class: "t", "Zoom" } div { class: "d", "Scale the whole window — Ctrl + / Ctrl − / Ctrl 0." } }
-                            div { class: "seg",
-                                for z in [0.8f64, 0.9, 1.0, 1.1, 1.25, 1.5] {
-                                    button { key: "{z}", class: seg((s.zoom - z).abs() < 0.01), onclick: move |_| app.update_config(|c| c.settings.zoom = z), "{(z * 100.0).round()}%" }
-                                }
-                            }
                         }
                     }
 
@@ -782,7 +749,9 @@ fn import_theme(text: &str) -> anyhow::Result<impl FnOnce(&mut larrier_core::Con
     let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string());
     let accent = s("accent").filter(|a| a.is_empty() || valid_css_color(a));
     let (light, dark, ui, mono) = (s("code_theme_light"), s("code_theme_dark"), s("ui_font"), s("mono_font"));
-    let size = v.get("font_size").and_then(|x| x.as_u64()).map(|n| n.clamp(10, 20) as u32);
+    // Themes from before text came in steps carry a reply size in px.
+    let size: Option<TextSize> = v.get("text_size").and_then(|t| serde_json::from_value(t.clone()).ok())
+        .or_else(|| v.get("font_size").and_then(|x| x.as_u64()).map(|n| TextSize::nearest(n as u32)));
     let density: Option<Density> = v.get("density").and_then(|d| serde_json::from_value(d.clone()).ok());
     Ok(move |c: &mut larrier_core::Config| {
         let st = &mut c.settings;
@@ -794,8 +763,8 @@ fn import_theme(text: &str) -> anyhow::Result<impl FnOnce(&mut larrier_core::Con
         st.code_theme_dark = dark;
         st.ui_font = ui;
         st.mono_font = mono;
-        if let Some(n) = size {
-            st.font_size = n;
+        if let Some(t) = size {
+            st.text_size = t;
         }
         if let Some(d) = density {
             st.density = d;

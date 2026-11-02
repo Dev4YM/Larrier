@@ -715,8 +715,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .app { --accent-c: var(--blue); --tw: 860px; }
 .app.compact { font-size: 12px; }
 .app.compact .nav-row, .app.compact .repo-row, .app.compact .chat-row { height: 28px; }
-.app.compact .a-text { font-size: 13px; line-height: 21px; }
-.app.compact .user-card { font-size: 13px; line-height: 20px; padding: 8px 12px; }
+.app.compact .user-card { padding: 8px 12px; }
 .app.compact .composer-row { padding: 5px 7px; }
 .transcript-inner, .chat-pane.split .transcript-inner { max-width: var(--tw); }
 .chat-col .composer-wrap, .chat-pane.full .composer-wrap { max-width: var(--tw); }
@@ -1224,20 +1223,27 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .step.skipped .verb, .step.skipped .target { color: var(--fg-3); text-decoration: line-through; text-decoration-color: var(--border-2); }
 .step .skip-tag, .tool-card-head .skip-tag { flex-shrink: 0; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 8px; background: var(--chip); color: var(--fg-2); }
 
-/* Text sizes (Settings → Appearance → Text). Headings and inline code
-   scale with the reply text; secondary text sits a step below its kind. */
-.a-text { font-size: var(--fs, 14px); line-height: 1.7; }
+/* Text (Settings → Appearance → Text Size). One size sets every kind of
+   text and its line height (ui::TypeScale, whole pixels), so rows, icons,
+   carets and the text drawn behind text boxes stay lined up at any size.
+   Headings and inline code follow the reply text in em. */
+.app .a-text { font-size: var(--fs, 14px); line-height: var(--lh, 24px); }
 .md h1 { font-size: 1.43em; } .md h2 { font-size: 1.29em; } .md h3 { font-size: 1.14em; } .md h4 { font-size: 1em; }
 .md table { font-size: .86em; }
-.md pre code { font-size: var(--fs-code, 12px); }
-.user-card { font-size: var(--fs-prompt, 14px); line-height: 1.57; }
-.composer textarea, .composer-row textarea { font-size: var(--fs-composer, 14px); line-height: 1.43; }
-.step { font-size: var(--fs-steps, 13px); }
-.tool-card-head { font-size: calc(var(--fs-steps, 13px) - 1px); }
-.tool-card pre { font-size: calc(var(--fs-code, 12px) - 1px); }
-.diff-body { font-size: calc(var(--fs-code, 12px) - .5px); }
-.chat-row, .repo-row { font-size: var(--fs-side, 13px); }
-.chat-row .tm { font-size: calc(var(--fs-side, 13px) - 1px); }
+.md pre code { font-size: var(--fs-code, 12px); line-height: var(--lh-code, 19px); }
+.app .user-card { font-size: var(--fs-prompt, 14px); line-height: var(--lh-prompt, 22px); }
+.composer textarea, .composer-row textarea { font-size: var(--fs-composer, 14px); line-height: var(--lh-composer, 20px); }
+.step { font-size: var(--fs-steps, 13px); line-height: var(--lh-steps, 16px); }
+.step .dur { font-size: calc(var(--fs-steps, 13px) - 2px); }
+.tool-card-head { font-size: var(--fs-tool, 12px); line-height: var(--lh-tool, 16px); }
+.tool-card pre { font-size: var(--fs-out, 11px); line-height: var(--lh-out, 17px); }
+.tool-card .cmd { font-size: var(--fs-out, 11px); line-height: var(--lh-out, 17px); }
+.tool-card .preview { font-size: var(--fs-out, 11px); line-height: var(--lh-out, 17px); max-height: calc(var(--lh-out, 17px) * 5 + 7px); }
+.diff-body { font-size: var(--fs-diff, 11.5px); line-height: var(--lh-diff, 19px); }
+.reasoning-text { font-size: var(--fs-note, 12px); line-height: var(--lh-note, 19px); }
+.thinking-row { font-size: var(--fs-note, 12px); }
+.app .chat-row, .app .repo-row { font-size: var(--fs-side, 13px); }
+.chat-row .tm { font-size: var(--fs-side-2, 12px); }
 
 /* − value + stepper. */
 .stepper { display: inline-flex; align-items: center; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); overflow: hidden; flex-shrink: 0; }
@@ -1251,8 +1257,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 
 /* Prompt cards: images as small thumbnails above the text; at most six
    lines tall (double-click shows it all), the rest fading out. */
-.user-card { max-height: calc(var(--fs-prompt, 14px) * 1.57 * 6 + 22px); }
-.user-card.has-images { max-height: calc(var(--fs-prompt, 14px) * 1.57 * 6 + 88px); }
+.user-card { max-height: calc(var(--lh-prompt, 22px) * 6 + 22px); }
+.user-card.has-images { max-height: calc(var(--lh-prompt, 22px) * 6 + 88px); }
 .user-card.expanded { max-height: none; }
 .user-card.short::after { display: none; }
 .user-card:not(.expanded)::after { height: 44px; background: linear-gradient(to bottom, transparent, var(--card-2) 88%); }
@@ -1272,9 +1278,9 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .ask-q { padding: 8px 14px 6px; display: flex; flex-direction: column; gap: 6px; }
 .ask-q + .ask-q { border-top: 1px solid var(--border); }
 .ask-hdr { align-self: flex-start; font-size: 10.5px; line-height: 18px; padding: 0 7px; border-radius: 9px; background: var(--chip); color: var(--fg-2); text-transform: uppercase; letter-spacing: .04em; }
-.ask-text { font-size: var(--fs, 14px); font-weight: 500; color: var(--fg); line-height: 1.45; }
+.ask-text { font-size: var(--fs, 14px); font-weight: 500; color: var(--fg); line-height: calc(var(--lh, 24px) - 4px); }
 .ask-opts { display: flex; flex-direction: column; gap: 2px; }
-.ask-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 7px 8px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--fg); font-size: 13px; transition: background-color .12s ease, border-color .12s ease, opacity .12s ease; }
+.ask-opt { display: flex; align-items: flex-start; gap: 10px; width: 100%; text-align: left; padding: 7px 8px; border-radius: 8px; border: 1px solid transparent; background: none; color: var(--fg); font-size: var(--fs-steps, 13px); transition: background-color .12s ease, border-color .12s ease, opacity .12s ease; }
 .ask-card.open .ask-opt:hover { background: var(--hover); }
 .ask-opt:disabled { cursor: default; }
 .ask-opt.on { background: color-mix(in srgb, var(--accent-c, var(--blue)) 8%, transparent); border-color: color-mix(in srgb, var(--accent-c, var(--blue)) 35%, transparent); }
@@ -1283,8 +1289,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .ask-opt.multi .ask-box { border-radius: 4px; }
 .ask-opt.on .ask-box { background: var(--accent-c, var(--blue)); border-color: var(--accent-c, var(--blue)); }
 .ask-lbl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ask-lbl .l { line-height: 18px; word-break: break-word; }
-.ask-lbl .d { font-size: 12px; line-height: 17px; color: var(--fg-3); word-break: break-word; }
+.ask-lbl .l { line-height: calc(var(--lh-steps, 16px) + 2px); word-break: break-word; }
+.ask-lbl .d { font-size: var(--fs-note, 12px); line-height: calc(var(--lh-note, 19px) - 2px); color: var(--fg-3); word-break: break-word; }
 .ask-other { margin: 2px 0 0 0; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-2); color: var(--fg); font: inherit; font-size: 13px; outline: none; }
 .ask-other:focus { border-color: var(--accent-c, var(--blue)); }
 .ask-actions { display: flex; align-items: center; gap: 8px; padding: 6px 14px 4px; }
@@ -1544,7 +1550,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* A sent prompt edited in place: the same card, now editable. */
 .user-card.editing { max-height: none; cursor: text; border-color: color-mix(in srgb, var(--accent-c, var(--blue)) 45%, var(--border)); background: var(--card-2); }
 .user-card.editing::after { display: none; }
-.user-card.editing .edit-input { display: block; padding: 0 !important; min-height: 22px; max-height: min(40vh, 320px); font: inherit; color: var(--fg); }
+.user-card.editing .edit-input { display: block; padding: 0 !important; min-height: var(--lh-prompt, 22px); max-height: min(40vh, 320px); font: inherit; color: var(--fg); }
 .user-card.editing .msg-images { margin: 0 0 8px; }
 .edit-thumb { position: relative; display: inline-flex; }
 .edit-thumb .x, .user-card.editing .attach-chip .x { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 9px; background: var(--fg); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .12s; }

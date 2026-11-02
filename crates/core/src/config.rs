@@ -53,7 +53,7 @@ fn config_version() -> u32 {
 }
 
 /// The config format this build writes (see `Config::migrate`).
-pub const CONFIG_VERSION: u32 = 2;
+pub const CONFIG_VERSION: u32 = 3;
 
 /// Agents whose own headless runners refuse whatever needs asking, while
 /// over the Agent Client Protocol the asks reach the user: they connect
@@ -85,6 +85,12 @@ impl Config {
             // 2: OpenCode and Hermes connect over ACP, where they can ask.
             for a in self.agents.iter_mut().filter(|a| acp_by_default(&a.kind)) {
                 a.prefer_acp = true;
+            }
+        }
+        if self.version < 3 {
+            // 3: text comes in steps instead of a size in px for each kind.
+            if let Some(px) = self.settings.legacy_font_size.take() {
+                self.settings.text_size = TextSize::nearest(px);
             }
         }
         self.version = self.version.max(CONFIG_VERSION);
@@ -181,12 +187,13 @@ pub struct Settings {
     pub worktrees_dir: Option<String>,
     #[serde(default)]
     pub send_with_ctrl_enter: bool,
-    /// Size of the agent's replies in the chat, px.
-    #[serde(default = "default_font_size")]
-    pub font_size: u32,
-    /// Sizes of the other kinds of text, px.
+    /// How big text is. Every kind of text (replies, prompts, steps, code,
+    /// sidebar, terminal) and its line height follow it, in proportion.
     #[serde(default)]
-    pub text_sizes: TextSizes,
+    pub text_size: TextSize,
+    /// Reply size in px from before text came in steps (see `Config::migrate`).
+    #[serde(default, rename = "font_size", skip_serializing)]
+    pub legacy_font_size: Option<u32>,
     #[serde(default = "yes")]
     pub show_reasoning: bool,
     #[serde(default)]
@@ -394,47 +401,43 @@ fn default_sidebar_width() -> u32 {
 fn default_chat_width() -> u32 {
     560
 }
-fn default_font_size() -> u32 {
-    14
+/// How big Larrier's text is. One step sets every kind of text together,
+/// so sizes and line heights always fit each other.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextSize {
+    Small,
+    #[default]
+    Default,
+    Large,
+    Larger,
 }
 
-/// Text sizes in px for each kind of text (replies use
-/// [`Settings::font_size`]).
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TextSizes {
-    /// The user's messages in the chat.
-    #[serde(default = "size_14")]
-    pub prompts: u32,
-    /// What is typed in the composer.
-    #[serde(default = "size_14")]
-    pub composer: u32,
-    /// Tool steps, commands and cards.
-    #[serde(default = "size_13")]
-    pub steps: u32,
-    /// Code blocks, diffs and tool output.
-    #[serde(default = "size_12")]
-    pub code: u32,
-    /// Chat and repository names in the sidebar.
-    #[serde(default = "size_13")]
-    pub sidebar: u32,
-    /// The integrated terminal.
-    #[serde(default = "size_13")]
-    pub terminal: u32,
-}
+impl TextSize {
+    pub const ALL: [TextSize; 4] = [TextSize::Small, TextSize::Default, TextSize::Large, TextSize::Larger];
 
-fn size_12() -> u32 {
-    12
-}
-fn size_13() -> u32 {
-    13
-}
-fn size_14() -> u32 {
-    14
-}
+    /// Size of the agent's replies, px; every other kind of text is set from it.
+    pub fn px(self) -> u32 {
+        match self {
+            TextSize::Small => 13,
+            TextSize::Default => 14,
+            TextSize::Large => 15,
+            TextSize::Larger => 16,
+        }
+    }
 
-impl Default for TextSizes {
-    fn default() -> Self {
-        TextSizes { prompts: 14, composer: 14, steps: 13, code: 12, sidebar: 13, terminal: 13 }
+    /// The step nearest a reply size in px.
+    pub fn nearest(px: u32) -> TextSize {
+        Self::ALL.into_iter().min_by_key(|t| t.px().abs_diff(px)).unwrap_or_default()
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TextSize::Small => "Small",
+            TextSize::Default => "Default",
+            TextSize::Large => "Large",
+            TextSize::Larger => "Larger",
+        }
     }
 }
 
@@ -454,8 +457,8 @@ impl Default for Settings {
             use_worktrees: false,
             worktrees_dir: None,
             send_with_ctrl_enter: false,
-            font_size: default_font_size(),
-            text_sizes: TextSizes::default(),
+            text_size: TextSize::default(),
+            legacy_font_size: None,
             show_reasoning: true,
             sidebar_group: SidebarGroup::default(),
             sidebar_sort: SidebarSort::default(),
@@ -896,5 +899,18 @@ mod tests {
         again.migrate();
         assert!(!again.agent(&AgentKind::OpenCode).prefer_acp, "the user's Native is kept");
         assert!(Config::default().agent(&AgentKind::Hermes).prefer_acp, "new configs start on ACP");
+    }
+
+    #[test]
+    fn text_sizes_become_one_step() {
+        let mut old: Config = serde_json::from_str(r#"{"version": 2, "settings": {"font_size": 15, "text_sizes": {"prompts": 14, "steps": 14}}}"#).unwrap();
+        old.migrate();
+        assert_eq!(old.settings.text_size, TextSize::Large);
+        let saved = serde_json::to_string(&old).unwrap();
+        assert!(!saved.contains("font_size") && !saved.contains("text_sizes"), "{saved}");
+        let mut again: Config = serde_json::from_str(&saved).unwrap();
+        again.migrate();
+        assert_eq!(again.settings.text_size, TextSize::Large);
+        assert_eq!([11, 13, 14, 15, 16, 22].map(|px| TextSize::nearest(px).px()), [13, 13, 14, 15, 16, 16]);
     }
 }

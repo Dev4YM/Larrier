@@ -112,8 +112,9 @@ each agent's own configuration and tagged with the agents that use it.
 - **General:** notifications, completion sound, tray icon, what sending
   during a turn does (steer or queue), window restore.
 - **Appearance:** themes, accent and per-token colors for light and dark,
-  fonts, text sizes, density, button corners, sidebar side and **Reduce
-  Motion**.
+  fonts, **Text Size** (Small to Larger: every kind of text and its spacing
+  move together), zoom, density, button corners, sidebar side and
+  **Reduce Motion**.
 - **Plan & Usage:** plan limits with reset times; tokens, cost, sessions
   and cache hits against the previous period; breakdowns by agent, model
   and project; an activity heatmap.

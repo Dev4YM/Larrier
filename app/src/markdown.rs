@@ -15,7 +15,7 @@ pub const CSS: &str = r#"
 .code-block:hover .code-copy { opacity: 1; }
 .code-block .code-copy:hover { background: var(--hover); color: var(--fg-2); }
 .md .code-block pre { margin: 0; border: none; border-radius: 0; background: transparent; padding: 8px 12px; overflow-x: auto; }
-.md .code-block pre code { font-family: var(--mono); font-size: var(--fs-code, 12px); line-height: 1.6; background: none; padding: 0; white-space: pre; }
+.md .code-block pre code { font-family: var(--mono); font-size: var(--fs-code, 12px); line-height: var(--lh-code, 19px); background: none; padding: 0; white-space: pre; }
 "#;
 
 

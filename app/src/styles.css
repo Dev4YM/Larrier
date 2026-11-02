@@ -724,12 +724,13 @@ select.input { cursor: pointer; padding-right: 4px; }
 .app a, .md a { color: var(--accent-c); }
 .send-btn.ready:hover { filter: brightness(1.1); }
 
-/* Motion */
-@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } to { opacity: 1; transform: none; } }
-@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px) scale(.98); } to { opacity: 1; transform: none; } }
+/* Motion. Things fade and slide but never scale: text and icons are the
+   same size on the first frame as on the last. */
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes pop-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes slide-in-right { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 .menu.in { animation: menu-in .14s cubic-bezier(.2, .8, .2, 1); }
 .menu.in.flip-up { animation-name: menu-in-up; }
@@ -740,7 +741,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .chat-row, .repo-row, .nav-row, .menu-item, .icon-btn, .pill-btn, .ghost-btn, .primary-btn, .picker, .env-chip, .tool-link, .select-btn, .plus-btn, .send-btn, .chip, .seg button, .toggle, .toggle::after {
   transition: background-color .12s ease, color .12s ease, border-color .12s ease, opacity .12s ease, transform .12s ease, left .15s ease, box-shadow .12s ease;
 }
-.send-btn:active, .primary-btn:active, .pill-btn:active, .icon-btn:active, .plus-btn:active { transform: scale(.94); }
+.send-btn:active, .primary-btn:active, .pill-btn:active, .icon-btn:active, .plus-btn:active { opacity: .72; }
 .app.no-motion *, .app.no-motion *::before, .app.no-motion *::after { animation: none !important; transition: none !important; }
 
 /* Styled select */
@@ -873,7 +874,7 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 .drop-overlay { position: absolute; inset: 0; z-index: 60; pointer-events: none; }
 .drop-preview { position: absolute; inset: 10px; display: flex; align-items: center; justify-content: center; border-radius: 14px;
   border: 1.5px solid var(--accent-c); background: color-mix(in srgb, var(--accent-c) 8%, transparent);
-  opacity: 0; transform: scale(.985); transition: opacity .14s ease, transform .2s cubic-bezier(.2, .8, .2, 1); }
+  opacity: 0; transition: opacity .14s ease; }
 .drop-preview.p-left { inset: 10px calc(50% + 5px) 10px 10px; }
 .drop-preview.p-right { inset: 10px 10px 10px calc(50% + 5px); }
 .drop-preview.p-context { inset: auto; left: var(--cx, 10px); top: var(--cy, 10px); width: var(--cw, 0); height: var(--ch, 0); border-radius: 26px; }
@@ -1448,7 +1449,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .rail-wrap > .tools-col:not(.collapsed) { flex: 0 0 264px; animation: rail-content-in .26s ease-out backwards; }
 .rail-wrap > .tools-col.collapsed { animation: rail-card-in .22s cubic-bezier(.2, .8, .2, 1) backwards; }
 @keyframes rail-content-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
-@keyframes rail-card-in { from { opacity: 0; transform: translateX(-6px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes rail-card-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 
 /* The sidebar slides out of the way instead of vanishing. */
 .app-body { position: relative; }
@@ -1501,7 +1502,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* Larrier's own tooltips (the title of whatever is hovered). */
 .l-tip { position: fixed; left: 0; top: 0; z-index: 3000; max-width: 340px; padding: 5px 9px; border-radius: 7px;
   background: #24231f; color: #f5f4ef; font: 500 11.5px/1.45 var(--font, system-ui, sans-serif); white-space: pre-wrap; word-break: break-word;
-  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .4); pointer-events: none; opacity: 0; transform: translateY(-3px) scale(.98);
+  box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .4); pointer-events: none; opacity: 0; transform: translateY(-3px);
   transition: opacity .12s ease, transform .14s cubic-bezier(.2, .8, .2, 1); }
 .l-tip.dark { background: #f1f0eb; color: #1d1c19; box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .7); }
 .l-tip.on { opacity: 1; transform: none; }

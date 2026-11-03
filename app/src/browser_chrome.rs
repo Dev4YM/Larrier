@@ -9,6 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -243,8 +244,79 @@ fn make_frame(main: isize) -> Option<isize> {
             None,
         )
         .ok()?;
+        FRAME.store(frame.0 as isize, Ordering::Relaxed);
+        let _ = SetWindowSubclass(HWND(main as *mut _), Some(main_focus_proc), 0x4C52_4246, 0);
         Some(frame.0 as isize)
     }
+}
+
+/// The frame, for the focus guard (which runs inside window messages, so
+/// it doesn't take `SHARED`'s lock).
+static FRAME: AtomicIsize = AtomicIsize::new(0);
+/// The page's window that had keyboard focus when the app was left.
+static PAGE_FOCUS: AtomicIsize = AtomicIsize::new(0);
+/// The app was just activated by a click.
+static CLICKED: AtomicBool = AtomicBool::new(false);
+
+/// Keyboard focus between the app and a seated page. Activating the app's
+/// window hands its focus to the app's own webview (wry moves it there on
+/// WM_SETFOCUS), which then took the typing meant for a page field and
+/// put it in the last box used in the app. When the window is activated by
+/// a click on the page, or comes back while the page had focus, the page
+/// gets the focus instead.
+unsafe extern "system" fn main_focus_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    match msg {
+        WM_ACTIVATE => {
+            let state = (wp.0 & 0xFFFF) as u32;
+            if state == WA_INACTIVE {
+                let f = unsafe { GetFocus() };
+                PAGE_FOCUS.store(if in_frame(f) { f.0 as isize } else { 0 }, Ordering::Relaxed);
+            } else {
+                CLICKED.store(state == WA_CLICKACTIVE, Ordering::Relaxed);
+            }
+        }
+        WM_SETFOCUS => {
+            if let Some(page) = page_to_focus() {
+                unsafe {
+                    let _ = SetFocus(Some(page));
+                }
+                return LRESULT(0);
+            }
+        }
+        _ => {}
+    }
+    unsafe { DefSubclassProc(h, msg, wp, lp) }
+}
+
+/// A window of a seated page (inside the frame).
+fn in_frame(h: HWND) -> bool {
+    let frame = FRAME.load(Ordering::Relaxed);
+    !h.is_invalid() && frame != 0 && unsafe { IsChild(HWND(frame as *mut _), h) }.as_bool()
+}
+
+/// Where focus goes as the app's window takes it: the page clicked, or the
+/// page that had it, while a page shows. Otherwise the app's webview.
+fn page_to_focus() -> Option<HWND> {
+    let frame = HWND(FRAME.load(Ordering::Relaxed) as *mut _);
+    if frame.is_invalid() {
+        return None;
+    }
+    let clicked = CLICKED.swap(false, Ordering::Relaxed)
+        || [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } as u16 & 0x8000 != 0);
+    let mut at = POINT::default();
+    let r = rect(frame);
+    let shown = r.left > AWAY / 2 && r.right > r.left && unsafe { IsWindowVisible(frame) }.as_bool();
+    if !shown || unsafe { GetCursorPos(&mut at) }.is_err() {
+        return None;
+    }
+    if clicked {
+        let over = at.x >= r.left && at.x < r.right && at.y >= r.top && at.y < r.bottom;
+        let target = unsafe { WindowFromPoint(at) };
+        return (over && in_frame(target)).then_some(target);
+    }
+    // Kept until the app is left again: activating can set focus more than once.
+    let had = HWND(PAGE_FOCUS.load(Ordering::Relaxed) as *mut _);
+    (in_frame(had) && unsafe { IsWindowVisible(had) }.as_bool()).then_some(had)
 }
 
 unsafe extern "system" fn frame_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {

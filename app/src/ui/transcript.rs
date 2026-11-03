@@ -671,9 +671,14 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
     // Once edited, the card stays put when it goes back: it doesn't slide in
     // again like a new message.
     let mut was_editing = use_signal(|| false);
+    let edit_box = format!("edit-{}", msg.id);
     use_effect(move || {
         if editing() {
             was_editing.set(true);
+            // Typing goes straight into it, after its text.
+            document::eval(&format!(
+                "requestAnimationFrame(() => {{ const t = document.getElementById('{edit_box}'); if (t) {{ t.focus({{ preventScroll: true }}); const n = t.value.length; t.setSelectionRange(n, n); }} }})"
+            ));
         }
     });
     let text = msg.text();

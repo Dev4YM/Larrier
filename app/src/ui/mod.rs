@@ -168,6 +168,13 @@ pub fn Root() -> Element {
     let layout = use_memo(move || app.layout());
     use_effect(move || crate::keep::set_layout(&layout.read()));
     use_effect(move || crate::keep::set_queues(&app.queue.read()));
+    // A prompt being edited is kept with its chat as it changes.
+    use_effect(move || {
+        let ed = app.editing.read();
+        if let (Some(_), Some(chat)) = (&ed.msg, &ed.session) {
+            crate::keep::set_value(chat, "edit", &Some(crate::state::EditState { confirm: None, ..ed.clone() }));
+        }
+    });
     // The side panel of the chat shown, as it is now (not only once left).
     let panel = use_memo(move || app.view.read().session_id().map(|id| (id.to_string(), crate::keep::Panel::of(&app.ui.read()))));
     use_effect(move || {

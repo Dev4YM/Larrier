@@ -779,6 +779,15 @@ pub fn Composer(
             app.toast("Started the prompt on every selected agent");
             return;
         }
+        // A prompt of this chat opened for editing and left as it was closes:
+        // the chat moved on. One with changes stays open.
+        let unchanged_edit = {
+            let ed = app.editing.peek();
+            ed.msg.is_some() && !ed.dirty() && sid.is_some() && ed.session == sid
+        };
+        if unchanged_edit {
+            app.set_edit(None);
+        }
         match (&sid, how) {
             (Some(id), Some(h)) if app.generating(id) => app.send_while_busy(id, t, a, h),
             _ => app.send(sid, t, a),

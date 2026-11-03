@@ -252,11 +252,16 @@ pub struct TabCtx {
     pub y: f64,
 }
 
-/// Editing a past prompt. Only one prompt is edited at a time; switching
-/// away from changed text asks to keep editing or discard first.
+/// Editing a past prompt: one at a time on screen. Each chat keeps its own
+/// (through a switch to another chat, a restart or an update); switching
+/// to another prompt in the same chat with changed text asks to keep
+/// editing or discard first.
 #[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct EditState {
     pub msg: Option<String>,
+    /// The chat the prompt is in.
+    #[serde(default)]
+    pub session: Option<String>,
     pub original: String,
     pub draft: String,
     /// The objects (@file, /skill, @chat...) the draft's text holds.
@@ -744,6 +749,7 @@ impl App {
                 panel.apply(&mut self.ui.write());
                 crate::browser_host::set_owner(n);
             }
+            self.swap_edit(new.as_deref());
         }
         if was_home && v != View::Home {
             crate::keep::list_home();
@@ -816,11 +822,11 @@ impl App {
             self.set_view(view);
         }
         self.split.set(split);
-        // The prompt being edited, if its chat is on screen.
-        if let Some(ed) = l.editing.filter(|e| e.msg.is_some()) {
+        // A prompt edited before the chats kept their own edits.
+        if let Some(mut ed) = l.editing.filter(|e| e.msg.is_some() && self.editing.peek().msg.is_none()) {
             let id = ed.msg.clone().unwrap_or_default();
-            let shown = [self.view.peek().session_id().map(String::from), self.split.peek().clone()].into_iter().flatten().any(|s| self.peek_session(&s, |s| s.messages.iter().any(|m| m.id == id)).unwrap_or(false));
-            if shown {
+            if let Some(chat) = self.chat_of_msg(&id) {
+                ed.session = Some(chat);
                 self.editing.set(ed);
             }
         }
@@ -829,7 +835,6 @@ impl App {
     /// Where the window is, for the next launch.
     pub fn layout(&self) -> crate::keep::Layout {
         let ui = self.ui.read();
-        let ed = self.editing.read();
         crate::keep::Layout {
             view: Some(self.view.read().clone()),
             tabs: self.tabs.read().clone(),
@@ -840,7 +845,8 @@ impl App {
             sidebar_query: ui.sidebar_query.clone(),
             expanded: ui.expanded_sections.clone(),
             models_agent: ui.models_agent.clone(),
-            editing: ed.msg.is_some().then(|| EditState { confirm: None, ..ed.clone() }),
+            // Kept with its chat instead (see `EditState`).
+            editing: None,
         }
     }
 
@@ -903,6 +909,11 @@ impl App {
         if same {
             return;
         }
+        // A prompt in another chat: this edit stays kept with its own chat.
+        let other_chat = target.as_ref().is_some_and(|(id, _, _)| st.session.is_some() && self.chat_of_msg(id) != st.session);
+        if other_chat {
+            return self.start_edit(target);
+        }
         if st.dirty() {
             self.editing.write().confirm = Some(target);
             document::eval("setTimeout(() => document.querySelector('.user-msg.editing')?.scrollIntoView({block: 'nearest', behavior: 'smooth'}), 20)");
@@ -911,16 +922,52 @@ impl App {
         self.set_edit(target);
     }
 
-    /// Switch editing without asking.
-    pub fn set_edit(mut self, target: Option<EditTarget>) {
+    /// Switch editing without asking: the edit open now is over.
+    pub fn set_edit(self, target: Option<EditTarget>) {
+        if let Some(chat) = self.editing.peek().session.clone() {
+            crate::keep::set_value(&chat, "edit", &None::<EditState>);
+        }
+        self.start_edit(target);
+    }
+
+    /// Edit `target` (or nothing on screen), leaving any other chat's kept
+    /// edit as it is.
+    fn start_edit(mut self, target: Option<EditTarget>) {
         self.editing.set(match target {
             Some((id, text, atts)) => {
                 // Its objects come back as objects, not the text the agent read.
                 let (draft, mentions) = crate::ui::mentions::to_edit(&text, &self.sessions.peek());
-                EditState { msg: Some(id), original: draft.clone(), draft, mentions, attachments: atts.clone(), original_attachments: atts, confirm: None }
+                let session = self.chat_of_msg(&id);
+                EditState { msg: Some(id), session, original: draft.clone(), draft, mentions, attachments: atts.clone(), original_attachments: atts, confirm: None }
             }
             None => EditState::default(),
         });
+    }
+
+    /// The open chat that has message `id`.
+    fn chat_of_msg(&self, id: &str) -> Option<String> {
+        self.open.peek().iter().find(|(_, s)| s.peek().messages.iter().any(|m| m.id == id)).map(|(k, _)| k.clone())
+    }
+
+    /// The chat on screen changed: an edit of a chat no longer shown stays
+    /// kept with it, and the shown chat's kept edit comes back.
+    fn swap_edit(mut self, shown: Option<&str>) {
+        let split = self.split.peek().clone();
+        let chat = self.editing.peek().session.clone();
+        if chat.is_some() && chat.as_deref() != shown && chat != split {
+            self.editing.set(EditState::default());
+        }
+        let Some(n) = shown else { return };
+        if self.editing.peek().msg.is_some() {
+            return;
+        }
+        let Some(ed) = crate::keep::value::<Option<EditState>>(n, "edit").flatten() else { return };
+        let id = ed.msg.clone().unwrap_or_default();
+        if self.peek_session(n, |s| s.messages.iter().any(|m| m.id == id)).unwrap_or(false) {
+            self.editing.set(EditState { session: Some(n.to_string()), ..ed });
+        } else {
+            crate::keep::set_value(n, "edit", &None::<EditState>);
+        }
     }
 
     // ------------------------------------------------------------- tabs
@@ -2174,10 +2221,8 @@ impl App {
             }
             s.recompute_usage();
         });
-        let editing = self.editing;
-        if editing.peek().msg.as_deref() == Some(message_id) {
-            let mut e = editing;
-            e.set(EditState::default());
+        if self.editing.peek().msg.as_deref() == Some(message_id) {
+            self.set_edit(None);
         }
         self.send_with(Some(session_id.to_string()), text, attachments, notice);
     }

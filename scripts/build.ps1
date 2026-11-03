@@ -21,6 +21,9 @@ Set-Location (Split-Path $PSScriptRoot)
 $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
 $version = ($meta.packages | Where-Object name -eq 'larrier-app').version
 
+# The browser engine's bindings build with CMake and Ninja.
+. "$PSScriptRoot/ninja.ps1"
+
 $packages = @('-p', 'larrier-app')
 if ($Cli) { $packages += @('-p', 'larrier-cli') }
 & cargo build --release --locked @packages

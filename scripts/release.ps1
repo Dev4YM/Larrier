@@ -206,6 +206,8 @@ Write-Host "Committed and tagged $tag" -ForegroundColor Green
 $dist = Join-Path (Get-Location) 'dist'
 $asset = "Larrier-$next-windows-x64.exe"
 if (-not $SkipBuild) {
+    # The browser engine's bindings build with CMake and Ninja.
+    . "$PSScriptRoot/ninja.ps1"
     & cargo build --release --locked -p larrier-app
     if ($LASTEXITCODE -ne 0) { Fail 'the release build failed (the commit and tag are local; remove them with: git tag -d ' + $tag + '; git reset --hard HEAD~1)' }
     $exe = 'target/release/larrier-desktop.exe'

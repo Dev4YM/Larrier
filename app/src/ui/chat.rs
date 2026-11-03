@@ -165,7 +165,6 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
 fn ChatColumn(id: String, input_id: &'static str) -> Element {
     rsx! {
         Transcript { key: "t-{id}", id: id.clone() }
-        AboveComposer { id: id.clone() }
         // Its own box per chat (a list of one, so the key is honored):
         // what was typed in each stays with it.
         for k in [id.clone()] {
@@ -845,10 +844,10 @@ pub fn DropZones(target: Option<String>) -> Element {
 
 // ------------------------------------------------------------------ subagent tab
 
-/// Background-task chips, then "Changes +N -M" and "Commit & Push ▾", above
-/// the composer.
+/// Background-task chips, then "Changes +N -M" and "Commit & Push ▾": pills
+/// of the one row above the message box (the composer lays it out).
 #[component]
-fn AboveComposer(id: String) -> Element {
+pub fn DockPills(id: String, card: Signal<Option<super::tasks::DockCard>>) -> Element {
     let app = use_app();
     let mut menu = use_signal(|| false);
     let mut busy = use_signal(|| false);
@@ -944,17 +943,15 @@ fn AboveComposer(id: String) -> Element {
     let mut run4 = run.clone();
     let mut run = run;
     rsx! {
-        div { class: "composer-wrap", style: "padding-bottom: 8px;",
-            div { class: "row above-composer", style: "gap: 6px;",
-                super::tasks::BackgroundChips { session_id: id.clone() }
+                super::tasks::BackgroundChips { session_id: id.clone(), card }
                 if show_changes {
-                    button { class: "pill-btn", onclick: move |_| open_tool(app, RightTab::Changes),
+                    button { class: "pill-btn dock-git", onclick: move |_| open_tool(app, RightTab::Changes),
                         "Changes"
                         span { class: "add num", "+{added}" }
                         span { class: "del num", "-{removed}" }
                     }
                     if in_git {
-                        div { class: "menu-anchor",
+                        div { class: "menu-anchor dock-git",
                             div { class: "pill-btn split-btn",
                                 button { class: "main", disabled: busy(), onclick: move |_| run("push"),
                                     if busy() { "Working…" } else { "Commit & Push" }
@@ -971,8 +968,6 @@ fn AboveComposer(id: String) -> Element {
                         }
                     }
                 }
-            }
-        }
     }
 }
 

@@ -1519,12 +1519,14 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 
 /* The queue: a card that folds into a pill; rows drag to reorder and
    show their actions on hover. */
-.queue-card { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 14px; background: var(--card-2); padding: 5px 6px 6px; animation: queue-in .2s cubic-bezier(.2, .8, .2, 1) backwards; }
+/* The queue: a card like the running agents' and terminals' (tk-card), opened
+   from its pill in the row above the box. */
+.queue-card .queue-list { gap: 1px; }
 @keyframes queue-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .queue-head { display: flex; align-items: center; gap: 6px; padding: 2px 4px 4px 10px; font-size: 12px; color: var(--fg-2); }
 .queue-head .n { font-weight: 500; }
 .queue-head .grow { flex: 1; }
-.queue-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 6px 0 4px; border-radius: 8px; font-size: 13px; color: var(--fg); cursor: grab;
+.queue-row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px 0 6px; border-radius: 6px; font-size: 12.5px; color: var(--fg); cursor: grab;
   transition: background-color .12s ease, box-shadow .12s ease, opacity .12s ease; }
 .queue-row:hover { background: var(--hover); }
 .queue-row.editing { background: var(--selected); }
@@ -1539,8 +1541,11 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .queue-row:hover .q-acts, .queue-row.editing .q-acts, .queue-row:focus-within .q-acts { opacity: 1; }
 .q-steer { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 12px; color: var(--fg-2); }
 .q-steer:hover { background: var(--chip); color: var(--fg); }
-.queue-pill { margin: 0 0 8px; }
-.queue-pill .n { color: var(--fg-3); margin-left: 4px; }
+/* One row above the box: running work, the queue, then the changes; it
+   takes no room when there's nothing to show. */
+.queue-pill { order: 1; }
+.dock-git { order: 2; }
+.above-composer:not(:has(> :not(style))) { display: none; }
 
 /* Editing a queued message: a badge next to "+", Esc or × cancels. */
 .c-plus { display: flex; align-items: center; gap: 6px; }

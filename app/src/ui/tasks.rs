@@ -17,7 +17,7 @@ use larrier_core::{Message, Part, Role, ToolCall, ToolKind, ToolStatus};
 use crate::icons::{Icon, I};
 use crate::state::{use_app, App, RightTab, View};
 
-const CSS: &str = r#"
+pub(crate) const CSS: &str = r#"
 .tk-sub { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 30px; padding: 0 8px; margin: 2px 0 6px;
   border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 12px; color: var(--fg-2); text-align: left; cursor: pointer; }
 .tk-sub:hover { background: var(--hover); color: var(--fg); }
@@ -274,12 +274,20 @@ fn Fact(icon: I, k: &'static str, v: String) -> Element {
     }
 }
 
+/// The card open above the message box (one at a time), kept per chat.
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+pub enum DockCard {
+    Agents,
+    Terminals,
+    Queue,
+}
+
 /// Chips above the composer while the session's subagents ("Working 2") or
-/// terminals ("1 Terminal") run. Each opens its own card listing them.
+/// terminals ("1 Terminal") run. Each opens its card listing them.
 #[component]
-pub fn BackgroundChips(session_id: String) -> Element {
+pub fn BackgroundChips(session_id: String, card: Signal<Option<DockCard>>) -> Element {
     let app = use_app();
-    let mut open = use_signal(|| None::<TaskKind>);
+    let mut open = card;
     let rows = use_memo(use_reactive!(|session_id| {
         if !app.is_active(&session_id) {
             return Vec::new();
@@ -291,12 +299,12 @@ pub fn BackgroundChips(session_id: String) -> Element {
         return rsx! {};
     }
     let (agents, terms): (Vec<TaskRow>, Vec<TaskRow>) = rows.into_iter().partition(|r| r.kind == TaskKind::Subagent);
-    let mut toggle = move |k: TaskKind| open.set(if open() == Some(k) { None } else { Some(k) });
+    let mut toggle = move |k: DockCard| open.set(if open() == Some(k) { None } else { Some(k) });
     let chip = |on: bool| if on { "pill-btn tk-chip on" } else { "pill-btn tk-chip" };
     let plural = |n: usize, one: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") };
     let shown = match open() {
-        Some(TaskKind::Subagent) if !agents.is_empty() => Some((true, agents.clone())),
-        Some(TaskKind::Shell) if !terms.is_empty() => Some((false, terms.clone())),
+        Some(DockCard::Agents) if !agents.is_empty() => Some((true, agents.clone())),
+        Some(DockCard::Terminals) if !terms.is_empty() => Some((false, terms.clone())),
         _ => None,
     };
     let can_stop = app.is_running(&session_id);
@@ -305,13 +313,13 @@ pub fn BackgroundChips(session_id: String) -> Element {
     rsx! {
         style { {CSS} }
         if !agents.is_empty() {
-            button { class: chip(open() == Some(TaskKind::Subagent)), title: "Running subagents", onclick: move |_| toggle(TaskKind::Subagent),
+            button { class: chip(open() == Some(DockCard::Agents)), title: "Running subagents", onclick: move |_| toggle(DockCard::Agents),
                 Stamp { size: 13 }
                 span { "Working " span { class: "n", "{agents.len()}" } }
             }
         }
         if !terms.is_empty() {
-            button { class: chip(open() == Some(TaskKind::Shell)), title: "Running terminals", onclick: move |_| toggle(TaskKind::Shell),
+            button { class: chip(open() == Some(DockCard::Terminals)), title: "Running terminals", onclick: move |_| toggle(DockCard::Terminals),
                 Stamp { size: 13 }
                 span { class: "n", "{n_terms}" }
             }

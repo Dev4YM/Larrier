@@ -214,10 +214,10 @@ pub fn Composer(
     });
     let mut text = use_signal(|| kept.text.clone());
     let attachments: Signal<Vec<Part>> = use_signal(|| kept.attachments.clone());
-    // The queue panel: open or folded, the row being dragged and where it
-    // would land, and the queued message being edited with the draft it
-    // set aside.
-    let mut queue_open = use_signal(|| true);
+    // The card open above the box (the queue, running agents or terminals),
+    // kept with the chat; the queued row being dragged and where it would
+    // land, and the queued message being edited with the draft it set aside.
+    let mut dock = super::use_kept(session_id.as_deref().unwrap_or_default(), "dock", || None::<super::tasks::DockCard>);
     let mut q_drag = use_signal(|| None::<usize>);
     let mut q_over = use_signal(|| None::<usize>);
     let q_edit = use_signal(|| None::<(u64, String, Vec<Part>, Vec<MentionChip>)>);
@@ -932,18 +932,29 @@ pub fn Composer(
                     }
                 }
             }
-            // Asked above the input, where it is answered: never in the chat.
-            if let (Some((req, more)), Some(sid)) = (request, session_id.clone()) {
-                super::request::RequestCard { key: "{req.id}", session_id: sid, request: req, more }
-            }
-            if !queued.is_empty() {
-                if queue_open() {
-                    div { class: "queue-card",
-                        div { class: "queue-head",
-                            span { class: "n", "{queued.len()} Queued" }
-                            span { class: "grow" }
-                            button { class: "icon-btn sm", title: "Fold the queue", onclick: move |_| queue_open.set(false), Icon { i: I::Minus, size: 13 } }
+            // One row of pills above the box (running agents and terminals,
+            // the queue, the changes), the card one of them opened over it.
+            if let Some(sid) = session_id.clone() {
+                div { class: "row above-composer",
+                    style { {super::tasks::CSS} }
+                    super::chat::DockPills { id: sid, card: dock }
+                    if !queued.is_empty() {
+                        button { class: if dock() == Some(super::tasks::DockCard::Queue) { "pill-btn tk-chip queue-pill on" } else { "pill-btn tk-chip queue-pill" },
+                            title: "Messages waiting for the agent",
+                            onclick: move |_| dock.set(if dock() == Some(super::tasks::DockCard::Queue) { None } else { Some(super::tasks::DockCard::Queue) }),
+                            Icon { i: I::List, size: 13 }
+                            span { "Queued " span { class: "n", "{queued.len()}" } }
                         }
+                    }
+                    if !queued.is_empty() && dock() == Some(super::tasks::DockCard::Queue) {
+                    div { class: "tk-card queue-card",
+                        div { class: "tk-card-head",
+                            span { class: "tk-ic", Icon { i: I::List, size: 13 } }
+                            span { class: "ttl", "{queued.len()} Queued" }
+                            span { class: "grow" }
+                            button { class: "icon-btn", title: "Collapse", onclick: move |_| dock.set(None), Icon { i: I::Minus, size: 13 } }
+                        }
+                        div { class: "tk-card-list queue-list",
                         for (qi, q) in queued.clone().into_iter().enumerate() {
                             {
                                 let sid = session_id.clone().unwrap_or_default();
@@ -998,11 +1009,13 @@ pub fn Composer(
                             }
                         }
                     }
-                } else {
-                    button { class: "pill-btn queue-pill", title: "Show the queue", onclick: move |_| queue_open.set(true),
-                        "Queued" span { class: "n", "{queued.len()}" }
+                    }
                     }
                 }
+            }
+            // Asked just above the box, where it is answered: never in the chat.
+            if let (Some((req, more)), Some(sid)) = (request, session_id.clone()) {
+                super::request::RequestCard { key: "{req.id}", session_id: sid, request: req, more }
             }
             if dragging() {
                 div { class: "drop-zone", "Drop files or images to attach" }

@@ -1464,6 +1464,24 @@ impl TypeScale {
     }
 }
 
+/// A widget's state kept with its chat (a card left open, a group folded):
+/// as it was when the chat is shown again, also after a restart. The widget
+/// is one per chat (keyed by it), so its state is read once.
+pub fn use_kept<T>(chat: &str, name: &'static str, default: impl FnOnce() -> T) -> Signal<T>
+where
+    T: Clone + PartialEq + serde::Serialize + serde::de::DeserializeOwned + 'static,
+{
+    let chat = use_hook(|| chat.to_string());
+    let v = use_signal(|| crate::keep::value::<T>(&chat, name).unwrap_or_else(default));
+    use_effect(move || {
+        let now = v.read().clone();
+        if !chat.is_empty() {
+            crate::keep::set_value(&chat, name, &now);
+        }
+    });
+    v
+}
+
 /// Below this window width the sidebar floats over the content.
 pub const NARROW: f64 = 760.0;
 

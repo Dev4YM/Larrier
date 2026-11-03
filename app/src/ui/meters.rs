@@ -155,7 +155,7 @@ fn PlanPanel(agent: AgentKind, quota: Option<Quota>, usage: Option<Usage>, cost:
 // ------------------------------------------------------------------ context
 
 /// One part of the context window.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Part {
     id: String,
     name: String,
@@ -165,7 +165,7 @@ struct Part {
     kind: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Breakdown {
     total: u64,
     max: u64,
@@ -199,6 +199,13 @@ fn breakdown(v: &Value) -> Breakdown {
     Breakdown { total: v["totalTokens"].as_u64().unwrap_or(0), max: v["maxTokens"].as_u64().unwrap_or(0), parts }
 }
 
+/// What chat `id`'s context was made of when last asked, kept with the chat
+/// (it shows at once, also after a restart, while a newer one is asked).
+fn kept(id: &str) -> Option<Asked> {
+    let (key, b): (usize, Breakdown) = crate::keep::value(id, "context")?;
+    Some(Asked { key, loading: false, result: Some(Ok(b)) })
+}
+
 /// Ask Claude Code what chat `id`'s context is made of, unless already asked
 /// at this point of the chat.
 fn ask(app: App, id: String, key: usize) {
@@ -207,13 +214,25 @@ fn ask(app: App, id: String, key: usize) {
         return;
     }
     let req = app.peek_session(&id, |s| larrier_agents::build_request(&app.config.peek(), s, &s.agent.clone()));
-    BREAKDOWNS.write().insert(id.clone(), Asked { key, loading: true, result: current.and_then(|a| a.result) });
+    let before = current.and_then(|a| a.result);
+    BREAKDOWNS.write().insert(id.clone(), Asked { key, loading: true, result: before.clone() });
     spawn_forever(async move {
         let result = match req {
             Some(Ok(req)) => larrier_agents::drivers::claude::context_usage(req).await.map(|v| breakdown(&v)),
             Some(Err(e)) => Err(e.to_string()),
             None => Err("The chat isn't open.".into()),
         };
+        // Asking again failed: the last breakdown stays (it's close).
+        let result = match (result, before) {
+            (Err(e), Some(Ok(b))) => {
+                tracing::warn!("context breakdown: {e}");
+                Ok(b)
+            }
+            (r, _) => r,
+        };
+        if let Ok(b) = &result {
+            crate::keep::set_value(&id, "context", &(key, b.clone()));
+        }
         BREAKDOWNS.write().insert(id, Asked { key, loading: false, result: Some(result) });
     });
 }
@@ -244,8 +263,21 @@ pub fn ContextRing(session_id: String, agent: AgentKind, context: Option<(u64, O
     let is_open = open();
     let claude = agent == AgentKind::ClaudeCode;
     let sid = session_id.clone();
-    use_effect(use_reactive!(|is_open, messages| {
-        if is_open && claude {
+    // What it's made of, kept from before; asked again after each turn (and
+    // when the panel opens), so it's always there and up to date.
+    use_hook({
+        let sid = sid.clone();
+        move || {
+            if !BREAKDOWNS.peek().contains_key(&sid) {
+                if let Some(a) = kept(&sid) {
+                    BREAKDOWNS.write().insert(sid, a);
+                }
+            }
+        }
+    });
+    let running = app.is_running(&session_id);
+    use_effect(use_reactive!(|is_open, messages, running| {
+        if claude && (is_open || !running) && messages > 0 {
             ask(app, sid.clone(), messages);
         }
     }));

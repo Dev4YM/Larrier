@@ -635,7 +635,12 @@ pub fn Root() -> Element {
                 const t = tip.getBoundingClientRect();
                 let x = Math.max(6, Math.min(r.left + r.width / 2 - t.width / 2, innerWidth - t.width - 6));
                 let y = r.bottom + 6;
-                if (y + t.height > innerHeight - 6) y = r.top - t.height - 6;
+                // A browser page is a window over the app: a tip that would
+                // land on it shows above its button instead.
+                const page = document.getElementById('lb-area');
+                const p = page && page.getBoundingClientRect();
+                const onPage = p && p.width > 0 && x < p.right && x + t.width > p.left && y < p.bottom && y + t.height > p.top;
+                if (y + t.height > innerHeight - 6 || onPage) y = r.top - t.height - 6;
                 tip.style.left = x + 'px';
                 tip.style.top = y + 'px';
               };

@@ -1211,6 +1211,12 @@ pub fn Composer(
                                 }
                             }
                         }
+                    } else if elsewhere {
+                        // Working in the agent's own app: shown as working,
+                        // but stopped (and replied to) there.
+                        button { class: "send-btn stop c-send", disabled: true, title: "Running in {agent.display_name()} — stop it there",
+                            Icon { i: I::Stop, size: 10 }
+                        }
                     } else if running {
                         button { class: "send-btn stop c-send", title: "Stop (Ctrl+.)",
                             onclick: move |_| if let Some(id) = &sid_stop { app.stop_reply(id) },

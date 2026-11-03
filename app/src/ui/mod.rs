@@ -692,6 +692,22 @@ pub fn Root() -> Element {
                 return;
               }
               if (e.altKey && (k === 'arrowleft' || k === 'arrowright')) { e.preventDefault(); dioxus.send({ t: 'nav', d: k === 'arrowleft' ? -1 : 1 }); return; }
+              // Typing with nothing to type into (no field, no menu or dialog
+              // open): the letters go to the message box, the chat's own in
+              // a side-by-side view.
+              if (!mod && !e.altKey && !e.isComposing && !e.defaultPrevented && (e.key || '').length === 1) {
+                const el = e.target && e.target.nodeType === 1 && e.target.closest ? e.target : null;
+                const typable = el && el.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+                const pressed = e.key === ' ' && el && el.closest('button, a, summary, label, [role="button"], [role="checkbox"], [role="tab"]');
+                const open = [...document.querySelectorAll('.menu, .menu-backdrop, .overlay, .palette, [role="dialog"]')].some(m => m.offsetParent || m.getClientRects().length);
+                if (!typable && !pressed && !open) {
+                  const pane = el && el.closest('.chat-col');
+                  const ids = pane && pane.classList.contains('secondary') ? ['composer-input-2', 'composer-input'] : ['composer-input', 'composer-input-2'];
+                  const box = ids.map(i => document.getElementById(i)).find(x => x && x.getClientRects().length && !x.disabled && !x.readOnly);
+                  // Focused now, the key's letter lands in it.
+                  if (box) { box.focus(); const n = box.value.length; box.setSelectionRange(n, n); }
+                }
+              }
               if (!mod) return;
               // Ctrl+Shift+V in a message box: the clipboard as plain text,
               // never made an attachment however long.

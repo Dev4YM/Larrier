@@ -72,8 +72,10 @@ impl State {
 
 pub static STATE: GlobalSignal<State> = Signal::global(State::default);
 
-/// Where the browser engine stands (Windows: its runtime comes once).
+/// Where the browser engine stands (Windows: its runtime comes once;
+/// elsewhere the system's web views are always ready).
 #[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum Engine {
     #[default]
     Ready,
@@ -418,12 +420,15 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                             let owner = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| t.owner.clone()));
                             adopt_tab(owner.as_deref(), &url, id, background);
                         }
+                        #[cfg(windows)]
                         Ev::EngineProgress { done, total } => *ENGINE.write() = Engine::Fetching { done, total },
+                        #[cfg(windows)]
                         Ev::EngineReady => {
                             *ENGINE.write() = Engine::Ready;
                             crate::browser_cef::flush();
                             with_host(|h| place(h));
                         }
+                        #[cfg(windows)]
                         Ev::EngineFailed { error } => *ENGINE.write() = Engine::Failed(error),
                         #[cfg(windows)]
                         Ev::PageError { id, code } => {

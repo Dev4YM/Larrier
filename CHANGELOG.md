@@ -5,6 +5,23 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.40 — 2026-11-03
+
+### New
+
+- Own error pages, pop-ups as tabs and DevTools in a tab
+- Chrome's spelling engine, with corrections on right-click
+- One row for running work, the queue and changes
+- Show subagents' model, tools and context in Background Tasks
+- Keep each chat's context breakdown up to date
+
+### Fixed
+
+- Show the toolbar's tips above the page
+- Keep typing in a page when Larrier comes back to the front
+- Go back to one line after sending
+- Keep a turn as it is when it ends, errors where they came
+- Shorter pinned prompts, a themed Quote button, text cursor on text
 ## 0.1.39 — 2026-11-03
 
 ### Fixed

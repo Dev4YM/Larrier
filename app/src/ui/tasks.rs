@@ -116,6 +116,8 @@ pub(crate) const CSS: &str = r#"
 .tk-row.term .tk-row-title { font-family: var(--mono); font-size: 12.5px; }
 .tk-row.done .tk-row-title { color: var(--fg-2); }
 .tk-row-when { color: var(--fg-3); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
+.tk-row:has(.tk-row-meta) { height: 66px; }
+.tk-row-meta { height: 15px; font-size: 11px; line-height: 15px; color: var(--fg-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tk-row-sub { height: 17px; font-size: 12px; line-height: 17px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tk-row.term .tk-row-sub.out { font-family: var(--mono); font-size: 11.5px; }
 "#;
@@ -400,7 +402,8 @@ pub fn open_agent_term(mut app: App, session_id: &str, tool_id: &str) {
 #[component]
 pub fn TasksPanel(session_id: String) -> Element {
     let app = use_app();
-    let mut closed = use_signal(|| (false, false));
+    // Running / Finished folded or not, kept with the chat.
+    let mut closed = super::use_kept(&session_id, "tasks.folded", || (false, false));
     let rows = use_memo(use_reactive!(|session_id| app.with_session(&session_id, |s| all_rows(&s.messages)).unwrap_or_default()));
     let mut rows = rows();
     rows.reverse();
@@ -494,12 +497,16 @@ fn TaskRowView(session_id: String, row: TaskRow) -> Element {
     // One line under the title: what it is doing (or printed last), else
     // what it is.
     let sub_out = kind != TaskKind::Subagent && row.activity.is_some();
+    // A subagent: what it's doing (or did last), then a quiet line of what
+    // it is: type, model, tools, context.
+    let agent = kind == TaskKind::Subagent;
     let sub = match (&row.activity, &row.meta) {
-        (Some(a), Some(_)) if row.active => a.clone(),
-        (_, Some(m)) => m.clone(),
-        (Some(a), None) => a.clone(),
+        (Some(a), _) => a.clone(),
+        (None, Some(_)) if agent => if row.active { "Starting…".into() } else { "Done".into() },
+        (None, Some(m)) => m.clone(),
         (None, None) => if kind == TaskKind::Monitor { "Monitor".into() } else { "Background command".into() },
     };
+    let meta = row.meta.clone().filter(|_| agent);
     let done = match row.ms {
         Some(ms) => format!("{word} · {}", fmt_ms(ms)),
         None => word.to_string(),
@@ -524,6 +531,9 @@ fn TaskRowView(session_id: String, row: TaskRow) -> Element {
                     }
                 }
                 div { class: if sub_out { "tk-row-sub out" } else { "tk-row-sub" }, title: "{sub}", "{sub}" }
+                if let Some(m) = meta {
+                    div { class: "tk-row-meta", title: "{m}", "{m}" }
+                }
             }
         }
     }
@@ -635,6 +645,9 @@ fn task_row(t: &ToolCall) -> TaskRow {
             meta.extend(info.model);
             if info.tools > 0 {
                 meta.push(format!("{} tool{}", info.tools, if info.tools == 1 { "" } else { "s" }));
+            }
+            if let Some(c) = info.context {
+                meta.push(format!("{} context", super::usage::fmt_tokens(c)));
             }
             (if desc.is_empty() { label } else { desc }, Some(meta.join(" · ")))
         }

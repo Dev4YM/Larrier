@@ -10,7 +10,8 @@ All systems: Rust 1.85 or newer (`rustup` recommended) and Git.
 
 | System | Also needs |
 |---|---|
-| Windows 10 / 11 | The MSVC build tools ("Desktop development with C++"). WebView2 is part of Windows. |
+| Windows 10 / 11 | The MSVC build tools ("Desktop development with C++") with the C++ CMake tools, which bring CMake and Ninja (the browser engine's bindings are built with them; `scripts
+inja.ps1` finds Visual Studio's Ninja). WebView2 is part of Windows. |
 | macOS 11+ | The Xcode command line tools: `xcode-select --install`. |
 | Linux | A C toolchain, `pkg-config` and the WebKitGTK 4.1 / GTK 3 development packages (below). |
 
@@ -108,6 +109,15 @@ The README's hero image comes from the demo home:
   samples in the importers).
 - Some tests talk to real installed agents or the network; they're marked
   `#[ignore]` and run with `cargo test -- --ignored`.
+
+## The browser engine (Windows)
+
+The `cef` crate downloads the Chromium Embedded Framework's SDK for the
+build; set `CEF_PATH` to a folder to keep that download between clean
+builds. The engine's runtime isn't built in: a build looks for it in
+`%LOCALAPPDATA%\Larrier\engine\<version>` and downloads it from the
+`engine-<version>` release when it isn't there. Set `LARRIER_CEF_DIR` to
+an unpacked runtime (the SDK's own folder works) to use that instead.
 
 ## Debugging the UI
 

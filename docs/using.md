@@ -39,8 +39,11 @@ onto the chat area:
 ## A chat
 
 - Prompts sit in sticky cards. Click one to edit it and send it again as a
-  fork. Esc or clicking elsewhere closes the editor; with unsaved changes
-  it asks whether to keep editing.
+  fork: the cursor is in it, after its text. Esc or clicking elsewhere
+  closes the editor; with unsaved changes it asks whether to keep editing.
+  An edit stays with its chat when you switch chats, close Larrier or
+  update it. Sending a new message closes an edit you didn't change; one
+  you changed stays open.
 - Reading, searching and thinking steps fold into "Explored …"; commands,
   edits (with inline diffs), plans and to-dos get their own cards.
 - A turn's work sits under "Working", then "Worked for 16s" with 👍 👎,
@@ -60,6 +63,11 @@ onto the chat area:
 ## The composer
 
 - "+" for files and images, the agent and model picker, and send / stop.
+  Typing while nothing you can type in has focus (no field, menu or
+  dialog) types into the message box.
+- A chat running in the agent's own app (a terminal, an IDE) shows the
+  stop button as it would while running, but disabled: reply and stop it
+  there, or here once it finishes.
 - The picker lists your enabled agents on the left and their models on the
   right; typing searches every model. A model's **Edit** shows its options
   (context size, reasoning effort, speed) and the account the chat runs as.
@@ -86,13 +94,19 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
 - **Changes:** Local Changes (git) and Agent Edits, file by file, with
   discard, commit, commit & push and Create PR (through `gh`). A
   worktree's branch can be merged back from here.
-- **Browser:** a real browser in the panel. Agents can drive it through
+- **Browser:** a real browser in the panel. On Windows its pages run on
+  Chromium, the open-source engine Chrome is built on, which Larrier runs
+  itself (as Electron apps do): Larrier is the browser, not a Chrome
+  window. Its first use downloads the engine once (about 186 MB, see
+  [install.md](install.md#the-browser-engine)). It has its own profile,
+  so sign in to sites there separately from your Chrome. On macOS and
+  Linux it uses the system's web view. Agents can drive it through
   Larrier's browser tools while you watch (its tab opens as a regular tab,
   not a preview); annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
   A page that can't be reached gets Larrier's own message with Try again,
-  pop-ups and new windows open as tabs, and Developer tools opens Chrome's
-  DevTools in a tab beside the page.
+  pop-ups and new windows open as tabs, and Developer tools opens
+  Chromium's DevTools in a tab beside the page.
 - **Terminal:** real terminals (your shell: PowerShell on Windows, `$SHELL`
   on macOS and Linux), plus read-only views of
   the agent's own background commands.

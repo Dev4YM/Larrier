@@ -73,7 +73,10 @@ Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
   `automations`, `usage`, `profile`, overlays and menus.
 - `keep.rs`: window state saved to `kept.json` (debounced, flushed on close)
   and restored on start.
-- `browser_host.rs`, `browser_control.rs`: the Browser tab's views.
+- `browser_host.rs`, `browser_control.rs`: the Browser tab's tabs and
+  the agents' control of them; `browser_cef.rs`: on Windows, the pages
+  themselves, run on Chromium (CEF) inside Larrier's window, with the
+  engine's runtime fetched on first use.
 - `update.rs`, `install.rs`, `version.rs`: self-install (Windows) and
   updates from GitHub releases on every system (the `.exe`, the whole
   Larrier.app, or the Linux program, swapped on restart).

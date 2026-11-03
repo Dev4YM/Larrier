@@ -15,6 +15,7 @@ In its data folder (see [install.md](install.md#your-data)):
 | `imports.json` | Fingerprints of native sessions already imported. |
 | `kept.json` | Window state for restoring: open chats and tabs, side panels, browser addresses, the last 64 KB of each terminal's output, scroll positions, queued and half-typed messages. |
 | `accounts/<id>/` | Config folders of separate logins you create in Larrier. |
+| `browser-engine/` | The Browser tab's profile on Windows: cookies and sign-ins, cache and site data of the pages you open, and the engine's log. |
 | `worktrees/` | Git worktrees for agents, when you use them. |
 
 API keys and other secrets go to the operating system's credential store,
@@ -45,7 +46,8 @@ the kernel keyring in front of it).
 Larrier itself connects to:
 
 - **GitHub** (`api.github.com`, release downloads): checking for and
-  downloading Larrier updates, anonymously (no GitHub account or token).
+  downloading Larrier updates, and once the browser engine (Windows),
+  anonymously (no GitHub account or token).
 - **Where agents publish releases** (npm, PyPI, GitHub, the agents' install
   scripts): looking up agents' latest versions.
 - **Model providers you configure** for API chat.

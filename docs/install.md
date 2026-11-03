@@ -146,6 +146,17 @@ installed it.
 Updates come from the public GitHub releases: no GitHub account or token
 is needed or used.
 
+## The browser engine
+
+On Windows the Browser tab runs on Chromium (the Chromium Embedded
+Framework). The engine isn't part of the program: the first time you use
+the Browser tab, Larrier downloads it from Larrier's GitHub releases
+(`Larrier-engine-<version>-windows-x64.zip`, about 186 MB), checks it
+against its published SHA-256 and unpacks it to
+`%LOCALAPPDATA%\Larrier\engine\<version>` (about 410 MB). Each Windows user
+has their own copy. An update that moves to a newer engine downloads it
+the same way and removes the old one; uninstalling removes it.
+
 ## Your data
 
 | System | Location |

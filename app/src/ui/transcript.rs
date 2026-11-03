@@ -498,7 +498,16 @@ fn TurnView(
     show_reasoning: bool,
 ) -> Element {
     let app = use_app();
-    let mut open = use_signal(|| false);
+    // The work's steps show while it runs and stay when it ends (a turn
+    // watched doesn't fold away under you); folded or opened by hand, it
+    // stays so, kept with the chat.
+    let mut seen_live = use_signal(|| live);
+    use_effect(use_reactive!(|live| {
+        if live && !*seen_live.peek() {
+            seen_live.set(true);
+        }
+    }));
+    let mut chosen = use_signal(|| None::<bool>);
     let mut steps = use_signal(|| STEP_WINDOW);
     let _ = fp;
     let Some((turn, feedback)) = app.peek_session(&session_id, |s| {
@@ -533,6 +542,20 @@ fn TurnView(
     let last_reply = turn.replies.last().cloned();
     let hidden = turn.replies.len().saturating_sub(steps());
     let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
+    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or_else(|| seen_live());
+    // What a folded turn shows: its errors and its answer, by when they came.
+    let mut folded: Vec<(usize, usize)> = turn
+        .replies
+        .iter()
+        .enumerate()
+        .flat_map(|(mi, m)| m.parts.iter().enumerate().filter(|(_, p)| matches!(p, Part::Error { .. })).map(move |(pi, _)| (mi, pi)))
+        .collect();
+    folded.extend(final_at);
+    folded.sort();
+    let folded: Vec<(String, usize, usize)> = folded
+        .into_iter()
+        .map(|(mi, pi)| (if Some((mi, pi)) == final_at { format!("f-{turn_key}") } else { format!("e-{}-{pi}", turn.replies[mi].id) }, mi, pi))
+        .collect();
     // Each turn is its own box so its sticky prompt card scrolls away when
     // the next prompt arrives (instead of stacking under it).
     rsx! {
@@ -548,43 +571,47 @@ fn TurnView(
                 }
             }
         }
-        if live {
-            // Running: show the steps as they happen (the newest ones; long
-            // turns reveal earlier steps on demand).
+        // One layout running and done: the steps stay the same components
+        // when the turn ends, so nothing is made again and nothing moves.
+        if has_work {
+            div { class: if live { "step worked live" } else { "step worked" },
+                onclick: {
+                    let (sid, key) = (session_id.clone(), turn_key.clone());
+                    move |_| {
+                        if !live {
+                            chosen.set(Some(!open));
+                            set_turn_open(&sid, &key, !open);
+                        }
+                    }
+                },
+                span { class: "verb", if live { "Working" } else { "{label}" } }
+                if !live {
+                    span { class: "chev", if open { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
+                }
+            }
+        }
+        if live || open {
+            // The newest steps; a long turn shows earlier ones on demand.
             if hidden > 0 {
                 button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
             }
             for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
-                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: mi + 1 == turn.replies.len(), show_reasoning, skip_final: false }
+                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == turn.replies.len(), show_reasoning, skip_final: false }
             }
         } else {
-            if has_work {
-                div { class: "step", onclick: move |_| open.toggle(),
-                    span { class: "verb", "{label}" }
-                    span { class: "chev", if open() { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
-                }
-                if open() {
-                    div { class: "sub-steps",
-                        if hidden > 0 {
-                            button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
-                        }
-                        for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
-                            AssistantMessage { key: "w{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: false, show_reasoning, skip_final: true }
-                        }
-                    }
+            // Folded: the answer and any errors stay in sight, in the order
+            // they happened (a limit hit after the answer shows after it).
+            for (k, mi, pi) in folded {
+                PartView {
+                    key: "{k}",
+                    session_id: session_id.clone(),
+                    part: turn.replies[mi].parts[pi].clone(),
+                    live: false,
+                    show_reasoning,
                 }
             }
-            // Errors stay visible even when the work is collapsed.
-            for m in turn.replies.iter() {
-                for (pi, p) in m.parts.iter().enumerate() {
-                    if let Part::Error { .. } = p {
-                        PartView { key: "e-{m.id}-{pi}", session_id: session_id.clone(), part: p.clone(), live: false, show_reasoning }
-                    }
-                }
-            }
-            if let Some((mi, pi)) = final_at {
-                PartView { key: "f-{turn_key}", session_id: session_id.clone(), part: turn.replies[mi].parts[pi].clone(), live: false, show_reasoning }
-            }
+        }
+        if !live {
             if let Some(m) = last_reply {
                 {
                     let fb = feedback.clone();
@@ -617,6 +644,21 @@ fn TurnView(
         }
         }
     }
+}
+
+/// Turns of chat `chat` opened (or, if watched, folded) by hand.
+fn turns_open(chat: &str) -> Vec<(String, bool)> {
+    crate::keep::value(chat, "turns").unwrap_or_default()
+}
+
+fn set_turn_open(chat: &str, key: &str, open: bool) {
+    let mut v = turns_open(chat);
+    v.retain(|(k, _)| k != key);
+    v.push((key.to_string(), open));
+    if v.len() > 300 {
+        v.drain(..v.len() - 300);
+    }
+    crate::keep::set_value(chat, "turns", &v);
 }
 
 #[component]

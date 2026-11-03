@@ -742,7 +742,11 @@ select.input { cursor: pointer; padding-right: 4px; }
 .overlay { animation: fade-in .12s ease-out; }
 .palette, .modal { animation: pop-in .16s cubic-bezier(.2, .8, .2, 1); }
 .right-pane { animation: slide-in-right .18s cubic-bezier(.2, .8, .2, 1); }
-.user-msg, .a-block, .tool-card, .step, .msg-actions { animation: rise-in .2s ease-out backwards; }
+/* What arrives animates in (a live turn's parts, a reply's actions); what
+   is only drawn again doesn't, so nothing flickers when a chat updates. */
+.msg-actions { animation: rise-in .2s ease-out backwards; }
+.step.worked.live { cursor: default; }
+.step.worked.live:hover .verb { color: var(--fg-2); }
 .chat-row, .repo-row, .nav-row, .menu-item, .icon-btn, .pill-btn, .ghost-btn, .primary-btn, .picker, .env-chip, .tool-link, .select-btn, .plus-btn, .send-btn, .chip, .seg button, .toggle, .toggle::after {
   transition: background-color .12s ease, color .12s ease, border-color .12s ease, opacity .12s ease, transform .12s ease, left .15s ease, box-shadow .12s ease;
 }

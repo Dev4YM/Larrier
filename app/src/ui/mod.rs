@@ -727,6 +727,14 @@ pub fn Root() -> Element {
                   });
                   document.body.appendChild(pop);
                 }
+                // It lives outside the app's root: the theme's colors and font
+                // come along each time it shows.
+                const root = document.querySelector('.larrier-root');
+                if (root) {
+                  const cs = getComputedStyle(root);
+                  for (const v of ['--card', '--card-2', '--menu-bg', '--fg', '--fg-2', '--border', '--hover']) pop.style.setProperty(v, cs.getPropertyValue(v));
+                  pop.style.fontFamily = cs.fontFamily;
+                }
                 pop.style.display = 'flex';
                 const w = pop.offsetWidth || 76, h = pop.offsetHeight || 28;
                 const x = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));

@@ -1269,6 +1269,15 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
    lines tall (double-click shows it all), the rest fading out. */
 .user-card { max-height: calc(var(--lh-prompt, 22px) * 6 + 22px); }
 .user-card.has-images { max-height: calc(var(--lh-prompt, 22px) * 6 + 88px); }
+/* Pinned at the top while its turn scrolls by, a prompt shows three lines,
+   fading out (drawn shorter only: its place in the chat doesn't change, so
+   nothing moves). */
+.turn > .user-msg { container-type: scroll-state; }
+@container scroll-state(stuck: top) {
+  .user-card:not(.expanded):not(.editing):not(.short) { clip-path: inset(0 0 calc(100% - var(--lh-prompt, 22px) * 3 - 20px) 0 round 12px); }
+  /* Its fade moves up to the new bottom. */
+  .user-card:not(.expanded):not(.editing):not(.short)::after { top: calc(var(--lh-prompt, 22px) * 3 - 24px); bottom: auto; }
+}
 .user-card.expanded { max-height: none; }
 .user-card.short::after { display: none; }
 .user-card:not(.expanded)::after { height: 44px; background: linear-gradient(to bottom, transparent, var(--card-2) 88%); }
@@ -1652,8 +1661,9 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .quote-pop:hover { background: var(--hover); }
 .quote-pop svg { color: var(--fg-2); }
 @keyframes quote-pop-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
-/* An agent's words read as text: the text cursor over them. */
-.a-text { cursor: text; }
+/* An agent's words: the text cursor over the text itself, the pointer
+   elsewhere (the browser decides, as on any page). */
+.a-text { cursor: auto; }
 .a-text a, .a-text button, .a-text summary { cursor: pointer; }
 .tok-field { position: relative; min-width: 0; }
 .cgrid .tok-field { grid-area: text; width: 100%; }

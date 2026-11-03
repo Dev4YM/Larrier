@@ -611,6 +611,7 @@ fn BrowserTab() -> Element {
     // The chat's tabs from when Larrier last closed come back the first
     // time its browser is shown.
     let owner = use_memo(|| host::STATE.read().owner.clone());
+    use_hook(host::prepare_engine);
     use_effect(move || host::restore(&owner()));
     let mut input = use_signal(String::new);
     let mut editing = use_signal(|| false);
@@ -730,12 +731,40 @@ fn BrowserTab() -> Element {
                     }
                 }
             }
-            if !has_page {
+            // The engine's runtime on its way (it comes once), or not.
+            if let host::Engine::Fetching { done, total } = host::ENGINE() {
+                {
+                    let pct = if total > 0 { done as f64 / total as f64 * 100.0 } else { 0.0 };
+                    let mb = |b: u64| (b as f64 / 1e6).round() as u64;
+                    rsx! {
+                        div { class: "browser-empty browser-error",
+                            Icon { i: I::Globe, size: 22 }
+                            div { class: "t", "Getting Larrier's browser ready" }
+                            if total > 0 {
+                                div { class: "d", "Its Chromium engine comes once: {mb(done)} of {mb(total)} MB." }
+                            } else {
+                                div { class: "d", "Its Chromium engine comes once." }
+                            }
+                            div { class: "engine-bar", div { class: "fill", style: "width: {pct:.1}%;" } }
+                        }
+                    }
+                }
+            } else if let host::Engine::Failed(e) = host::ENGINE() {
+                div { class: "browser-empty browser-error",
+                    Icon { i: I::Globe, size: 22 }
+                    div { class: "t", "The browser engine isn't here" }
+                    div { class: "d", "{e}" }
+                    button { class: "primary-btn", onclick: move |_| host::retry_engine(), "Try again" }
+                }
+            } else if !has_page || active.as_ref().is_some_and(|t| host::is_blank(&t.url) && t.error.is_none()) {
                 div { class: "browser-empty",
                     Icon { i: I::Globe, size: 22 }
                     if let Some(e) = st.error.clone() {
                         div { class: "t", "The browser couldn't start" }
                         div { class: "d", "{e}" }
+                    } else if has_page {
+                        div { class: "t", "New Tab" }
+                        div { class: "d", "Type an address or search above." }
                     } else {
                         div { class: "t", "Larrier's browser" }
                         div { class: "d", if larrier_agents::browser::SUPPORTED { "Type an address above. Agents browse here with their browser tools, in the same pages you see." } else { "Type an address above to browse here." } }

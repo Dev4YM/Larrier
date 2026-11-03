@@ -466,6 +466,8 @@ svg { flex-shrink: 0; display: block; }
 .browser-error .t { font-size: 15px; color: var(--fg); }
 .browser-error .d { max-width: 360px; font-size: 12.5px; line-height: 19px; color: var(--fg-2); }
 .browser-error .code { font-family: var(--mono); font-size: 11px; color: var(--fg-3); }
+.engine-bar { width: 220px; height: 4px; margin-top: 6px; border-radius: 2px; background: var(--chip); overflow: hidden; }
+.engine-bar .fill { height: 100%; background: var(--accent-c, var(--blue)); transition: width .3s ease; }
 
 .term { flex: 1; overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 8px 12px; user-select: text; }
 .term .cmd-line { color: var(--fg); }

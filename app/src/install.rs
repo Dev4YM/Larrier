@@ -331,6 +331,9 @@ pub fn uninstall(scope: Scope, remove_data: bool) -> Result<()> {
     }
     powershell(&format!("Remove-Item -Path '{}:\\{}' -Recurse -Force -ErrorAction SilentlyContinue", l.registry_root(), UNINSTALL_KEY))?;
     let _ = std::fs::remove_dir_all(&l.shared_dir);
+    // The browser engine, kept in the user's own folder.
+    #[cfg(windows)]
+    let _ = std::fs::remove_dir_all(crate::browser_cef::root());
     if remove_data {
         let _ = std::fs::remove_dir_all(larrier_core::store::data_root());
     }

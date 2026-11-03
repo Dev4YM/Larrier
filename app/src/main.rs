@@ -4,7 +4,7 @@
 mod agent_models;
 mod agent_versions;
 mod automations;
-mod browser_chrome;
+mod browser_cef;
 mod browser_control;
 mod browser_host;
 mod highlight;
@@ -108,8 +108,14 @@ enum Start {
 }
 
 fn main() {
-    scrub_host_session_env();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // One of the browser engine's helper processes (renderer, GPU, …): this
+    // program again, started by the engine. Nothing else of Larrier's runs.
+    #[cfg(windows)]
+    if browser_cef::is_subprocess(&args) {
+        std::process::exit(browser_cef::subprocess());
+    }
+    scrub_host_session_env();
     // An agent's browser tools: an MCP server on stdio (before any logging,
     // which would write into its replies).
     if args.first().map(String::as_str) == Some("mcp-browser") {
@@ -124,6 +130,8 @@ fn main() {
     // macOS / Linux: the agents and their tools as a terminal finds them.
     platform::adopt_login_path();
     install::tidy();
+    #[cfg(windows)]
+    browser_cef::tidy();
     let start = if args.iter().any(|a| a == "--uninstall") {
         Start::Uninstall
     } else if install::current() == install::Kind::Portable && !args.iter().any(|a| a == "--portable") {

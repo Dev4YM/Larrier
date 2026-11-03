@@ -16,6 +16,10 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
+    // The browser engine's library loads when the browser is first used,
+    // from where its runtime is (the program starts without it).
+    println!("cargo:rustc-link-arg=/DELAYLOAD:libcef.dll");
+    println!("cargo:rustc-link-lib=delayimp");
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let ico = out.join("larrier.ico");
     std::fs::write(&ico, icon(&[16, 20, 24, 32, 40, 48, 64, 128, 256])).expect("write icon");
@@ -27,11 +31,31 @@ fn main() {
     res.set("LegalCopyright", "© Dev4YM");
     res.set("OriginalFilename", "Larrier.exe");
     res.set("ProductVersion", &format!("{} ({commit})", env!("CARGO_PKG_VERSION")));
+    // Windows 10/11 as what the program is made for: without it Windows
+    // reports an older version, and the browser engine's GPU process fails.
+    res.set_manifest(MANIFEST);
     // Without the Windows SDK's resource compiler the exe just has no icon.
     if let Err(e) = res.compile() {
         println!("cargo:warning=no exe icon: {e}");
     }
 }
+
+const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>
+"#;
 
 /// The commit being built and its date (`LARRIER_COMMIT` /
 /// `LARRIER_COMMIT_DATE` override them, e.g. for builds outside a checkout).

@@ -1,9 +1,9 @@
 //! Larrier's browser: real browser pages laid over the Browser tab, one per
-//! page tab. With Google Chrome installed they're Larrier's own Chrome's
-//! (see `browser_chrome`); otherwise WebView2 views (the engine Larrier runs
-//! on). Either way they have a profile of their own and a DevTools port, so
-//! agents drive the very pages the user sees (`Larrier mcp-browser` attaches
-//! to that port) and sites see an ordinary browser, not a headless one.
+//! page tab. On Windows they're Chromium's, run by Larrier itself (see
+//! `browser_cef`); elsewhere the system's web views. Either way they have a
+//! profile of their own and a DevTools port, so agents drive the very pages
+//! the user sees (`Larrier mcp-browser` attaches to that port) and sites see
+//! an ordinary browser, not a headless one.
 //!
 //! The pages are native child windows: placed over the tab's area as the
 //! layout reports it, they step aside (offscreen, still rendering) when the
@@ -71,6 +71,26 @@ impl State {
 }
 
 pub static STATE: GlobalSignal<State> = Signal::global(State::default);
+
+/// Where the browser engine stands (Windows: its runtime comes once).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Engine {
+    #[default]
+    Ready,
+    Fetching { done: u64, total: u64 },
+    Failed(String),
+}
+
+pub static ENGINE: GlobalSignal<Engine> = Signal::global(Engine::default);
+
+/// Fetch the engine's runtime again after it failed.
+pub fn retry_engine() {
+    #[cfg(windows)]
+    {
+        *ENGINE.write() = Engine::Fetching { done: 0, total: 0 };
+        crate::browser_cef::ensure();
+    }
+}
 
 /// A chat's browser as kept between launches: its pages (address, title)
 /// and the one it showed.
@@ -163,10 +183,18 @@ pub(crate) enum Ev {
     /// A page opened another (a link to a new window): a tab in the same
     /// chat's browser.
     Open { url: String, from: Option<u64> },
-    /// A page Chrome opened in a window of its own (a popup, Ctrl+N): it
-    /// becomes a tab as it is, in the browser of the tab that opened it.
+    /// A page the engine opened itself (a pop-up, a link to a new window,
+    /// DevTools): tab `id` as it is, in the browser of the tab that opened it.
     #[cfg(windows)]
-    Popup { target: String, url: String, from: Option<u64> },
+    Popup { id: u64, url: String, from: Option<u64>, background: bool },
+    /// The engine's runtime is being fetched (bytes so far, of all).
+    #[cfg(windows)]
+    EngineProgress { done: u64, total: u64 },
+    /// It's here: what waited for it goes on.
+    #[cfg(windows)]
+    EngineReady,
+    #[cfg(windows)]
+    EngineFailed { error: String },
     /// After a load: the page couldn't be reached (its error code), or it
     /// loaded (`None`).
     #[cfg(windows)]
@@ -213,15 +241,26 @@ pub fn set_app(app: crate::state::App) {
     #[cfg(windows)]
     {
         use dioxus::desktop::tao::platform::windows::WindowExtWindows;
-        crate::browser_chrome::setup(dioxus::desktop::window().window.hwnd(), events(), annotate_script());
+        crate::browser_cef::setup(dioxus::desktop::window().window.hwnd(), events(), annotate_script());
+        events();
     }
 }
 
-/// Larrier's own Chrome is the engine when Google Chrome is installed;
-/// WebView2 views otherwise.
+/// The Browser tab is shown: the engine's runtime is fetched now if it
+/// isn't here (once, ahead of the first page).
+pub fn prepare_engine() {
+    #[cfg(windows)]
+    if !crate::browser_cef::present() && matches!(*ENGINE.peek(), Engine::Ready) {
+        *ENGINE.write() = Engine::Fetching { done: 0, total: 0 };
+        crate::browser_cef::ensure();
+    }
+}
+
+/// On Windows the engine is Larrier's own Chromium (see `browser_cef`);
+/// elsewhere the system's web views, for now.
 #[cfg(windows)]
 fn chrome() -> bool {
-    crate::browser_chrome::chrome_exe().is_some()
+    true
 }
 
 #[cfg(not(windows))]
@@ -230,14 +269,14 @@ fn chrome() -> bool {
 }
 
 #[cfg(windows)]
-fn to_chrome(cmd: crate::browser_chrome::Cmd) {
-    crate::browser_chrome::send(cmd);
+fn to_chrome(cmd: crate::browser_cef::Cmd) {
+    crate::browser_cef::send(cmd);
 }
 
 /// What a new tab opens: Chrome's New Tab page, or a blank page.
 pub fn blank() -> &'static str {
     if chrome() {
-        "chrome://newtab/"
+        "about:blank"
     } else {
         "about:blank"
     }
@@ -257,7 +296,7 @@ fn annotate_script() -> String {
 fn eval(id: u64, js: &str) -> Option<serde_json::Value> {
     #[cfg(windows)]
     if chrome() {
-        return crate::browser_chrome::eval(id, js);
+        return crate::browser_cef::eval(id, js);
     }
     use larrier_agents::browser::{view_running, view_target, Cdp};
     let cdp = Cdp::connect(&view_running()?).ok()?;
@@ -298,7 +337,7 @@ pub fn to_chat(which: &str, target: Option<String>) {
 fn capture(id: u64, clip: Option<(f64, f64, f64, f64)>) -> Option<String> {
     #[cfg(windows)]
     if chrome() {
-        return crate::browser_chrome::capture(id, clip);
+        return crate::browser_cef::capture(id, clip);
     }
     larrier_agents::browser::view_capture(id, clip)
 }
@@ -375,10 +414,17 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                         #[cfg(windows)]
                         Ev::Gone { id } => close_tab(id),
                         #[cfg(windows)]
-                        Ev::Popup { target, url, from } => {
+                        Ev::Popup { id, url, from, background } => {
                             let owner = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| t.owner.clone()));
-                            adopt_tab(owner.as_deref(), &url, target);
+                            adopt_tab(owner.as_deref(), &url, id, background);
                         }
+                        Ev::EngineProgress { done, total } => *ENGINE.write() = Engine::Fetching { done, total },
+                        Ev::EngineReady => {
+                            *ENGINE.write() = Engine::Ready;
+                            crate::browser_cef::flush();
+                            with_host(|h| place(h));
+                        }
+                        Ev::EngineFailed { error } => *ENGINE.write() = Engine::Failed(error),
                         #[cfg(windows)]
                         Ev::PageError { id, code } => {
                             let changed = {
@@ -441,9 +487,10 @@ fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {
 fn place(h: &Host) {
     #[cfg(windows)]
     if chrome() {
-        // A page that couldn't load steps aside for Larrier's own message.
-        let failed = h.active.is_some_and(|id| STATE.peek().tabs.iter().any(|t| t.id == id && t.error.is_some()));
-        crate::browser_chrome::place(h.area.filter(|_| !h.aside && !failed), h.active);
+        // A page that couldn't load steps aside for Larrier's own message,
+        // a new tab for Larrier's own New Tab.
+        let failed = h.active.is_some_and(|id| STATE.peek().tabs.iter().any(|t| t.id == id && (t.error.is_some() || is_blank(&t.url))));
+        crate::browser_cef::place(h.area.filter(|_| !h.aside && !failed), h.active);
         return;
     }
     for (id, v) in &h.views {
@@ -488,7 +535,7 @@ pub fn new_tab_in(owner: Option<&str>, url: &str) -> Option<u64> {
     }
     #[cfg(windows)]
     if chrome() {
-        to_chrome(crate::browser_chrome::Cmd::NewTab { id, url });
+        to_chrome(crate::browser_cef::Cmd::NewTab { id, url });
         with_host(|h| place(h));
         return Some(id);
     }
@@ -498,34 +545,25 @@ pub fn new_tab_in(owner: Option<&str>, url: &str) -> Option<u64> {
     Some(id)
 }
 
-/// A page Chrome opened in a window of its own, made a tab of `owner`'s
-/// browser (`None`: the chat shown) as it is: its window is seated, so
-/// what opened it (a sign-in popup's page) still reaches it.
+/// A page the engine opened itself, made tab `id` of `owner`'s browser
+/// (`None`: the chat shown), shown unless it opened in the background.
 #[cfg(windows)]
-fn adopt_tab(owner: Option<&str>, url: &str, target: String) {
+fn adopt_tab(owner: Option<&str>, url: &str, id: u64, background: bool) {
     let owner = owner.map(String::from).unwrap_or_else(|| STATE.peek().owner.clone());
-    let shown = owner == STATE.peek().owner;
-    let Some(id) = with_host(|h| {
-        let id = h.next;
-        h.next += 1;
-        if shown {
-            h.active = Some(id);
-        }
-        id
-    }) else {
-        return;
-    };
+    let shown = owner == STATE.peek().owner && !background;
     {
         let mut st = STATE.write();
         st.tabs.push(Tab { id, owner: owner.clone(), url: url.to_string(), loading: true, ..Default::default() });
         if shown {
             st.active = Some(id);
-        } else {
-            st.last.insert(owner, id);
         }
     }
-    to_chrome(crate::browser_chrome::Cmd::Adopt { id, target });
-    with_host(|h| place(h));
+    with_host(|h| {
+        if shown {
+            h.active = Some(id);
+        }
+        place(h);
+    });
 }
 
 /// Build the waiting views from the message loop itself (a thread timer):
@@ -673,7 +711,7 @@ pub fn close_tab(id: u64) {
     drop(st);
     #[cfg(windows)]
     if chrome() {
-        to_chrome(crate::browser_chrome::Cmd::Close { id });
+        to_chrome(crate::browser_cef::Cmd::Close { id });
     }
     with_host(|h| {
         if !chrome() && !h.views.iter().any(|(v, _)| *v == id) {
@@ -692,7 +730,7 @@ fn active_view<R>(f: impl FnOnce(&WebView) -> R) -> Option<R> {
 /// Hand Chrome's worker a command for the tab shown, when Chrome is the
 /// engine (`false`: it isn't, the view does it).
 #[cfg(windows)]
-fn chrome_active(cmd: impl FnOnce(u64) -> crate::browser_chrome::Cmd) -> bool {
+fn chrome_active(cmd: impl FnOnce(u64) -> crate::browser_cef::Cmd) -> bool {
     if !chrome() {
         return false;
     }
@@ -709,7 +747,7 @@ pub fn navigate(input: &str) {
         return;
     }
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_chrome::Cmd::Navigate { id, url: url.clone() }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::Navigate { id, url: url.clone() }) {
         return;
     }
     active_view(|v| v.load_url(&url));
@@ -717,7 +755,7 @@ pub fn navigate(input: &str) {
 
 pub fn back() {
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_chrome::Cmd::History { id, back: true }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::History { id, back: true }) {
         return;
     }
     active_view(|v| v.evaluate_script("history.back()"));
@@ -725,7 +763,7 @@ pub fn back() {
 
 pub fn forward() {
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_chrome::Cmd::History { id, back: false }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::History { id, back: false }) {
         return;
     }
     active_view(|v| v.evaluate_script("history.forward()"));
@@ -733,7 +771,7 @@ pub fn forward() {
 
 pub fn reload() {
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_chrome::Cmd::Reload { id }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::Reload { id }) {
         return;
     }
     active_view(|v| v.reload());
@@ -741,7 +779,7 @@ pub fn reload() {
 
 pub fn stop() {
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_chrome::Cmd::Stop { id }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::Stop { id }) {
         return;
     }
     active_view(|v| v.evaluate_script("window.stop()"));
@@ -749,7 +787,7 @@ pub fn stop() {
 
 pub fn devtools() {
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_chrome::Cmd::DevTools { id }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::DevTools { id }) {
         return;
     }
     active_view(|v| v.open_devtools());
@@ -759,7 +797,7 @@ pub fn devtools() {
 pub fn annotate(on: bool) {
     *ANNOTATING.write() = on;
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_chrome::Cmd::Script { id, js: format!("window.__larrierAnnotate && window.__larrierAnnotate({on})") }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::Script { id, js: format!("window.__larrierAnnotate && window.__larrierAnnotate({on})") }) {
         return;
     }
     active_view(|v| {

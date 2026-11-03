@@ -85,15 +85,16 @@ impl Server {
     }
 }
 
-/// Larrier's own browser views (WebView2 in the app's Browser tab): their
-/// profile folder.
+/// The Browser tab's folder: the agents' control file, and the profile of
+/// the system's web views where the tab uses them (macOS, Linux).
 pub fn view_dir() -> PathBuf {
     larrier_core::store::data_root().join("browser-view")
 }
 
-/// Larrier's own Google Chrome: its profile folder.
-pub fn chrome_dir() -> PathBuf {
-    larrier_core::store::data_root().join("browser-chrome")
+/// The profile of Larrier's own browser engine (Chromium, on Windows): its
+/// pages' cookies and sign-ins, and the DevTools port file.
+pub fn engine_dir() -> PathBuf {
+    larrier_core::store::data_root().join("browser-engine")
 }
 
 /// A browser's DevTools port and websocket path, from the file it writes
@@ -108,20 +109,12 @@ fn devtools_at(file: PathBuf) -> Option<(u16, String)> {
     Some((port, path))
 }
 
-/// Larrier's Chrome's DevTools port, while it runs.
-pub fn chrome_port() -> Option<u16> {
-    devtools_at(chrome_dir().join("DevToolsActivePort")).map(|(p, _)| p)
-}
-
-/// Larrier's Chrome's DevTools websocket address, while it runs.
-pub fn chrome_running() -> Option<String> {
-    devtools_at(chrome_dir().join("DevToolsActivePort")).map(|(port, path)| format!("ws://127.0.0.1:{port}{path}"))
-}
-
 /// The DevTools websocket address of the browser behind Larrier's Browser
-/// tab (its Chrome, or its WebView2 views), when it's open.
+/// tab (its Chromium engine, or the system's web views), when it's open.
 pub fn view_running() -> Option<String> {
-    chrome_running().or_else(|| devtools_at(view_dir().join("EBWebView").join("DevToolsActivePort")).map(|(port, path)| format!("ws://127.0.0.1:{port}{path}")))
+    devtools_at(engine_dir().join("DevToolsActivePort"))
+        .map(|(port, path)| format!("ws://127.0.0.1:{port}{path}"))
+        .or_else(|| devtools_at(view_dir().join("EBWebView").join("DevToolsActivePort")).map(|(port, path)| format!("ws://127.0.0.1:{port}{path}")))
 }
 
 /// The page target showing Larrier tab `tab` (each view tells its pages

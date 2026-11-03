@@ -55,7 +55,7 @@ fn api_root() -> String {
     std::env::var("LARRIER_UPDATE_API").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "https://api.github.com".into())
 }
 
-fn repo() -> String {
+pub fn repo() -> String {
     std::env::var("LARRIER_UPDATE_REPO").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| REPO.into())
 }
 

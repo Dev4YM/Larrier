@@ -60,10 +60,10 @@ pub fn start() {
         .ok();
 }
 
-/// The DevTools target showing tab `id`, when Larrier's Chrome shows it.
+/// The DevTools target showing tab `id`, when Larrier's engine shows it.
 fn target_of(id: u64) -> Option<String> {
     #[cfg(windows)]
-    return crate::browser_chrome::target_of(id);
+    return crate::browser_cef::target_of(id);
     #[cfg(not(windows))]
     {
         let _ = id;

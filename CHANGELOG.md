@@ -5,6 +5,12 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.39 — 2026-11-03
+
+### Fixed
+
+- Show a question the agent is waiting on once
+- Ask questions, approvals and plans above the input only
 ## 0.1.38 — 2026-11-02
 
 ### New

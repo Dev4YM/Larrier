@@ -17,14 +17,16 @@ use larrier_agents::browser::{chrome_running, Cdp};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedSender;
 use windows::core::{w, BOOL};
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, WHITE_BRUSH};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetFocus, SetFocus, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, EnumChildWindows, EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, PostMessageW,
+    CreateWindowExW, DefWindowProcW, EnumChildWindows, EnumWindows, GetClassNameW, GetCursorPos, IsChild, WindowFromPoint, WA_CLICKACTIVE, WA_INACTIVE, WM_ACTIVATE, WM_SETFOCUS, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible,
     RegisterClassW, SetParent, HWND_TOP, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, SET_WINDOW_POS_FLAGS, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE,
     SWP_NOZORDER, SWP_SHOWWINDOW,
-    WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_NOPARENTNOTIFY, WS_EX_TOOLWINDOW,
+    WM_DESTROY, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_NOPARENTNOTIFY, WS_EX_TOOLWINDOW,
     WS_THICKFRAME, WS_VISIBLE,
 };
 
@@ -58,6 +60,9 @@ pub enum Cmd {
     Reload { id: u64 },
     Stop { id: u64 },
     DevTools { id: u64 },
+    /// Seat the window of a page Chrome opened in a window of its own (a
+    /// popup, Ctrl+N) as tab `id`.
+    Adopt { id: u64, target: String },
     Script { id: u64, js: String },
     /// Show tab `id` filling the frame (now `size`, when it changed), the
     /// others out of sight.
@@ -478,14 +483,6 @@ fn insets(win: HWND) -> Option<(i32, i32, i32, i32)> {
     (i.right > i.left).then_some((i.left - o.left, i.top - o.top, o.right - i.right, o.bottom - i.bottom))
 }
 
-fn post_key(win: isize, vk: usize, scan: isize) {
-    let h = HWND(win as *mut _);
-    unsafe {
-        let _ = PostMessageW(Some(h), WM_KEYDOWN, WPARAM(vk), LPARAM(1 | (scan << 16)));
-        let _ = PostMessageW(Some(h), WM_KEYUP, WPARAM(vk), LPARAM(1 | (scan << 16) | (0xC000_0000u32 as isize)));
-    }
-}
-
 /// An address that is no page of its own yet.
 fn unsettled(url: &str) -> bool {
     url.is_empty() || url == "about:blank"
@@ -656,10 +653,26 @@ impl Worker {
                 self.call(id, "Runtime.evaluate", json!({"expression": js, "userGesture": true}));
             }
             Cmd::DevTools { id } => {
-                // Chrome's own DevTools, docked in the page's window (F12).
-                if let Some(h) = self.tabs.get(&id).and_then(|t| t.window) {
-                    post_key(h, 0x7B, 0x58);
+                // Chrome's own DevTools for the page, in a tab beside it.
+                let at = chrome_running().and_then(|ws| ws.split("//").nth(1).and_then(|r| r.split('/').next()).map(String::from));
+                if let (Some(t), Some(at)) = (self.tabs.get(&id), at) {
+                    let url = format!("devtools://devtools/bundled/inspector.html?ws={at}/devtools/page/{}", t.target);
+                    let _ = self.events.send(Ev::Open { url, from: Some(id) });
                 }
+            }
+            Cmd::Adopt { id, target } => {
+                // Its window: the one of Chrome's not seated yet.
+                let seated: HashSet<isize> = self.tabs.values().filter_map(|t| t.window).collect();
+                let until = Instant::now() + Duration::from_secs(3);
+                let mut win = None;
+                while win.is_none() && Instant::now() < until {
+                    win = chrome_windows(self.chrome.id()).into_iter().find(|h| !seated.contains(h));
+                    if win.is_none() {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                }
+                self.adopt(id, &target, win);
+                self.show(Some(id));
             }
             Cmd::Show { id, size } => {
                 if let Some((w, h)) = size {
@@ -708,11 +721,24 @@ impl Worker {
                     }
                     let url = self.tabs.get(&id).map(|t| t.url.clone()).unwrap_or_default();
                     let _ = self.events.send(Ev::Load { id, started: false, url });
+                    // Chrome's "can't be reached" page: Larrier shows its own
+                    // instead (a certificate warning stays Chrome's: it can
+                    // be passed from there).
+                    let probe = "location.href.startsWith('chrome-error://') ? ((document.querySelector('.error-code') || {}).textContent || 'ERR_FAILED').trim() : ''";
+                    let code = self
+                        .call(id, "Runtime.evaluate", json!({"expression": probe, "returnByValue": true}))
+                        .and_then(|v| v["result"]["value"].as_str().map(String::from))
+                        .filter(|c| !c.is_empty() && !c.contains("CERT"));
+                    let _ = self.events.send(Ev::PageError { id, code });
                     if let Some(h) = self.call(id, "Page.getNavigationHistory", json!({})) {
                         let i = h["currentIndex"].as_u64().unwrap_or(0) as usize;
                         let n = h["entries"].as_array().map(|e| e.len()).unwrap_or(0);
                         let _ = self.events.send(Ev::Nav { id, back: i > 0, forward: i + 1 < n });
                     }
+                }
+                // A real page took the tab: whatever couldn't load before is gone.
+                ("Page.frameNavigated", Some(id)) if p["frame"]["parentId"].is_null() && !p["frame"]["url"].as_str().unwrap_or("").starts_with("chrome-error://") => {
+                    let _ = self.events.send(Ev::PageError { id, code: None });
                 }
                 ("Runtime.bindingCalled", Some(id)) if p["name"] == "__larrierPost" => {
                     let _ = self.events.send(Ev::Annotate { id, body: p["payload"].as_str().unwrap_or("").to_string() });
@@ -736,10 +762,18 @@ impl Worker {
                     // or a window of its own (a sign-in popup: left to be).
                     let window = self.cdp.call("Browser.getWindowForTarget", json!({"targetId": t}), None).ok().and_then(|v| v["windowId"].as_i64());
                     let from = window.and_then(|_| self.tabs.iter().find(|(_, x)| x.window_id == window).map(|(id, _)| *id));
+                    let url = i["url"].as_str().unwrap_or("").to_string();
                     if let Some(from) = from {
-                        self.strays.insert(t.to_string(), (Instant::now(), i["url"].as_str().unwrap_or("").to_string(), Some(from)));
+                        self.strays.insert(t.to_string(), (Instant::now(), url, Some(from)));
                     } else {
+                        // A window of its own (a sign-in popup, Ctrl+N): it
+                        // becomes a tab as it is, keeping what opened it.
                         self.known.insert(t.to_string());
+                        let prerender = i["subtype"].as_str().is_some_and(|s| !s.is_empty());
+                        if !prerender && !url.starts_with("devtools://") {
+                            let opener = i["openerId"].as_str().and_then(|o| by_target.get(o)).copied().or(self.shown);
+                            let _ = self.events.send(Ev::Popup { target: t.to_string(), url, from: opener });
+                        }
                     }
                 }
                 ("Target.targetDestroyed", _) => {

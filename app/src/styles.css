@@ -461,6 +461,11 @@ svg { flex-shrink: 0; display: block; }
 .browser-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; color: var(--fg-3); }
 .browser-empty .t { color: var(--fg-2); font-weight: 500; }
 .browser-empty .d { max-width: 300px; font-size: 12px; line-height: 18px; }
+/* A page that couldn't load: Larrier's own message where the page goes. */
+.browser-error { position: absolute; inset: 0; height: auto; background: var(--pane); gap: 8px; }
+.browser-error .t { font-size: 15px; color: var(--fg); }
+.browser-error .d { max-width: 360px; font-size: 12.5px; line-height: 19px; color: var(--fg-2); }
+.browser-error .code { font-family: var(--mono); font-size: 11px; color: var(--fg-3); }
 
 .term { flex: 1; overflow-y: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; padding: 8px 12px; user-select: text; }
 .term .cmd-line { color: var(--fg); }

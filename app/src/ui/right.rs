@@ -709,6 +709,27 @@ fn BrowserTab() -> Element {
             if let Some(shot) = host::SNAPSHOT() {
                 img { class: "browser-snap", src: "data:image/jpeg;base64,{shot}", draggable: "false" }
             }
+            if let Some((code, url)) = active.as_ref().and_then(|t| Some((t.error.clone()?, t.url.clone()))) {
+                {
+                    let (title, detail) = page_error(&code, &page_host(&url));
+                    let host = page_host(&url);
+                    let search = matches!(code.as_str(), "ERR_NAME_NOT_RESOLVED" | "ERR_NAME_RESOLUTION_FAILED") || code.starts_with("DNS_PROBE");
+                    rsx! {
+                        div { class: "browser-empty browser-error",
+                            Icon { i: I::Globe, size: 22 }
+                            div { class: "t", "{title}" }
+                            div { class: "d", "{detail}" }
+                            div { class: "code", "{code}" }
+                            div { class: "row", style: "gap: 8px; margin-top: 6px;",
+                                button { class: "primary-btn", onclick: move |_| host::reload(), "Try again" }
+                                if search {
+                                    button { class: "ghost-btn", onclick: move |_| host::navigate(&host), "Search for it" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if !has_page {
                 div { class: "browser-empty",
                     Icon { i: I::Globe, size: 22 }
@@ -722,6 +743,24 @@ fn BrowserTab() -> Element {
                 }
             }
         }
+    }
+}
+
+/// What to say for a page Chrome couldn't load (its error code): a title and
+/// a line on what to do.
+fn page_error(code: &str, host: &str) -> (String, String) {
+    let host = if host.is_empty() { "The site" } else { host };
+    match code {
+        "ERR_NAME_NOT_RESOLVED" | "ERR_NAME_RESOLUTION_FAILED" => ("This site can't be found".into(), format!("{host}'s address couldn't be found. Check the spelling, or search for it.")),
+        c if c.starts_with("DNS_PROBE") => ("This site can't be found".into(), format!("{host}'s address couldn't be found. Check the spelling, or search for it.")),
+        "ERR_CONNECTION_REFUSED" => (format!("{host} refused to connect"), "Nothing is answering at this address. If it's a local server, check that it's running.".into()),
+        "ERR_INTERNET_DISCONNECTED" => ("You're offline".into(), "Check your internet connection, then try again.".into()),
+        "ERR_CONNECTION_TIMED_OUT" | "ERR_TIMED_OUT" => (format!("{host} took too long to respond"), "The site may be busy or down. Try again in a moment.".into()),
+        "ERR_CONNECTION_RESET" | "ERR_CONNECTION_CLOSED" | "ERR_EMPTY_RESPONSE" => ("The connection was interrupted".into(), format!("{host} closed the connection before the page loaded.")),
+        "ERR_TOO_MANY_REDIRECTS" => ("This page keeps redirecting".into(), format!("{host} sent the browser around in a loop. Clearing its cookies may help.")),
+        "ERR_FILE_NOT_FOUND" => ("File not found".into(), "It may have been moved, renamed or deleted.".into()),
+        c if c.starts_with("HTTP ERROR") => ("This page isn't working".into(), format!("{host} couldn't handle the request.")),
+        _ => ("This page couldn't load".into(), format!("{host} can't be reached right now.")),
     }
 }
 

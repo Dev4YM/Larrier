@@ -29,6 +29,9 @@ pub struct Tab {
     pub loading: bool,
     pub can_back: bool,
     pub can_forward: bool,
+    /// The page couldn't load (Chrome's error code): Larrier says so in its
+    /// place.
+    pub error: Option<String>,
 }
 
 /// What the Browser tab shows.
@@ -115,7 +118,8 @@ pub fn keep() {
         }
     }
     for o in owners.iter().filter(|o| !o.is_empty()) {
-        let mine: Vec<&Tab> = st.tabs.iter().filter(|t| &t.owner == o).collect();
+        // DevTools belongs to its page's run of Chrome: not kept.
+        let mine: Vec<&Tab> = st.tabs.iter().filter(|t| &t.owner == o && !t.url.starts_with("devtools://")).collect();
         let active = st.active_of(o).and_then(|a| mine.iter().position(|t| t.id == a));
         let k = Kept { pages: mine.iter().map(|t| (t.url.clone(), t.title.clone())).collect(), active };
         // A browser with no tabs left keeps nothing.
@@ -159,6 +163,14 @@ pub(crate) enum Ev {
     /// A page opened another (a link to a new window): a tab in the same
     /// chat's browser.
     Open { url: String, from: Option<u64> },
+    /// A page Chrome opened in a window of its own (a popup, Ctrl+N): it
+    /// becomes a tab as it is, in the browser of the tab that opened it.
+    #[cfg(windows)]
+    Popup { target: String, url: String, from: Option<u64> },
+    /// After a load: the page couldn't be reached (its error code), or it
+    /// loaded (`None`).
+    #[cfg(windows)]
+    PageError { id: u64, code: Option<String> },
     Failed { id: u64, error: String },
     Nav { id: u64, back: bool, forward: bool },
     /// A message from the page's annotate script.
@@ -362,6 +374,21 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                         }
                         #[cfg(windows)]
                         Ev::Gone { id } => close_tab(id),
+                        #[cfg(windows)]
+                        Ev::Popup { target, url, from } => {
+                            let owner = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| t.owner.clone()));
+                            adopt_tab(owner.as_deref(), &url, target);
+                        }
+                        #[cfg(windows)]
+                        Ev::PageError { id, code } => {
+                            let changed = {
+                                let mut st = STATE.write();
+                                st.tabs.iter_mut().find(|t| t.id == id).filter(|t| t.error != code).map(|t| t.error = code).is_some()
+                            };
+                            if changed {
+                                with_host(|h| place(h));
+                            }
+                        }
                         Ev::Open { url, from } => {
                             let owner = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| t.owner.clone()));
                             new_tab_in(owner.as_deref(), &url);
@@ -414,7 +441,9 @@ fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {
 fn place(h: &Host) {
     #[cfg(windows)]
     if chrome() {
-        crate::browser_chrome::place(h.area.filter(|_| !h.aside), h.active);
+        // A page that couldn't load steps aside for Larrier's own message.
+        let failed = h.active.is_some_and(|id| STATE.peek().tabs.iter().any(|t| t.id == id && t.error.is_some()));
+        crate::browser_chrome::place(h.area.filter(|_| !h.aside && !failed), h.active);
         return;
     }
     for (id, v) in &h.views {
@@ -467,6 +496,36 @@ pub fn new_tab_in(owner: Option<&str>, url: &str) -> Option<u64> {
     BUILDER.with(|b| b.borrow_mut().get_or_insert_with(|| dioxus::desktop::window().window.clone()).clone());
     schedule_build();
     Some(id)
+}
+
+/// A page Chrome opened in a window of its own, made a tab of `owner`'s
+/// browser (`None`: the chat shown) as it is: its window is seated, so
+/// what opened it (a sign-in popup's page) still reaches it.
+#[cfg(windows)]
+fn adopt_tab(owner: Option<&str>, url: &str, target: String) {
+    let owner = owner.map(String::from).unwrap_or_else(|| STATE.peek().owner.clone());
+    let shown = owner == STATE.peek().owner;
+    let Some(id) = with_host(|h| {
+        let id = h.next;
+        h.next += 1;
+        if shown {
+            h.active = Some(id);
+        }
+        id
+    }) else {
+        return;
+    };
+    {
+        let mut st = STATE.write();
+        st.tabs.push(Tab { id, owner: owner.clone(), url: url.to_string(), loading: true, ..Default::default() });
+        if shown {
+            st.active = Some(id);
+        } else {
+            st.last.insert(owner, id);
+        }
+    }
+    to_chrome(crate::browser_chrome::Cmd::Adopt { id, target });
+    with_host(|h| place(h));
 }
 
 /// Build the waiting views from the message loop itself (a thread timer):

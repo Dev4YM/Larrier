@@ -178,6 +178,26 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
         .unwrap_or(true);
     let open = !answered && !replied_later && !sent() && !live;
     let title = tool.input.get("title").and_then(|t| t.as_str()).map(String::from);
+    if live {
+        // The card above the composer asks it: here it is one line that
+        // leads there, so the question shows once.
+        let label = title.unwrap_or_else(|| if n > 1 { format!("Asked you {n} questions") } else { "Asked you a question".into() });
+        let find = format!(
+            "const a = document.querySelector('[data-ask=' + JSON.stringify({}) + ']'); \
+             const r = a && a.closest('.transcript')?.querySelector('.req-card.ask-card'); \
+             if (r) r.scrollIntoView({{ block: 'nearest', behavior: document.querySelector('.app.no-motion') ? 'auto' : 'smooth' }});",
+            serde_json::to_string(&tool.id).unwrap_or_default()
+        );
+        return rsx! {
+            button { class: "ask-card waiting", "data-ask": "{tool.id}", title: "Show the question",
+                onclick: move |_| { document::eval(&find); },
+                span { class: "ic", Icon { i: I::Message, size: 13 } }
+                span { class: "grow", "{label}" }
+                span { class: "hint", "Answer below" }
+                span { class: "ic", Icon { i: I::ArrowDown, size: 12 } }
+            }
+        };
+    }
     let hint = if app.running_elsewhere(&session_id) {
         format!("Running in {}: answer it there", app.peek_session(&session_id, |s| s.agent.display_name()).unwrap_or_default())
     } else if app.is_active(&session_id) {
@@ -188,10 +208,10 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
     let sid = session_id.clone();
     let qs_send = qs.clone();
     rsx! {
-        div { class: if open || live { "ask-card open" } else { "ask-card" },
+        div { class: if open { "ask-card open" } else { "ask-card" },
             div { class: "ask-head",
-                span { class: "ic", Icon { i: if open || live { I::Message } else { I::CircleCheck }, size: 13 } }
-                span { class: "grow", if let Some(t) = &title { "{t}" } else if open || live { "The agent has a question" } else { "Answered" } }
+                span { class: "ic", Icon { i: if open { I::Message } else { I::CircleCheck }, size: 13 } }
+                span { class: "grow", if let Some(t) = &title { "{t}" } else if open { "The agent has a question" } else { "Answered" } }
                 if n > 1 { span { class: "ask-count", "{n} questions" } }
             }
             QuestionList {
@@ -205,9 +225,7 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
                     app.send(Some(sid.clone()), reply(&qs_send, &picks), Vec::new());
                 },
             }
-            if live {
-                div { class: "ask-actions", span { class: "grow hint", "Waiting for your answer below" } }
-            } else if sent() {
+            if sent() {
                 div { class: "ask-actions", span { class: "grow hint", "Answers sent" } }
             } else if !open && !answered {
                 // The agent did not record the answer (Cursor): it was given

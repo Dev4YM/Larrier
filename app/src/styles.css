@@ -1431,6 +1431,13 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* What a running agent waits for: a tool to approve, a plan, questions. */
 .req-card { margin: 10px 0 12px; border: 1px solid color-mix(in srgb, var(--accent-c, var(--blue)) 40%, var(--border)); border-radius: 12px; background: var(--card); padding: 10px 14px 10px; animation: req-in .18s ease-out; }
 .req-card.ask-card { padding: 4px 0 6px; }
+/* A question the agent is waiting on, where it was asked: one line that
+   leads to the card above the composer, which asks it. */
+.ask-card.waiting { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 12px 7px 14px; text-align: left; font-size: 12px; color: var(--fg-2);
+  border-color: color-mix(in srgb, var(--accent-c, var(--blue)) 45%, var(--border)); cursor: pointer; transition: background-color .12s ease; }
+.ask-card.waiting:hover { background: var(--hover); }
+.ask-card.waiting .ic { display: inline-flex; color: var(--accent-c, var(--blue)); }
+.ask-card.waiting .hint { color: var(--fg-3); }
 .req-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-2); margin-bottom: 6px; }
 .req-head .ic { color: var(--accent-c, var(--blue)); display: inline-flex; }
 .req-head .grow { flex: 1; }

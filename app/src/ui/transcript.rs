@@ -188,7 +188,6 @@ pub fn Transcript(id: String) -> Element {
     let running = app.is_active(&id);
     // The agent finished its reply; only background work keeps it running.
     let writing = running && !app.idle.read().contains(&id);
-    let (permission, pending_more) = app.permissions.read().get(&id).map(|v| (v.first().cloned(), v.len().saturating_sub(1))).unwrap_or((None, 0));
     let steering = app.steering.read().get(&id).cloned().unwrap_or_default();
     let show_reasoning = app.config.read().settings.show_reasoning;
     let n_rows = rows.len();
@@ -431,9 +430,6 @@ pub fn Transcript(id: String) -> Element {
                         }
                         div { class: "pending-note", super::loaders::Orbit { size: 11 } if taking_back.contains(&q.id) { "Taking it back…" } else { "Sending into this turn…" } }
                     }
-                }
-                if let Some(req) = permission {
-                    super::request::RequestCard { key: "{req.id}", session_id: id.clone(), request: req, more: pending_more }
                 }
                 if waiting {
                     div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
@@ -1497,7 +1493,12 @@ fn PlanCard(entries: Vec<PlanEntry>) -> Element {
 
 /// A plan the agent proposed (ExitPlanMode).
 #[component]
-fn PlanProposal(tool: ToolCall) -> Element {
+fn PlanProposal(session_id: String, tool: ToolCall) -> Element {
+    // Waiting on it, the plan shows in the card above the input; once
+    // decided, it stays here.
+    if super::ask::waited_on(use_app(), &session_id, &tool.id) {
+        return rsx! {};
+    }
     let plan = tool.input.get("plan").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if plan.trim().is_empty() {
         return rsx! { Step { tool } };
@@ -1517,7 +1518,7 @@ fn ToolView(session_id: String, tool: ToolCall) -> Element {
         return rsx! { super::tasks::SubagentCard { session_id, tool } };
     }
     match tool.name.as_str() {
-        "ExitPlanMode" => return rsx! { PlanProposal { tool } },
+        "ExitPlanMode" => return rsx! { PlanProposal { session_id, tool } },
         name if super::ask::QUESTION_TOOLS.contains(&name) => return rsx! { super::ask::AskCard { session_id, tool } },
         "BashOutput" | "TaskOutput" | "KillShell" | "KillBash" | "TaskStop" | "Monitor" => return rsx! { Step { tool } },
         _ => {}

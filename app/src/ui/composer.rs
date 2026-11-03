@@ -493,6 +493,9 @@ pub fn Composer(
     };
     let hl_i = if suggs.is_empty() { 0 } else { hl().min(suggs.len() - 1) };
     let queued: Vec<crate::state::Queued> = session_id.as_ref().and_then(|id| app.queue.read().get(id).cloned()).unwrap_or_default();
+    // What the agent is waiting on (a question, an approval, a plan), with
+    // how many more wait behind it.
+    let request = session_id.as_ref().and_then(|id| app.permissions.read().get(id).and_then(|v| Some((v.first()?.clone(), v.len() - 1))));
 
     // Copy-able helpers so every menu row and key handler can hold one.
     // Store a pick for mode group 0 (Session.mode) or 1 (Session.permission).
@@ -928,6 +931,10 @@ pub fn Composer(
                         }
                     }
                 }
+            }
+            // Asked above the input, where it is answered: never in the chat.
+            if let (Some((req, more)), Some(sid)) = (request, session_id.clone()) {
+                super::request::RequestCard { key: "{req.id}", session_id: sid, request: req, more }
             }
             if !queued.is_empty() {
                 if queue_open() {

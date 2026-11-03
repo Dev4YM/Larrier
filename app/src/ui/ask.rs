@@ -140,6 +140,12 @@ fn read_answers(qs: &mut [Question], output: &str) {
     }
 }
 
+/// The agent is waiting on this tool call (a question, a plan): the card
+/// above the input asks it, so the chat doesn't show it as well.
+pub fn waited_on(app: crate::state::App, session_id: &str, tool_id: &str) -> bool {
+    app.permissions.read().get(session_id).is_some_and(|v| v.iter().any(|r| r.tool_call_id.as_deref() == Some(tool_id)))
+}
+
 /// The reply that answers `qs` with the user's picks.
 pub fn reply(qs: &[Question], picks: &[Vec<String>]) -> String {
     if qs.len() == 1 {
@@ -152,9 +158,11 @@ pub fn reply(qs: &[Question], picks: &[Vec<String>]) -> String {
     out
 }
 
-/// A question card. Answered questions show what was chosen; unanswered
-/// ones can be answered here: live when the agent is waiting for the
-/// answer, else as the next message.
+/// A question where the agent asked it. It is asked once: while the agent
+/// waits on it, in the card above the composer, and nothing shows here;
+/// answered, it is one quiet row with what was picked. A question the
+/// agent isn't waiting on (it ended its turn with it) is answered in a card
+/// here, as the next message.
 #[component]
 pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
     let app = use_app();
@@ -165,9 +173,9 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
     }
     let n = qs.len();
     let answered = qs.iter().any(|q| !q.answers.is_empty());
-    // The agent is waiting on this very question: it is answered in the
-    // request card above the composer.
-    let live = app.permissions.read().get(&session_id).is_some_and(|v| v.iter().any(|r| r.tool_call_id.as_deref() == Some(tool.id.as_str())));
+    if waited_on(app, &session_id, &tool.id) {
+        return rsx! {};
+    }
     // A later prompt answered it in the chat already.
     let replied_later = app
         .peek_session(&session_id, |s| {
@@ -176,28 +184,31 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
         })
         .flatten()
         .unwrap_or(true);
-    let open = !answered && !replied_later && !sent() && !live;
-    let title = tool.input.get("title").and_then(|t| t.as_str()).map(String::from);
-    if live {
-        // The card above the composer asks it: here it is one line that
-        // leads there, so the question shows once.
-        let label = title.unwrap_or_else(|| if n > 1 { format!("Asked you {n} questions") } else { "Asked you a question".into() });
-        let find = format!(
-            "const a = document.querySelector('[data-ask=' + JSON.stringify({}) + ']'); \
-             const r = a && a.closest('.transcript')?.querySelector('.req-card.ask-card'); \
-             if (r) r.scrollIntoView({{ block: 'nearest', behavior: document.querySelector('.app.no-motion') ? 'auto' : 'smooth' }});",
-            serde_json::to_string(&tool.id).unwrap_or_default()
-        );
+    if answered || replied_later || sent() {
+        // What was picked; an agent that doesn't record it (Cursor) got the
+        // answer as the next message.
+        let summary = qs
+            .iter()
+            .map(|q| {
+                let name = q.header.clone().unwrap_or_else(|| q.text.clone());
+                if q.answers.is_empty() { name } else { format!("{name}: {}", q.answers.join(", ")) }
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let full = qs
+            .iter()
+            .map(|q| if q.answers.is_empty() { q.text.clone() } else { format!("{}\n→ {}", q.text, q.answers.join(", ")) })
+            .collect::<Vec<_>>()
+            .join("\n\n");
         return rsx! {
-            button { class: "ask-card waiting", "data-ask": "{tool.id}", title: "Show the question",
-                onclick: move |_| { document::eval(&find); },
-                span { class: "ic", Icon { i: I::Message, size: 13 } }
-                span { class: "grow", "{label}" }
-                span { class: "hint", "Answer below" }
-                span { class: "ic", Icon { i: I::ArrowDown, size: 12 } }
+            div { class: "step quiet ask-done", title: "{full}",
+                span { class: "ic", Icon { i: I::CircleCheck, size: 13 } }
+                span { class: "verb", if answered || sent() { "Answered" } else { "Asked" } }
+                span { class: "target", "{summary}" }
             }
         };
     }
+    let title = tool.input.get("title").and_then(|t| t.as_str()).map(String::from);
     let hint = if app.running_elsewhere(&session_id) {
         format!("Running in {}: answer it there", app.peek_session(&session_id, |s| s.agent.display_name()).unwrap_or_default())
     } else if app.is_active(&session_id) {
@@ -208,15 +219,15 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
     let sid = session_id.clone();
     let qs_send = qs.clone();
     rsx! {
-        div { class: if open { "ask-card open" } else { "ask-card" },
+        div { class: "ask-card open",
             div { class: "ask-head",
-                span { class: "ic", Icon { i: if open { I::Message } else { I::CircleCheck }, size: 13 } }
-                span { class: "grow", if let Some(t) = &title { "{t}" } else if open { "The agent has a question" } else { "Answered" } }
+                span { class: "ic", Icon { i: I::Message, size: 13 } }
+                span { class: "grow", if let Some(t) = &title { "{t}" } else { "The agent has a question" } }
                 if n > 1 { span { class: "ask-count", "{n} questions" } }
             }
             QuestionList {
                 questions: qs.clone(),
-                editable: open,
+                editable: true,
                 hint,
                 submit: "Send answers".to_string(),
                 disabled: app.running_elsewhere(&session_id),
@@ -224,13 +235,6 @@ pub fn AskCard(session_id: String, tool: ToolCall) -> Element {
                     sent.set(true);
                     app.send(Some(sid.clone()), reply(&qs_send, &picks), Vec::new());
                 },
-            }
-            if sent() {
-                div { class: "ask-actions", span { class: "grow hint", "Answers sent" } }
-            } else if !open && !answered {
-                // The agent did not record the answer (Cursor): it was given
-                // in the next message.
-                div { class: "ask-actions", span { class: "grow hint", "Answered in the chat" } }
             }
         }
     }

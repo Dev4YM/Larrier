@@ -30,8 +30,8 @@ them into one window:
 - **Every agent, one place.** Start a chat with any installed agent, or
   several in parallel, and watch them work live: streaming replies, tool
   steps, diffs, plans, subagents and background tasks.
-- **Answer them as they work.** Approvals, questions and plans reach you
-  inline. Steer a running agent, queue follow-ups, or take a message back.
+- **Answer them as they work.** Approvals, questions and plans wait for
+  you just above the input. Steer a running agent, queue follow-ups, or take a message back.
 - **Review and ship.** See every file the agent changed, then discard,
   commit, push or open a pull request without leaving the chat.
 - **Your history, portable.** Larrier imports the sessions your agents
@@ -45,7 +45,7 @@ them into one window:
 
 | | |
 |---|---|
-| **Live agents** | Approvals, questions and plans answered in the chat; steering, queued follow-ups and clean stops. |
+| **Live agents** | Approvals, questions and plans answered just above the input; steering, queued follow-ups and clean stops. |
 | **Side panel** | Git changes with commit / push / PR, a real browser agents can drive, terminals and a file viewer, per chat. |
 | **Parallel work** | Run one prompt on several agents (Multitask), side-by-side chats, optional per-agent git worktrees. |
 | **Accounts** | Several logins, API keys (in the OS keychain) or environment presets per agent; pick one per chat. |

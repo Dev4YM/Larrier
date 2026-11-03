@@ -51,7 +51,8 @@ onto the chat area:
   composer lists what's running, and each subagent opens its own
   transcript in a tab.
 - **Requests from the agent** (approve a command, answer a question, accept
-  a plan) appear inline and wait for you.
+  a plan) wait for you just above the input, once: not in the chat. An
+  answered question stays in the chat as one line with what you picked.
 
 ## The composer
 

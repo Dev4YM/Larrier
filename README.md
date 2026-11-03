@@ -146,4 +146,6 @@ described in [SECURITY.md](SECURITY.md).
 
 [MIT](LICENSE). Brand logos of agents and model vendors belong to their
 owners and are listed with their sources in
-[app/assets/logos/LICENSES.md](app/assets/logos/LICENSES.md).
+[app/assets/logos/LICENSES.md](app/assets/logos/LICENSES.md). The English
+spelling dictionary is SCOWL's, under its own license:
+[app/dict/en/license](app/dict/en/license).

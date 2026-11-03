@@ -43,13 +43,16 @@ onto the chat area:
   it asks whether to keep editing.
 - Reading, searching and thinking steps fold into "Explored …"; commands,
   edits (with inline diffs), plans and to-dos get their own cards.
-- Finished turns fold into "Worked for 16s", followed by 👍 👎, copy, fork
-  and the time.
+- A turn's work sits under "Working", then "Worked for 16s" with 👍 👎,
+  copy, fork and the time. A turn you watched stays open when it ends;
+  older ones are folded to their answer (and any error, where it came).
+  Opening or folding one is remembered.
 - A prompt timeline runs down the left edge: hover it to preview a prompt,
   click to jump there.
-- **Subagents and background work** are tracked live: a pill above the
-  composer lists what's running, and each subagent opens its own
-  transcript in a tab.
+- **Subagents and background work** are tracked live: pills in the row
+  above the composer list what's running (with the queue and the changes
+  beside them), and each subagent opens its own transcript in a tab.
+  Background Tasks shows each subagent's model, tools and context.
 - **Requests from the agent** (approve a command, answer a question, accept
   a plan) wait for you just above the input, once: not in the chat. An
   answered question stays in the chat as one line with what you picked.
@@ -65,9 +68,14 @@ onto the chat area:
 - Paste or drop images and files. Ctrl+Shift+V pastes long text as text.
 - Messages sent while the agent works steer the running turn or wait in a
   queue (Settings → General; Ctrl+Enter does the other). A queued message can be sent at once or taken back.
+  The box goes back to one line once a message is sent.
+- **Spelling** is checked with Hunspell, the engine Chrome's spelling is
+  built on, and its English dictionary. Right-click a misspelled word for
+  its corrections (it's selected for you), or Add to Dictionary.
 - Below it: the branch, where the chat runs (this PC or a worktree), the
   agent's mode, and two rings for plan usage and context; hover them for
-  the breakdown.
+  the breakdown. What the context is made of is checked after each turn
+  and kept with the chat.
 
 ## The side panel
 
@@ -82,6 +90,9 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   Larrier's browser tools while you watch (its tab opens as a regular tab,
   not a preview); annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
+  A page that can't be reached gets Larrier's own message with Try again,
+  pop-ups and new windows open as tabs, and Developer tools opens Chrome's
+  DevTools in a tab beside the page.
 - **Terminal:** real terminals (your shell: PowerShell on Windows, `$SHELL`
   on macOS and Linux), plus read-only views of
   the agent's own background commands.
@@ -132,8 +143,9 @@ each agent's own configuration and tagged with the agents that use it.
 Whether Larrier was closed, updated or stopped, it comes back on the same
 chat or page, with each chat's tabs, side panel (browser pages, terminals
 with their recent output, open files, the commit message being typed),
-scroll position, queued and half-typed messages, the sidebar's state, and
-the searches and filters of every page.
+scroll position, queued and half-typed messages, the sidebar's state, the
+cards and groups left open or folded, and the searches and filters of
+every page.
 
 ## Keyboard
 

@@ -38,6 +38,7 @@ syntect = { version = "5", default-features = false, features = ["default-fancy"
 notify-rust = "4"
 base64 = "0.22"
 sha2.workspace = true
+spellbook = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 # Already built for the webview: Windows' spell checker for the right-click menu.

@@ -3,3 +3,6 @@
 *.sh       text eol=lf
 *.desktop  text eol=lf
 Dockerfile text eol=lf
+
+# The spelling dictionary is read as is (Hunspell files, Unix line endings).
+app/dict/** text eol=lf

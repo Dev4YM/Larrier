@@ -1654,6 +1654,8 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
   white-space: pre-wrap; overflow-wrap: break-word; color: var(--fg); user-select: none; }
 .queue-row .t .tok { box-shadow: none; padding: 0 2px; }
 .spell-fix .fix { font-weight: 600; }
+/* Misspelled words in a text box (drawn in the copy behind it). */
+.tok-back .sp-bad { text-decoration: underline wavy var(--red); text-decoration-thickness: 1px; text-underline-offset: 3px; text-decoration-skip-ink: none; }
 
 /* Changes: long file names wrap; a diff wider than the pane scrolls
    sideways in its own block, never the pane. */

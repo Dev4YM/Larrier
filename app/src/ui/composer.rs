@@ -1055,6 +1055,8 @@ pub fn Composer(
                         id: "{input_id}",
                         class: "c-text tok-input",
                         dir: "auto",
+                        // Spelling is Larrier's own (underlined in the copy behind).
+                        spellcheck: "false",
                         rows: if home { "3" } else { "1" },
                         placeholder: "{placeholder}",
                         value: "{text}",

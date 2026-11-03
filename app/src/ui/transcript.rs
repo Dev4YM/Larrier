@@ -703,6 +703,7 @@ pub fn UserMessage(session_id: String, msg: Message) -> Element {
                         id: "edit-{msg.id}",
                         class: "edit-input tok-input",
                         dir: "auto",
+                        spellcheck: "false",
                         value: "{st.draft}",
                         autofocus: true,
                         oninput: move |e| app.editing.write().draft = e.value(),

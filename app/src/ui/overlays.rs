@@ -799,8 +799,8 @@ pub fn GlobalMenu() -> Element {
                     let w = sp.word.clone();
                     move || {
                         if crate::spell::add(&w) {
-                            // The underline goes once the box checks its text again.
-                            document::eval("const el = window.__larrierCtx; if (el) { el.spellcheck = false; requestAnimationFrame(() => { el.spellcheck = true; }); }");
+                            // The boxes draw their text again, without the underline.
+                            *crate::spell::WORDS.write() += 1;
                         }
                     }
                 }))}

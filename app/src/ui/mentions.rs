@@ -507,20 +507,53 @@ pub fn PromptText(text: String) -> Element {
 }
 
 /// The colored copy drawn behind a text box: its text, with each object's
-/// token as a pill (same text, same layout as the box itself).
+/// token as a pill and misspelled words underlined (same text, same layout
+/// as the box itself).
 #[component]
 pub fn TokenBackdrop(text: String, chips: Vec<MentionChip>) -> Element {
     let segs = token_segs(&chips, &text);
+    let last = segs.len().saturating_sub(1);
     rsx! {
         div { class: "tok-back", "aria-hidden": "true",
             for (i, s) in segs.into_iter().enumerate() {
                 match s {
-                    Seg::Text(t) => rsx! { span { key: "{i}", "{t}" } },
+                    Seg::Text(t) => rsx! { span { key: "{i}", SpelledText { text: t, end: i == last } } },
                     Seg::Chip(c) => rsx! { span { key: "{i}", class: "tok {c.class()}", "{OPEN}{c.token()}{CLOSE}" } },
                 }
             }
             // Keeps a last empty line as tall as the box's.
             "\u{200b}"
+        }
+    }
+}
+
+/// Text with its misspelled words underlined. `end`: it ends the box's text,
+/// where the word being typed isn't checked yet.
+#[component]
+fn SpelledText(text: String, end: bool) -> Element {
+    // Drawn again when a word is added to the dictionary.
+    let _ = crate::spell::WORDS();
+    // A piece in the middle ends at an object, not mid-word: a space marks
+    // it done for the checker.
+    let marks = if end { crate::spell::underlined(&text) } else { crate::spell::underlined(&format!("{text} ")) };
+    if marks.is_empty() {
+        return rsx! { "{text}" };
+    }
+    let mut parts: Vec<(String, bool)> = Vec::new();
+    let mut at = 0;
+    for (a, b) in marks {
+        if a > at {
+            parts.push((text[at..a].to_string(), false));
+        }
+        parts.push((text[a..b].to_string(), true));
+        at = b;
+    }
+    if at < text.len() {
+        parts.push((text[at..].to_string(), false));
+    }
+    rsx! {
+        for (i, (t, bad)) in parts.into_iter().enumerate() {
+            if bad { span { key: "{i}", class: "sp-bad", "{t}" } } else { span { key: "{i}", "{t}" } }
         }
     }
 }

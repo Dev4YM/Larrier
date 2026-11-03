@@ -76,6 +76,7 @@ pub fn Root() -> Element {
             }
         }
         crate::highlight::warm_up();
+        crate::spell::warm();
         crate::models_sync::start();
         crate::automations::start(app);
         app.detect_agents();
@@ -800,11 +801,25 @@ pub fn Root() -> Element {
               const a = t.closest('a[href]');
               const pre = t.closest('pre');
               const pathEl = t.closest('[data-path]');
-              // The webview selects a misspelled word when it's right-clicked:
-              // the menu offers its corrections.
+              // A word right-clicked (or selected) in a text box: the menu
+              // offers its corrections, the word selected once it's known to
+              // be misspelled (as Chrome does).
               let spell = null;
-              if (ed && typeof ed.selectionStart === 'number' && ed.spellcheck !== false && /^[\p{L}\p{M}'\u2019]{2,40}$/u.test(sel)) {
-                spell = { word: sel, start: ed.selectionStart, end: ed.selectionEnd };
+              const wordy = /^[\p{L}\p{M}'\u2019]{2,40}$/u;
+              const checked = ed && typeof ed.selectionStart === 'number' && (ed.classList.contains('tok-input') || ed.spellcheck !== false);
+              if (checked && wordy.test(sel)) {
+                spell = { word: sel, start: ed.selectionStart, end: ed.selectionEnd, pick: false };
+              } else if (checked && !sel) {
+                // The word under the pointer (the caret, if the point is no text).
+                let at = ed.selectionStart;
+                const cp = document.caretPositionFromPoint ? document.caretPositionFromPoint(e.clientX, e.clientY) : null;
+                if (cp && cp.offsetNode === ed) at = cp.offset;
+                const v = ed.value, isW = (c) => /[\p{L}\p{M}'\u2019]/u.test(c || '');
+                let a = at, b = at;
+                while (a > 0 && isW(v[a - 1])) a--;
+                while (b < v.length && isW(v[b])) b++;
+                const w = v.slice(a, b).replace(/^['\u2019]+|['\u2019]+$/g, '');
+                if (wordy.test(w)) { const s = v.indexOf(w, a); spell = { word: w, start: s, end: s + w.length, pick: true }; }
               }
               const msg = { t: 'ctx', x: e.clientX, y: e.clientY, editable: !!ed, selection: sel.slice(0, 200000),
                 link: a ? a.href : null, code: pre ? pre.innerText.slice(0, 500000) : null,
@@ -1287,17 +1302,23 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                 spell: None,
             };
             let word = v["spell"]["word"].as_str().map(|w| (w.to_string(), v["spell"]["start"].as_u64().unwrap_or(0) as usize, v["spell"]["end"].as_u64().unwrap_or(0) as usize));
+            let pick = v["spell"]["pick"].as_bool().unwrap_or(false);
             {
                 let mut ui = app.ui.write();
                 ui.ctx = None;
                 ui.menubar = None;
             }
             match word {
-                // Windows' checker answers in a moment; the menu opens with its answer.
+                // The checker answers in a moment; the menu opens with its answer.
                 Some((w, start, end)) => {
                     spawn(async move {
                         let w2 = w.clone();
                         let found = tokio::task::spawn_blocking(move || crate::spell::suggest(&w2)).await.ok().flatten();
+                        // A misspelled word right-clicked is selected, so it's
+                        // clear what a correction replaces.
+                        if pick && found.is_some() {
+                            document::eval(&format!("const el = window.__larrierCtx; if (el) el.setSelectionRange({start}, {end});"));
+                        }
                         let mut g = g;
                         g.spell = found.map(|suggestions| crate::state::Misspelling { word: w, start, end, suggestions });
                         app.ui.write().gctx = Some(g);

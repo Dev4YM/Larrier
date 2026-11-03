@@ -477,7 +477,14 @@ pub fn Composer(
     let can_send = !elsewhere && (!text.read().trim().is_empty() || !atts.is_empty());
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();
-    let tall = home || overflow() || text.read().contains('\n') || !atts.is_empty();
+    // The box grows while what's in it needs more than a line; once it's
+    // sent (queued, steered, cleared) it's one line again.
+    let tall = home || (overflow() && !text.read().is_empty()) || text.read().contains('\n') || !atts.is_empty();
+    use_effect(move || {
+        if text.read().is_empty() && *overflow.peek() {
+            overflow.set(false);
+        }
+    });
     // The harness's logo: "Cursor Agent · Opus 5.5" is Cursor, whoever made the model.
     let model_logo_svg = agent_logo(&agent);
     let (model_text, effort_text) = model_display(&app, &agent, &model, &effort);

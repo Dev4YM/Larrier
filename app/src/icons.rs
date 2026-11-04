@@ -122,6 +122,7 @@ icons! {
     Brain => "brain",
     Sparkle => "sparkle",
     Lock => "lock",
+    LockOpen => "lock-open",
     Monitor => "monitor",
     Eye => "eye",
     Loader => "loader",

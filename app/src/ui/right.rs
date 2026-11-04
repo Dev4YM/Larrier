@@ -654,6 +654,12 @@ fn BrowserTabMenu(id: u64, x: f64, y: f64, onclose: EventHandler<()>) -> Element
             {item("Add to Chat", I::MessagePlus, "", page, Box::new(move || host::to_chat(&id.to_string(), Some(owner.clone()))))}
             {item(if tab.devtools { "Close Developer Tools" } else { "Developer Tools" }, I::Code, "F12", page, Box::new(move || { host::activate(id); host::devtools(); }))}
             div { class: "menu-sep" }
+            if tab.agent {
+                {item("Take Back from Agent", I::User, "", true, Box::new(move || host::release(id, true)))}
+            } else {
+                {item("Give to Agent", I::Bot, "", true, Box::new(move || host::give_to_agent(id)))}
+            }
+            div { class: "menu-sep" }
             {item("Close", I::X, "Middle-click", true, Box::new(move || host::close_tab(id)))}
             {item("Close Other Tabs", I::X, "", mine.len() > 1, Box::new(move || host::close_others(id, false)))}
             {item("Close Tabs to the Right", I::X, "", at + 1 < mine.len(), Box::new(move || host::close_others(id, true)))}
@@ -695,15 +701,57 @@ fn BrowserTab() -> Element {
     let dock_now = host::DEVTOOLS().dock;
     // This chat's tabs (each chat has a browser of its own).
     let mine = st.mine();
+    // The agent's tabs are its own while it runs: the user watches them
+    // (unless they unlocked one), so the two never fight over a page.
+    let running = app.is_running(&st.owner);
+    for t in &mine {
+        host::set_locked(t.id, t.agent && !t.unlocked && running);
+    }
+    // Leaving the Browser tab gives tabs the user unlocked back to the agent.
+    use_drop(host::relock_all);
+    // The card a hover on an agent's tab shows: (tab, x, y).
+    let mut card = use_signal(|| None::<(u64, f64, f64)>);
+    let mut card_gen = use_signal(|| 0u64);
+    let mut show_card = move |id: u64, x: f64, y: f64| {
+        card_gen += 1;
+        if (*card.peek()).map(|c| c.0) != Some(id) {
+            card.set(Some((id, x, y)));
+        }
+    };
+    let mut hide_card = move || {
+        card_gen += 1;
+        let g = *card_gen.peek();
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(220)).await;
+            if *card_gen.peek() == g {
+                card.set(None);
+            }
+        });
+    };
+    let agent_shown = active.as_ref().filter(|t| t.agent).map(|t| (t.id, t.unlocked));
     rsx! {
-        if mine.len() > 1 {
+        if mine.len() > 1 || mine.iter().any(|t| t.agent) {
             div { class: "browser-tabs",
                 for t in mine {
                     {
                         let on = Some(t.id) == st.active;
                         let label = tab_label(&t);
+                        let locked = t.agent && !t.unlocked && running;
+                        let class = format!("browser-tab{}{}{}", if on { " on" } else { "" }, if t.agent { " agent" } else { "" }, if locked { " locked" } else { "" });
+                        let agent = t.agent;
                         rsx! {
-                            div { key: "{t.id}", class: if on { "browser-tab on" } else { "browser-tab" }, title: "{t.url}",
+                            div { key: "{t.id}", class: "{class}", title: if agent { String::new() } else { t.url.clone() },
+                                onmouseenter: move |e| {
+                                    if agent {
+                                        let (c, el) = (e.client_coordinates(), e.element_coordinates());
+                                        show_card(t.id, c.x - el.x, c.y - el.y + 30.0);
+                                    }
+                                },
+                                onmouseleave: move |_| {
+                                    if agent {
+                                        hide_card();
+                                    }
+                                },
                                 "data-drag-session": if host::is_blank(&t.url) { String::new() } else { format!("page:{}", t.id) },
                                 "data-drag-title": "{label}",
                                 "data-ctx": "tab",
@@ -720,8 +768,9 @@ fn BrowserTab() -> Element {
                                     let c = e.client_coordinates();
                                     tab_menu.set(Some((t.id, c.x, c.y)));
                                 },
-                                if t.loading { super::loaders::Orbit { size: 12 } } else { Icon { i: I::Globe, size: 12 } }
+                                if t.loading { super::loaders::Orbit { size: 12 } } else if agent { span { class: "ag", Icon { i: I::Bot, size: 12 } } } else { Icon { i: I::Globe, size: 12 } }
                                 span { class: "t", "{label}" }
+                                if locked { span { class: "lk", Icon { i: I::Lock, size: 10 } } }
                                 button { class: "x", title: "Close tab",
                                     onclick: move |e| { e.stop_propagation(); host::close_tab(t.id); },
                                     Icon { i: I::X, size: 10 }
@@ -739,6 +788,25 @@ fn BrowserTab() -> Element {
                 button { class: "icon-btn sm", title: "Stop", onclick: move |_| host::stop(), Icon { i: I::X, size: 14 } }
             } else {
                 button { class: "icon-btn sm", title: "Reload", disabled: !has_page, onclick: move |_| host::reload(), Icon { i: I::Refresh, size: 13 } }
+            }
+            if let Some((aid, unlocked)) = agent_shown {
+                button { class: if unlocked { "agent-pill open" } else if running { "agent-pill locked" } else { "agent-pill" },
+                    title: "",
+                    onmouseenter: move |e| {
+                        let (c, el) = (e.client_coordinates(), e.element_coordinates());
+                        show_card(aid, c.x - el.x, c.y - el.y + 28.0);
+                    },
+                    onmouseleave: move |_| hide_card(),
+                    onclick: move |_| {
+                        if unlocked {
+                            host::relock(aid);
+                        } else if running {
+                            host::unlock(aid);
+                        }
+                    },
+                    Icon { i: if unlocked { I::LockOpen } else if running { I::Lock } else { I::Bot }, size: 12 }
+                    span { if unlocked { "Yours for now" } else if running { "Agent" } else { "Agent's tab" } }
+                }
             }
             input { class: "url-input",
                 placeholder: "Search or enter an address",
@@ -813,6 +881,13 @@ fn BrowserTab() -> Element {
         if let Some((id, x, y)) = tab_menu() {
             BrowserTabMenu { id, x, y, onclose: move |_| tab_menu.set(None) }
         }
+        if let Some((id, x, y)) = card() {
+            AgentTabCard { id, x, y, running,
+                onenter: move |_| card_gen += 1,
+                onleave: move |_| hide_card(),
+                ondone: move |_| card.set(None),
+            }
+        }
         // The page itself is a native view laid over this area.
         div { id: "lb-area", class: "browser-area",
             // The page's picture while a menu or dialog is over it.
@@ -879,6 +954,45 @@ fn BrowserTab() -> Element {
                         div { class: "d", if larrier_agents::browser::SUPPORTED { "Type an address above. Agents browse here with their browser tools, in the same pages you see." } else { "Type an address above to browse here." } }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// What a hover on the agent's tab says, and what the user can do: unlock
+/// it to use it themselves (the agent is told), lock it again, or take it
+/// back for good.
+#[component]
+fn AgentTabCard(id: u64, x: f64, y: f64, running: bool, onenter: EventHandler<()>, onleave: EventHandler<()>, ondone: EventHandler<()>) -> Element {
+    use crate::browser_host as host;
+    use_effect(use_reactive!(|x, y| {
+        document::eval(&super::place_at_js("agent-tab-card", x - 2.0, y - 2.0, false));
+    }));
+    let st = host::STATE();
+    let Some(tab) = st.tabs.iter().find(|t| t.id == id).cloned() else { return rsx! {} };
+    if !tab.agent {
+        return rsx! {};
+    }
+    let (icon, title, detail) = if tab.unlocked {
+        (I::LockOpen, "You unlocked this tab", "The agent was told you may be using it. It's the agent's alone again once you leave this tab.")
+    } else if running {
+        (I::Lock, "The agent is controlling this tab", "You can watch it work. Unlock to use the page yourself; the agent is told.")
+    } else {
+        (I::Bot, "The agent's tab", "Its browser tools work here. While it runs, the page is the agent's and you watch.")
+    };
+    rsx! {
+        div { id: "agent-tab-card", class: "menu agent-card", style: "left: {x}px; top: {y}px; visibility: hidden;",
+            onmouseenter: move |_| onenter.call(()),
+            onmouseleave: move |_| onleave.call(()),
+            div { class: "t", Icon { i: icon, size: 13 } span { "{title}" } }
+            div { class: "d", "{detail}" }
+            div { class: "row",
+                if tab.unlocked {
+                    button { class: "primary-btn", onclick: move |_| { host::relock(id); ondone.call(()); }, "Lock again" }
+                } else if running {
+                    button { class: "primary-btn", onclick: move |_| { host::unlock(id); ondone.call(()); }, "Unlock" }
+                }
+                button { class: "ghost-btn", title: "Make it yours for good: the agent opens another tab if it needs one", onclick: move |_| { host::release(id, true); ondone.call(()); }, "Take back" }
             }
         }
     }

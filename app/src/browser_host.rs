@@ -34,6 +34,12 @@ pub struct Tab {
     pub error: Option<String>,
     /// Its DevTools are open.
     pub devtools: bool,
+    /// Reserved for the chat's agent: its browser tools work here, and while
+    /// it runs the page takes no input from the user, who watches.
+    pub agent: bool,
+    /// The user unlocked the agent's tab to use it themselves, until they
+    /// leave it (another tab, panel or chat).
+    pub unlocked: bool,
 }
 
 /// What the Browser tab shows.
@@ -152,6 +158,40 @@ pub fn retry_engine() {
 struct Kept {
     pages: Vec<(String, String)>,
     active: Option<usize>,
+    /// The pages' tab ids, so a tab keeps its id across launches (an
+    /// agent working in it still finds it).
+    #[serde(default)]
+    ids: Vec<u64>,
+    /// Which were the agent's.
+    #[serde(default)]
+    agent: Vec<bool>,
+}
+
+/// A tab that left, and why: what the agents' tools say when a tab they
+/// used is gone.
+#[derive(Clone, Debug)]
+pub struct Closed {
+    pub id: u64,
+    pub owner: String,
+    pub why: String,
+    pub at: std::time::Instant,
+}
+
+fn closed_log() -> std::sync::MutexGuard<'static, Vec<Closed>> {
+    static LOG: OnceLock<std::sync::Mutex<Vec<Closed>>> = OnceLock::new();
+    LOG.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn note_closed(id: u64, owner: &str, why: &str) {
+    let mut log = closed_log();
+    log.push(Closed { id, owner: owner.to_string(), why: why.to_string(), at: std::time::Instant::now() });
+    let extra = log.len().saturating_sub(200);
+    log.drain(..extra);
+}
+
+/// Tabs of `owner`'s browser that closed since Larrier started, newest last.
+pub fn closed_tabs(owner: &str) -> Vec<Closed> {
+    closed_log().iter().filter(|c| c.owner == owner).cloned().collect()
 }
 
 /// Chats whose kept tabs are back (or had none to bring back).
@@ -168,10 +208,11 @@ pub fn restore(owner: &str) {
     }
     let Some(k) = crate::keep::value::<Kept>(owner, "browser") else { return };
     let mut ids = Vec::new();
-    for (url, title) in k.pages {
-        if let Some(id) = new_tab_in(Some(owner), &url) {
+    for (i, (url, title)) in k.pages.into_iter().enumerate() {
+        if let Some(id) = open_tab(Some(owner), &url, k.ids.get(i).copied(), true) {
             if let Some(t) = STATE.write().tabs.iter_mut().find(|t| t.id == id) {
                 t.title = title;
+                t.agent = k.agent.get(i).copied().unwrap_or(false);
             }
             ids.push(id);
         }
@@ -195,7 +236,7 @@ pub fn keep() {
         // DevTools belongs to its page's run of Chrome: not kept.
         let mine: Vec<&Tab> = st.tabs.iter().filter(|t| &t.owner == o && !t.url.starts_with("devtools://")).collect();
         let active = st.active_of(o).and_then(|a| mine.iter().position(|t| t.id == a));
-        let k = Kept { pages: mine.iter().map(|t| (t.url.clone(), t.title.clone())).collect(), active };
+        let k = Kept { pages: mine.iter().map(|t| (t.url.clone(), t.title.clone())).collect(), active, ids: mine.iter().map(|t| t.id).collect(), agent: mine.iter().map(|t| t.agent).collect() };
         // A browser with no tabs left keeps nothing.
         crate::keep::set_value(o, "browser", &(!k.pages.is_empty()).then_some(k));
     }
@@ -473,11 +514,17 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                             }
                         }
                         #[cfg(windows)]
-                        Ev::Gone { id } => close_tab(id),
+                        Ev::Gone { id } => close_tab_as(id, "the page closed itself"),
                         #[cfg(windows)]
                         Ev::Popup { id, url, from, background } => {
-                            let owner = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| t.owner.clone()));
-                            adopt_tab(owner.as_deref(), &url, id, background);
+                            let opener = from.and_then(|f| STATE.peek().tabs.iter().find(|t| t.id == f).map(|t| (t.owner.clone(), t.agent)));
+                            let agent = opener.as_ref().is_some_and(|o| o.1);
+                            adopt_tab(opener.map(|o| o.0).as_deref(), &url, id, background || agent);
+                            if agent {
+                                if let Some(t) = STATE.write().tabs.iter_mut().find(|t| t.id == id) {
+                                    t.agent = true;
+                                }
+                            }
                         }
                         #[cfg(windows)]
                         Ev::EngineProgress { done, total } => *ENGINE.write() = Engine::Fetching { done, total },
@@ -519,6 +566,9 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                             new_tab_in(owner.as_deref(), &url);
                         }
                         Ev::Failed { id, error } => {
+                            if let Some(o) = STATE.peek().tabs.iter().find(|t| t.id == id).map(|t| t.owner.clone()) {
+                                note_closed(id, &o, &format!("it couldn't be opened ({error})"));
+                            }
                             let mut st = STATE.write();
                             st.tabs.retain(|t| t.id != id);
                             if st.active == Some(id) {
@@ -555,7 +605,9 @@ fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {
         let mut h = h.borrow_mut();
         if h.is_none() {
             let _ = std::fs::create_dir_all(data_dir());
-            *h = Some(Host { ctx: Some(WebContext::new(Some(data_dir()))), closed: Default::default(), views: Vec::new(), active: None, area: None, covered: false, aside: false, gen: 0, next: 1 });
+            // Ids go on from the last launch's: kept tabs keep theirs.
+            let next = crate::keep::value::<u64>(crate::keep::WINDOW, "browser.next").unwrap_or(1).max(1);
+            *h = Some(Host { ctx: Some(WebContext::new(Some(data_dir()))), closed: Default::default(), views: Vec::new(), active: None, area: None, covered: false, aside: false, gen: 0, next });
         }
         h.as_mut().map(f)
     })
@@ -587,16 +639,43 @@ pub fn new_tab(url: &str) -> Option<u64> {
 /// shown if that's the browser shown. The tab is listed at once; its view
 /// is built a moment later (see `build_pending`).
 pub fn new_tab_in(owner: Option<&str>, url: &str) -> Option<u64> {
+    open_tab(owner, url, None, true)
+}
+
+/// A tab for `owner`'s agent, reserved for it. It's shown unless the user is
+/// on a page of their own in that browser (the agent doesn't pull them away).
+pub fn new_agent_tab(owner: &str, url: &str) -> Option<u64> {
+    let busy = {
+        let st = STATE.peek();
+        owner == st.owner && st.active.and_then(|a| st.tabs.iter().find(|t| t.id == a)).is_some_and(|t| !t.agent && !is_blank(&t.url))
+    };
+    let id = open_tab(Some(owner), url, None, !busy)?;
+    if let Some(t) = STATE.write().tabs.iter_mut().find(|t| t.id == id) {
+        t.agent = true;
+    }
+    Some(id)
+}
+
+/// Tab ids the engine gives pop-ups start here: kept ids below it are
+/// Larrier's own.
+const ENGINE_IDS: u64 = 1 << 40;
+
+/// Open a tab, as tab `want` if that id is free (a kept tab coming back);
+/// shown (`show`) if its chat's browser is.
+fn open_tab(owner: Option<&str>, url: &str, want: Option<u64>, show: bool) -> Option<u64> {
     let url = normalize(url);
     // Started here, inside the UI's runtime (the builder isn't).
     events();
     let owner = owner.map(String::from).unwrap_or_else(|| STATE.peek().owner.clone());
     // Its kept tabs first, so a new one goes after them.
     restore(&owner);
-    let shown = owner == STATE.peek().owner;
+    let here = owner == STATE.peek().owner;
+    let shown = here && show;
+    let free = want.filter(|w| *w > 0 && *w < ENGINE_IDS && !STATE.peek().tabs.iter().any(|t| t.id == *w));
     let id = with_host(|h| {
-        let id = h.next;
-        h.next += 1;
+        let id = free.unwrap_or(h.next);
+        h.next = h.next.max(id + 1);
+        crate::keep::set_value(crate::keep::WINDOW, "browser.next", &h.next);
         if shown {
             h.active = Some(id);
         }
@@ -607,7 +686,7 @@ pub fn new_tab_in(owner: Option<&str>, url: &str) -> Option<u64> {
         st.tabs.push(Tab { id, owner: owner.clone(), url: url.clone(), loading: true, ..Default::default() });
         if shown {
             st.active = Some(id);
-        } else {
+        } else if !here {
             st.last.insert(owner, id);
         }
         st.error = None;
@@ -742,8 +821,13 @@ pub fn activate(id: u64) {
         st.last.insert(owner, id);
         return;
     }
+    let moved = st.active != Some(id);
     st.active = Some(id);
     drop(st);
+    // Leaving a tab the user unlocked gives it back to the agent.
+    if moved {
+        relock_all();
+    }
     with_host(|h| {
         h.active = Some(id);
         place(h);
@@ -760,6 +844,9 @@ pub fn set_owner(owner: &str) {
     if let Some(a) = st.active {
         st.last.insert(prev, a);
     }
+    drop(st);
+    relock_all();
+    let mut st = STATE.write();
     let active = st.last.remove(owner).filter(|id| st.tabs.iter().any(|t| t.id == *id)).or_else(|| st.tabs.iter().rev().find(|t| t.owner == owner).map(|t| t.id));
     st.active = active;
     drop(st);
@@ -771,10 +858,135 @@ pub fn set_owner(owner: &str) {
 }
 
 pub fn close_tab(id: u64) {
+    close_tab_as(id, "it was closed in Larrier");
+}
+
+// ------------------------------------------------------ the agent's tabs
+
+/// What the user did with the agents' tabs, for their browser tools to say:
+/// (number, chat, what).
+fn agent_log() -> std::sync::MutexGuard<'static, Vec<(u64, String, String)>> {
+    static LOG: OnceLock<std::sync::Mutex<Vec<(u64, String, String)>>> = OnceLock::new();
+    LOG.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+
+static TOLD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Tell `owner`'s agent, through its browser tools' next result.
+fn tell_agent(owner: &str, what: String) {
+    let n = TOLD.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let mut log = agent_log();
+    log.push((n, owner.to_string(), what));
+    let extra = log.len().saturating_sub(200);
+    log.drain(..extra);
+}
+
+/// What `owner`'s agent is told (numbered), and the latest number of all.
+pub fn agent_notes(owner: &str) -> (Vec<(u64, String)>, u64) {
+    let log = agent_log();
+    (log.iter().filter(|(_, o, _)| o == owner).map(|(n, _, t)| (*n, t.clone())).collect(), TOLD.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+fn tab_name(t: &Tab) -> String {
+    let title = if t.title.trim().is_empty() { t.url.clone() } else { t.title.clone() };
+    format!("tab {} ({})", t.id, title.chars().take(60).collect::<String>())
+}
+
+/// The agent reserves tab `id` of its chat `owner` (its tools act there).
+pub fn reserve(id: u64, owner: &str) -> Result<(), String> {
+    let mut st = STATE.write();
+    let t = st.tabs.iter_mut().find(|t| t.id == id && t.owner == owner).ok_or_else(|| format!("Tab {id} isn't open in this chat's browser."))?;
+    t.agent = true;
+    t.unlocked = false;
+    drop(st);
+    keep();
+    Ok(())
+}
+
+/// The user hands tab `id` to its chat's agent.
+pub fn give_to_agent(id: u64) {
+    let mut st = STATE.write();
+    let Some(t) = st.tabs.iter_mut().find(|t| t.id == id && !t.agent) else { return };
+    t.agent = true;
+    t.unlocked = false;
+    let (owner, name) = (t.owner.clone(), tab_name(t));
+    drop(st);
+    tell_agent(&owner, format!("The user gave you {name}: it's yours to work in."));
+    keep();
+}
+
+/// Tab `id` stops being the agent's: given back by the agent, or taken back
+/// by the user (`by_user`: the agent is told).
+pub fn release(id: u64, by_user: bool) {
+    let mut st = STATE.write();
+    let Some(t) = st.tabs.iter_mut().find(|t| t.id == id && t.agent) else { return };
+    t.agent = false;
+    t.unlocked = false;
+    let (owner, name) = (t.owner.clone(), tab_name(t));
+    drop(st);
+    set_locked(id, false);
+    if by_user {
+        tell_agent(&owner, format!("The user took {name} back: it's theirs now, not yours. tabs_create opens one of your own."));
+    }
+    keep();
+}
+
+/// The user unlocks the agent's tab `id` to use it themselves for now.
+pub fn unlock(id: u64) {
+    let mut st = STATE.write();
+    let Some(t) = st.tabs.iter_mut().find(|t| t.id == id && t.agent && !t.unlocked) else { return };
+    t.unlocked = true;
+    let (owner, name) = (t.owner.clone(), tab_name(t));
+    drop(st);
+    tell_agent(&owner, format!("The user unlocked your {name} to use it themselves: the page may change under you. It's yours alone again once they leave it."));
+}
+
+/// The user is done with the agent's tab `id` they unlocked: it's the
+/// agent's alone again (they watch).
+pub fn relock(id: u64) {
+    let mut st = STATE.write();
+    let Some(t) = st.tabs.iter_mut().find(|t| t.id == id && t.unlocked) else { return };
+    t.unlocked = false;
+    let (owner, name) = (t.owner.clone(), tab_name(t));
+    drop(st);
+    tell_agent(&owner, format!("The user is done with your {name}: it's yours alone again."));
+}
+
+/// The user left the Browser tab, a tab or the chat: tabs they unlocked go
+/// back to the agent.
+pub fn relock_all() {
+    let ids: Vec<u64> = STATE.peek().tabs.iter().filter(|t| t.unlocked).map(|t| t.id).collect();
+    for id in ids {
+        relock(id);
+    }
+}
+
+/// Whether the user's mouse and keys reach tab `id`'s page: not while the
+/// agent works there (unless they unlocked it). The agent's own input goes
+/// to the page directly either way.
+pub fn set_locked(id: u64, locked: bool) {
+    thread_local! {
+        static APPLIED: RefCell<HashMap<u64, bool>> = RefCell::new(HashMap::new());
+    }
+    let changed = APPLIED.with(|a| a.borrow_mut().insert(id, locked) != Some(locked));
+    if !changed {
+        return;
+    }
+    #[cfg(windows)]
+    if chrome() {
+        crate::browser_cef::set_input(id, !locked);
+    }
+}
+
+/// Close tab `id`, noting why (for the agents' tools).
+pub fn close_tab_as(id: u64, why: &str) {
     PENDING.with(|p| p.borrow_mut().retain(|(t, _)| *t != id));
     let mut st = STATE.write();
     let i = st.tabs.iter().position(|t| t.id == id);
     let owner = i.map(|i| st.tabs[i].owner.clone());
+    if let Some(o) = &owner {
+        note_closed(id, o, why);
+    }
     st.tabs.retain(|t| t.id != id);
     if st.active == Some(id) {
         let o = st.owner.clone();
@@ -908,7 +1120,7 @@ pub fn close_others(id: u64, right: bool) {
     let at = mine.iter().position(|t| *t == id).unwrap_or(0);
     for (i, t) in mine.into_iter().enumerate() {
         if t != id && (!right || i > at) {
-            close_tab(t);
+            close_tab_as(t, "it was closed in Larrier (Close Other Tabs)");
         }
     }
     activate(id);

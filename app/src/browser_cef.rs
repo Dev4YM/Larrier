@@ -29,7 +29,7 @@ use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POI
 use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, FillRect, GetStockObject, InvalidateRect, ScreenToClient, HBRUSH, HDC, WHITE_BRUSH};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, SetDllDirectoryW};
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetFocus, ReleaseCapture, SetCapture, SetFocus, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, GetAsyncKeyState, GetFocus, ReleaseCapture, SetCapture, SetFocus, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GetAncestor, GetClientRect, LoadCursorW, PostMessageW, SetCursor, SetWindowTextW, GA_ROOT, IDC_SIZENS, IDC_SIZEWE, GetCursorPos, GetWindowThreadProcessId, GetWindowRect, IsChild, IsWindowVisible, RegisterClassW, SetWindowPos, WindowFromPoint, HWND_TOP,
@@ -510,6 +510,49 @@ fn run(cmd: Cmd) {
 
 /// A browser was made for tab `id`: keep it, wire its DevTools messages,
 /// mark its pages with their tab and the annotate script, and lay it out.
+/// Tabs whose pages take no input from the user (their agent works there).
+static LOCKED: Mutex<Option<std::collections::HashSet<u64>>> = Mutex::new(None);
+
+fn locked(id: u64) -> bool {
+    LOCKED.lock().unwrap().as_ref().is_some_and(|l| l.contains(&id))
+}
+
+/// Let the user's mouse and keys reach tab `id`'s page, or not. A page
+/// window that's off takes no clicks or keys (nor do its children, Chromium's
+/// own); the agent's input goes to the page directly, not through it.
+pub fn set_input(id: u64, on: bool) {
+    {
+        let mut g = LOCKED.lock().unwrap();
+        let l = g.get_or_insert_with(Default::default);
+        if on {
+            l.remove(&id);
+        } else {
+            l.insert(id);
+        }
+    }
+    on_ui(move || apply_input(id));
+}
+
+/// On the engine's thread (its windows are).
+fn apply_input(id: u64) {
+    let Some(h) = pages(|p| p.get(&id).map(|x| x.hwnd)).filter(|h| *h != 0) else { return };
+    let off = locked(id);
+    unsafe {
+        let page = HWND(h as *mut _);
+        // Typing that was going to the page goes to the app instead.
+        if off {
+            let f = GetFocus();
+            if !f.is_invalid() && (f == page || IsChild(page, f).as_bool()) {
+                let main = MAIN.load(Ordering::Relaxed);
+                if main != 0 {
+                    let _ = SetFocus(Some(HWND(main as *mut _)));
+                }
+            }
+        }
+        let _ = EnableWindow(page, !off);
+    }
+}
+
 fn created(id: u64, browser: Option<Browser>) {
     let Some(b) = browser else { return };
     let Some(host) = b.host() else { return };
@@ -531,6 +574,9 @@ fn created(id: u64, browser: Option<Browser>) {
         return;
     }
     lay_out();
+    if locked(id) {
+        apply_input(id);
+    }
     let waiting = pages(|p| p.get_mut(&id).map(|x| std::mem::take(&mut x.waiting)).unwrap_or_default());
     for c in waiting {
         run(c);
@@ -816,8 +862,13 @@ wrap_keyboard_handler! {
     }
 
     impl KeyboardHandler {
-        fn on_pre_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: Option<&mut sys::MSG>, _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
+        fn on_pre_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, os_event: Option<&mut sys::MSG>, _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
             let Some(e) = event else { return 0 };
+            // The user's keys (the system's, not the agent's) while the agent
+            // has the page.
+            if os_event.is_some() && locked(self.tab) {
+                return 1;
+            }
             if e.type_.get_raw() != KeyEventType::RAWKEYDOWN.get_raw() {
                 return 0;
             }

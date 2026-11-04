@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use super::{address, control, view_running, view_target, Cdp};
 
 const INSTRUCTIONS: &str = "Larrier's browser: real browser tabs the user sees live in Larrier's Browser tab (logins and cookies persist). \
-Start with tabs_context to get the tab ids (it opens a tab if there is none), or tabs_create for a fresh tab. \
+Start with tabs_context to get the tab ids. You work in tabs of your own (tabs_create opens one; tools without a tabId use yours, opening one if needed): the user watches them while you work and may unlock one to use it, which you're told about. The user's own tabs you can read; to act in one, tabs_reserve it first. \
 Read a page with read_page or find (they give elements refs like ref_12), get_page_text for articles, and computer to click, type, press keys, scroll and take screenshots. \
 Coordinates are the page's CSS pixels, the frame every screenshot reports. Prefer refs over coordinates when you have them.";
 
@@ -34,6 +34,26 @@ struct Browser {
     recording: Option<Vec<Frame>>,
     stopped: Option<Vec<Frame>>,
     notes: Vec<String>,
+    /// Tabs this agent has used or been shown: when one goes, the next
+    /// result says so (and why).
+    known: std::collections::HashSet<u64>,
+    /// The agent's own tab it last worked in: where tools without a tabId act.
+    current: Option<u64>,
+    /// The last of Larrier's notes about the agent's tabs already passed on.
+    seen: u64,
+}
+
+/// A tab as Larrier lists it.
+struct TabInfo {
+    id: u64,
+    url: String,
+    title: String,
+    /// Shown in Larrier.
+    shown: bool,
+    /// Reserved for this agent.
+    mine: bool,
+    /// The user unlocked it (theirs to use for now).
+    unlocked: bool,
 }
 
 #[derive(Clone)]
@@ -115,6 +135,10 @@ fn call(browser: &mut Option<Browser>, name: &str, args: &Value) -> Value {
                         recording: None,
                         stopped: None,
                         notes: Vec::new(),
+                        known: Default::default(),
+                        current: None,
+                        // Notes from before this agent's tools started aren't news.
+                        seen: control::request(json!({"cmd": "tabs"})).ok().and_then(|v| v["seq"].as_u64()).unwrap_or(0),
                     })
                 }
                 Err(e) => return failed(e),
@@ -125,6 +149,7 @@ fn call(browser: &mut Option<Browser>, name: &str, args: &Value) -> Value {
         match run(b, name, args) {
             Ok(mut v) => {
                 b.pump();
+                b.notice_gone();
                 // Dialogs answered meanwhile are worth knowing about.
                 if !b.notes.is_empty() {
                     let extra = b.notes.drain(..).collect::<Vec<_>>().join("\n");
@@ -135,7 +160,11 @@ fn call(browser: &mut Option<Browser>, name: &str, args: &Value) -> Value {
                 return v;
             }
             Err(e) if attempt == 0 && (e.contains("connection closed") || e.contains("browser closed")) => *browser = None,
-            Err(e) => return failed(e),
+            Err(e) => {
+                b.notice_gone();
+                let more = b.notes.drain(..).collect::<Vec<_>>();
+                return failed(if more.is_empty() { e } else { format!("{e}\n{}", more.join("\n")) });
+            }
         }
     }
     failed("Larrier's browser isn't reachable.")
@@ -162,21 +191,25 @@ impl Tab<'_> {
         Ok(r["result"]["value"].clone())
     }
 
-    /// Wait for a load the last action started (or `wait` to pass).
+    /// Wait for a load the last action started (or `wait` to pass), then
+    /// for the page to stop changing (a menu opening, a list redrawn), up
+    /// to a moment: refs and finds right after see the page as it ends up.
     fn settle(&self, wait: Duration) {
         let until = Instant::now() + wait;
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(150));
         while Instant::now() < until {
             if self.eval("document.readyState").ok().and_then(|v| v.as_str().map(|s| s == "complete")).unwrap_or(false) {
-                return;
+                break;
             }
             std::thread::sleep(Duration::from_millis(150));
         }
+        let _ = self.eval(QUIET_JS);
     }
 
     fn state(&self) -> String {
-        let v = self.eval("[document.title, location.href]").unwrap_or(Value::Null);
-        format!("Tab {}: {} — {}", self.id, v[0].as_str().filter(|t| !t.is_empty()).unwrap_or("(untitled)"), v[1].as_str().unwrap_or(""))
+        let v = self.eval("[document.title, location.href, document.readyState]").unwrap_or(Value::Null);
+        let loading = if v[2].as_str().is_some_and(|r| r != "complete") { " (still loading)" } else { "" };
+        format!("Tab {}: {} — {}{loading}", self.id, v[0].as_str().filter(|t| !t.is_empty()).unwrap_or("(untitled)"), v[1].as_str().unwrap_or(""))
     }
 
     fn mouse(&self, kind: &str, x: f64, y: f64, button: &str, clicks: u32, mods: u32) -> Result<(), String> {
@@ -192,9 +225,9 @@ impl Tab<'_> {
 
     /// Where an element is (its centre), scrolled into view first.
     fn locate(&self, r: &str) -> Result<(f64, f64, String), String> {
-        let v = self.eval(&format!("({LOCATE_JS})({})", json!(r)))?;
+        let v = self.eval(&format!("({})({})", LOCATE_JS.replace("__A11Y__", A11Y_JS), json!(r)))?;
         if v.is_null() {
-            return Err(format!("No element has {r}. Refs come from read_page or find, and are lost when the page changes."));
+            return Err(format!("No element has {r}: the page changed and nothing on it matches what {r} was. find or read_page gives fresh refs."));
         }
         Ok((v[0].as_f64().unwrap_or(0.0), v[1].as_f64().unwrap_or(0.0), v[2].as_str().unwrap_or("").to_string()))
     }
@@ -264,15 +297,103 @@ impl Browser {
         }
     }
 
-    /// The tabs as Larrier has them: (id, url, title, active).
-    fn tabs(&self) -> Result<Vec<(u64, String, String, bool)>, String> {
+    /// The tabs as Larrier has them.
+    fn tabs(&mut self) -> Result<Vec<TabInfo>, String> {
         let v = control::request(json!({"cmd": "tabs"}))?;
-        Ok(v["tabs"]
+        let tabs: Vec<TabInfo> = v["tabs"]
             .as_array()
             .into_iter()
             .flatten()
-            .map(|t| (t["id"].as_u64().unwrap_or(0), t["url"].as_str().unwrap_or("").to_string(), t["title"].as_str().unwrap_or("").to_string(), t["active"].as_bool().unwrap_or(false)))
-            .collect())
+            .map(|t| TabInfo {
+                id: t["id"].as_u64().unwrap_or(0),
+                url: t["url"].as_str().unwrap_or("").to_string(),
+                title: t["title"].as_str().unwrap_or("").to_string(),
+                shown: t["active"].as_bool().unwrap_or(false),
+                mine: t["agent"].as_bool().unwrap_or(false),
+                unlocked: t["unlocked"].as_bool().unwrap_or(false),
+            })
+            .collect();
+        self.known.extend(tabs.iter().map(|t| t.id));
+        Ok(tabs)
+    }
+
+    /// The tab to act in: `id` if it's the agent's; without one, the agent's
+    /// current tab, another of its own, or a new one. The user's tabs are
+    /// theirs until the agent reserves one.
+    fn own_tab(&mut self, id: Option<u64>) -> Result<u64, String> {
+        let list = self.tabs()?;
+        if let Some(id) = id {
+            return match list.iter().find(|t| t.id == id) {
+                Some(t) if t.mine => {
+                    self.current = Some(id);
+                    Ok(id)
+                }
+                Some(t) => Err(format!(
+                    "Tab {id} is the user's{}: reserve it first with tabs_reserve (they watch it while you work), or open one of your own with tabs_create.",
+                    if t.shown { ", open in front of them" } else { "" }
+                )),
+                None => {
+                    self.known.remove(&id);
+                    let listing = control::request(json!({"cmd": "tabs"})).unwrap_or(Value::Null);
+                    Err(format!("{} tabs_context lists the open ones.", Self::why_gone(id, &listing)))
+                }
+            };
+        }
+        if let Some(c) = self.current.filter(|c| list.iter().any(|t| t.id == *c && t.mine)) {
+            return Ok(c);
+        }
+        if let Some(t) = list.iter().find(|t| t.mine && t.shown).or_else(|| list.iter().find(|t| t.mine)) {
+            self.current = Some(t.id);
+            return Ok(t.id);
+        }
+        let id = self.new_tab("about:blank")?;
+        self.notes.push(format!("Opened tab {id} for you to work in (yours; the user's tabs are left alone)."));
+        self.current = Some(id);
+        Ok(id)
+    }
+
+    /// The agent's tab to read without a tabId, if it has one.
+    fn mine_now(&mut self) -> Option<u64> {
+        let list = self.tabs().ok()?;
+        self.current
+            .filter(|c| list.iter().any(|t| t.id == *c && t.mine))
+            .or_else(|| list.iter().find(|t| t.mine && t.shown).or_else(|| list.iter().find(|t| t.mine)).map(|t| t.id))
+    }
+
+    /// Why tab `id` isn't there, if Larrier knows.
+    fn why_gone(id: u64, listing: &Value) -> String {
+        match listing["closed"].as_array().into_iter().flatten().rev().find(|c| c["id"].as_u64() == Some(id)) {
+            Some(c) => format!("Tab {id} is gone: {} ({} ago).", c["why"].as_str().unwrap_or("it was closed"), ago(c["ago"].as_u64().unwrap_or(0))),
+            None => format!("Tab {id} isn't open (Larrier may have restarted; its tabs come back with the same ids when its chat's browser is shown)."),
+        }
+    }
+
+    /// What the user did with the agent's tabs, and tabs this agent used
+    /// that have gone since: notes for the result (with the tabs open now).
+    fn notice_gone(&mut self) {
+        let Ok(v) = control::request(json!({"cmd": "tabs"})) else { return };
+        for n in v["notes"].as_array().into_iter().flatten() {
+            let seq = n["seq"].as_u64().unwrap_or(0);
+            if seq > self.seen {
+                self.seen = seq;
+                self.notes.push(n["text"].as_str().unwrap_or("").to_string());
+            }
+        }
+        if self.known.is_empty() {
+            return;
+        }
+        let open: Vec<u64> = v["tabs"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_u64()).collect();
+        let gone: Vec<u64> = self.known.iter().copied().filter(|id| !open.contains(id)).collect();
+        if gone.is_empty() {
+            return;
+        }
+        for id in &gone {
+            self.known.remove(id);
+            self.sessions.remove(id);
+            self.notes.push(Self::why_gone(*id, &v));
+        }
+        let list: Vec<String> = v["tabs"].as_array().into_iter().flatten().map(|t| format!("{} ({})", t["id"], t["title"].as_str().filter(|x| !x.is_empty()).unwrap_or("untitled"))).collect();
+        self.notes.push(if list.is_empty() { "No tabs are open now.".into() } else { format!("Open tabs now: {}.", list.join(", ")) });
     }
 
     /// The page target showing tab `id`: as Larrier knows it, or found by
@@ -289,6 +410,7 @@ impl Browser {
     fn new_tab(&mut self, url: &str) -> Result<u64, String> {
         let v = control::request(json!({"cmd": "new_tab", "url": url}))?;
         let id = v["id"].as_u64().ok_or("Larrier couldn't open a tab")?;
+        self.known.insert(id);
         let until = Instant::now() + Duration::from_secs(20);
         while Instant::now() < until {
             if self.target(id).is_some() {
@@ -305,8 +427,8 @@ impl Browser {
             Some(i) => i,
             None => {
                 let list = self.tabs()?;
-                match list.iter().find(|t| t.3).or(list.first()) {
-                    Some(t) => t.0,
+                match list.iter().find(|t| t.shown).or(list.first()) {
+                    Some(t) => t.id,
                     None => self.new_tab("about:blank")?,
                 }
             }
@@ -316,7 +438,15 @@ impl Browser {
             None => false,
         };
         if !alive {
-            let target = self.target(id).ok_or(format!("There's no tab {id}. tabs_context lists them."))?;
+            let target = match self.target(id) {
+                Some(t) => t,
+                None => {
+                    self.known.remove(&id);
+                    self.sessions.remove(&id);
+                    let listing = control::request(json!({"cmd": "tabs"})).unwrap_or(Value::Null);
+                    return Err(format!("{} tabs_context lists the open ones.", Self::why_gone(id, &listing)));
+                }
+            };
             let r = self.cdp.call("Target.attachToTarget", json!({"targetId": target, "flatten": true}), None)?;
             let session = r["sessionId"].as_str().ok_or("couldn't attach to the tab")?.to_string();
             for m in ["Page.enable", "Runtime.enable", "Log.enable", "Network.enable"] {
@@ -325,6 +455,7 @@ impl Browser {
             self.sessions.insert(id, session);
         }
         let session = self.sessions[&id].clone();
+        self.known.insert(id);
         Ok(Tab { b: self, id, session })
     }
 
@@ -353,6 +484,32 @@ impl Browser {
             }
         }
     }
+}
+
+/// Seconds as "40 s", "3 min", "2 h".
+fn ago(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs} s"),
+        60..=3599 => format!("{} min", secs / 60),
+        _ => format!("{} h", secs / 3600),
+    }
+}
+
+/// What a failed connection to `url` may mean: Windows out of network
+/// buffers; `localhost` trying IPv6 first while the server listens on IPv4.
+fn connection_hint(url: &str, err: &str) -> String {
+    let mut hint = String::new();
+    if err.contains("ERR_NO_BUFFER_SPACE") {
+        hint.push_str(" Windows ran out of network buffers (another program holds many connections open, Docker often).");
+    }
+    let host = url.split("://").nth(1).unwrap_or(url).split(['/', '?', '#']).next().unwrap_or("");
+    let local = host == "localhost" || host.starts_with("localhost:");
+    let refused = ["ERR_NO_BUFFER_SPACE", "ERR_CONNECTION_REFUSED", "ERR_CONNECTION_FAILED", "ERR_CONNECTION_TIMED_OUT", "ERR_ADDRESS_UNREACHABLE", "ERR_TIMED_OUT", "ERR_EMPTY_RESPONSE"].iter().any(|e| err.contains(e));
+    if local && refused {
+        let to = url.replacen("localhost", "127.0.0.1", 1);
+        hint.push_str(&format!(" localhost can resolve to IPv6 (::1) first; a server listening on IPv4 only answers at {to}."));
+    }
+    hint
 }
 
 fn push_capped(v: &mut Vec<Value>, item: Value) {
@@ -445,34 +602,84 @@ fn coord(a: &Value, key: &str) -> Option<(f64, f64)> {
     Some((c.first()?.as_f64()?, c.get(1)?.as_f64()?))
 }
 
+/// Whether tool `name` changes the page (it then needs a tab of the
+/// agent's own); reading and looking work in any tab.
+fn acts(name: &str, a: &Value) -> bool {
+    match name {
+        "navigate" | "form_input" | "javascript_tool" | "resize_window" | "file_upload" | "upload_image" => true,
+        "computer" => !matches!(a["action"].as_str(), Some("screenshot" | "zoom" | "wait")),
+        _ => false,
+    }
+}
+
 fn run(b: &mut Browser, name: &str, a: &Value) -> Result<Value, String> {
     let s = |k: &str| a[k].as_str().map(str::trim).filter(|v| !v.is_empty());
-    let tab_id = a["tabId"].as_u64();
+    let given = a["tabId"].as_u64();
+    let tab_id = match name {
+        "tabs_context" | "tabs_create" | "tabs_close" | "tabs_reserve" | "tabs_release" | "gif_creator" => given,
+        _ if acts(name, a) => Some(b.own_tab(given)?),
+        _ => given.or_else(|| b.mine_now()),
+    };
     let out = match name {
         "tabs_context" => {
             let mut tabs = b.tabs()?;
             if tabs.is_empty() {
-                b.new_tab("about:blank")?;
+                b.current = Some(b.new_tab("about:blank")?);
                 tabs = b.tabs()?;
             }
-            let lines: Vec<String> = tabs.iter().map(|(id, url, title, on)| format!("tabId {id}{}: {} — {url}", if *on { " (shown)" } else { "" }, if title.is_empty() { "(untitled)" } else { title })).collect();
-            text(format!("Tabs in Larrier's browser:\n{}", lines.join("\n")))
+            let lines: Vec<String> = tabs
+                .iter()
+                .map(|t| {
+                    let mut tags = vec![if t.mine { "yours" } else { "the user's" }];
+                    if t.shown {
+                        tags.push("shown");
+                    }
+                    if t.unlocked {
+                        tags.push("unlocked: the user is using it");
+                    }
+                    format!("tabId {} ({}): {} — {}", t.id, tags.join(", "), if t.title.is_empty() { "(untitled)" } else { &t.title }, t.url)
+                })
+                .collect();
+            text(format!(
+                "Tabs in this chat's browser. Yours are reserved for you: tools without a tabId act in yours (one is opened if you have none), and the user watches them while you work. Reading any tab works; acting in one of the user's needs tabs_reserve first.\n{}",
+                lines.join("\n")
+            ))
         }
         "tabs_create" => {
             let url = s("url").map(address).unwrap_or_else(|| "about:blank".into());
             let id = b.new_tab(&url)?;
+            b.current = Some(id);
             let t = b.tab(Some(id))?;
             t.settle(Duration::from_secs(15));
-            text(format!("Opened tab {id}.\n{}", t.state()))
+            text(format!("Opened tab {id} (yours).\n{}", t.state()))
         }
         "tabs_close" => {
             let id = tab_id.ok_or("give the tabId")?;
             control::request(json!({"cmd": "close_tab", "id": id}))?;
             b.sessions.remove(&id);
+            if b.current == Some(id) {
+                b.current = None;
+            }
             text(format!("Closed tab {id}."))
+        }
+        "tabs_reserve" => {
+            let id = tab_id.ok_or("give the tabId")?;
+            control::request(json!({"cmd": "reserve", "id": id}))?;
+            b.current = Some(id);
+            b.known.insert(id);
+            text(format!("Tab {id} is yours now: tools without a tabId act there, and the user watches it while you work (they can unlock it to use it themselves; you're told when they do)."))
+        }
+        "tabs_release" => {
+            let id = tab_id.ok_or("give the tabId")?;
+            control::request(json!({"cmd": "release", "id": id}))?;
+            if b.current == Some(id) {
+                b.current = None;
+            }
+            text(format!("Tab {id} is the user's again."))
         }
         "navigate" => {
             let url = s("url").ok_or("give a url (or back / forward)")?.to_string();
+            let mut note: Option<&str> = None;
             let t = b.tab(tab_id)?;
             match url.as_str() {
                 "back" | "forward" => {
@@ -482,14 +689,31 @@ fn run(b: &mut Browser, name: &str, a: &Value) -> Result<Value, String> {
                     t.call("Page.navigateToHistoryEntry", json!({"entryId": entry["id"]}))?;
                 }
                 _ => {
-                    let r = t.call("Page.navigate", json!({"url": address(&url)}))?;
-                    if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
-                        return Err(format!("couldn't open {url}: {e}"));
+                    let to = address(&url);
+                    match t.b.cdp.call_for("Page.navigate", json!({"url": to}), Some(&t.session), Duration::from_secs(45)) {
+                        Ok(r) => match r["errorText"].as_str().filter(|e| !e.is_empty()) {
+                            // Another load took over (a redirect, the page's
+                            // own script): what's there is said below.
+                            Some(e) if e.contains("ERR_ABORTED") => note = Some("The first load gave way to another (a redirect or the page's own script)."),
+                            Some(e) => return Err(format!("couldn't open {url}: {e}.{}", connection_hint(&to, e))),
+                            None => {}
+                        },
+                        Err(e) if e.contains("timed out") => note = Some("The page is slow: it was still loading after 45 s. read_page or a screenshot shows what's there so far."),
+                        Err(e) => return Err(e),
                     }
                 }
             }
             t.settle(Duration::from_secs(20));
-            let st = t.state();
+            let mut st = t.state();
+            if let Some(n) = note {
+                st = format!("{st}\n{n}");
+            }
+            // An error page in its place: what failed, and what may help.
+            if let Ok(err) = t.eval("location.href.startsWith('chrome-error://') ? (document.querySelector('#error-code, .error-code')?.innerText || document.title) : ''") {
+                if let Some(e) = err.as_str().filter(|e| !e.is_empty()) {
+                    st = format!("{st}\nThe page couldn't load: {e}.{}", connection_hint(&address(&url), e));
+                }
+            }
             let id = t.id;
             b.frame(Some(id), &format!("navigate {url}"), None);
             text(st)
@@ -520,7 +744,20 @@ fn run(b: &mut Browser, name: &str, a: &Value) -> Result<Value, String> {
         "form_input" => {
             let r = s("ref").ok_or("give the ref")?;
             let t = b.tab(tab_id)?;
-            let v = t.eval(&format!("({FORM_JS})({}, {})", json!(r), a["value"]))?;
+            let v = t.eval(&format!("({})({}, {})", FORM_JS.replace("__A11Y__", A11Y_JS), json!(r), a["value"]))?;
+            // A control the page draws (a combobox, a switch): set the way a
+            // person would, by clicking.
+            if v.is_object() {
+                if let Some(p) = v.get("press") {
+                    let (x, y) = (p[0].as_f64().unwrap_or(0.0), p[1].as_f64().unwrap_or(0.0));
+                    t.mouse("mouseMoved", x, y, "none", 0, 0)?;
+                    t.mouse("mousePressed", x, y, "left", 1, 0)?;
+                    t.mouse("mouseReleased", x, y, "left", 1, 0)?;
+                    t.settle(Duration::from_secs(3));
+                    return Ok(text(format!("Clicked {} to set it.\n{}", v["desc"].as_str().unwrap_or(r), t.state())));
+                }
+                return pick_options(&t, r, &a["value"], &v);
+            }
             match v.as_str() {
                 Some(msg) if msg.starts_with("Set") || msg.starts_with("Checked") || msg.starts_with("Unchecked") || msg.starts_with("Selected") => text(msg.to_string()),
                 Some(msg) => return Err(msg.to_string()),
@@ -782,7 +1019,65 @@ fn computer(b: &mut Browser, tab_id: Option<u64>, a: &Value) -> Result<Value, St
     Ok(text(msg))
 }
 
+/// Choose `value` (one label, or several) in combobox `r`: open it, find
+/// the option by its label, click it, as a person would.
+fn pick_options(t: &Tab, r: &str, value: &Value, v: &Value) -> Result<Value, String> {
+    let want: Vec<String> = match value {
+        Value::Array(a) => a.iter().map(|x| x.as_str().map(String::from).unwrap_or_else(|| x.to_string())).collect(),
+        Value::String(x) => vec![x.clone()],
+        other => vec![other.to_string()],
+    };
+    let (x, y) = (v["x"].as_f64().unwrap_or(0.0), v["y"].as_f64().unwrap_or(0.0));
+    let typed = v["editable"].as_bool().unwrap_or(false);
+    let desc = v["desc"].as_str().unwrap_or(r).to_string();
+    let mut picked = Vec::new();
+    for w in &want {
+        let open = t.eval(&format!("(() => {{ const el = document.querySelector('[data-larrier-ref=\"' + {} + '\"]'); return !!el && el.getAttribute('aria-expanded') === 'true'; }})()", json!(r))).ok().and_then(|o| o.as_bool()).unwrap_or(false);
+        if !open || typed {
+            t.mouse("mouseMoved", x, y, "none", 0, 0)?;
+            t.mouse("mousePressed", x, y, "left", 1, 0)?;
+            t.mouse("mouseReleased", x, y, "left", 1, 0)?;
+        }
+        if typed {
+            // A box that filters its list as it's typed in.
+            press(t, "ctrl+a")?;
+            t.call("Input.insertText", json!({"text": w}))?;
+        }
+        let mut found = Value::Null;
+        for _ in 0..15 {
+            std::thread::sleep(Duration::from_millis(200));
+            found = t.eval(&format!("({})({}, {})", OPTION_JS.replace("__A11Y__", A11Y_JS), json!(r), json!(w)))?;
+            if found.get("x").is_some() {
+                break;
+            }
+        }
+        if found.get("x").is_none() {
+            let offered: Vec<&str> = found["options"].as_array().into_iter().flatten().filter_map(|o| o.as_str()).collect();
+            // A box typed in that offers nothing to pick: the words stay.
+            if typed && offered.is_empty() {
+                picked.push(format!("\"{w}\" (typed; it offered no list)"));
+                continue;
+            }
+            let _ = press(t, "Escape");
+            return Err(if offered.is_empty() {
+                format!("{desc} opened no list of options for \"{w}\". read_page shows what it did.")
+            } else {
+                format!("{desc} has no option \"{w}\". It offers: {}.", offered.join(", "))
+            });
+        }
+        let (ox, oy) = (found["x"].as_f64().unwrap_or(0.0), found["y"].as_f64().unwrap_or(0.0));
+        t.mouse("mouseMoved", ox, oy, "none", 0, 0)?;
+        t.mouse("mousePressed", ox, oy, "left", 1, 0)?;
+        t.mouse("mouseReleased", ox, oy, "left", 1, 0)?;
+        t.settle(Duration::from_secs(3));
+        picked.push(found["label"].as_str().unwrap_or(w).to_string());
+    }
+    Ok(text(format!("Selected {} in {desc}.\n{}", picked.join(", "), t.state())))
+}
+
 fn set_files(t: &Tab, r: &str, files: &[String]) -> Result<(), String> {
+    // The input may have been drawn again since its ref was given.
+    t.eval(&format!("(() => {{ {} return !!byRef({}); }})()", A11Y_JS, json!(r)))?;
     let obj = t.call("Runtime.evaluate", json!({"expression": format!("document.querySelector('[data-larrier-ref={}]')", json!(r))}))?;
     let oid = obj["result"]["objectId"].as_str().ok_or(format!("No element has {r}."))?;
     t.call("DOM.setFileInputFiles", json!({"files": files, "objectId": oid}))?;
@@ -842,21 +1137,71 @@ fn gif(frames: &[Frame], path: &std::path::Path, clicks: bool, progress: bool) -
 }
 
 /// An element by ref, scrolled into view if it's out of it: its centre and
-/// a short description.
+/// a description in read_page's and find's words (role "name"). A control
+/// the page hides and draws otherwise (a checkbox shown by its label) is
+/// clicked where it shows; something over it is named.
 const LOCATE_JS: &str = r#"(ref) => {
-  const el = document.querySelector('[data-larrier-ref="' + ref + '"]');
+  __A11Y__
+  const el = byRef(ref);
   if (!el) return null;
-  let r = el.getBoundingClientRect();
-  if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) { el.scrollIntoView({ block: 'center', inline: 'center' }); r = el.getBoundingClientRect(); }
-  const name = (el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('placeholder') || '').trim().replace(/\s+/g, ' ').slice(0, 50);
-  return [r.left + r.width / 2, r.top + r.height / 2, ref + ' (' + el.tagName.toLowerCase() + (name ? ' "' + name + '"' : '') + ')'];
+  const r0 = role(el) || el.tagName.toLowerCase(), n0 = name(el, r0);
+  let desc = ref + ' (' + r0 + (n0 ? ' "' + clean(n0, 50) + '"' : '') + ')';
+  const faint = (e) => { const b = e.getBoundingClientRect(), s = getComputedStyle(e); return b.width < 3 || b.height < 3 || s.opacity === '0' || s.visibility === 'hidden' || s.display === 'none'; };
+  let target = el;
+  if (faint(el)) {
+    const lab = el.labels && el.labels[0];
+    const alt = (lab && !faint(lab)) ? lab : el.parentElement && el.parentElement.closest('label, button, [role=checkbox], [role=switch], [role=radio], [role=option], [role=menuitemcheckbox], [role=menuitemradio], [role=tab]');
+    if (alt && !faint(alt)) { target = alt; desc += ' via its ' + (alt.tagName === 'LABEL' ? 'label' : (role(alt) || alt.tagName.toLowerCase())); }
+  }
+  let r = target.getBoundingClientRect();
+  if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) { target.scrollIntoView({ block: 'center', inline: 'center' }); r = target.getBoundingClientRect(); }
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const top = document.elementFromPoint(x, y);
+  if (top && top !== target && !target.contains(top) && !top.contains(target) && !(el.labels && [...el.labels].some(l => l.contains(top)))) {
+    const tr = role(top) || top.tagName.toLowerCase(), tn = name(top, tr);
+    desc += ', with ' + tr + (tn ? ' "' + clean(tn, 40) + '"' : '') + ' over it (the click lands there)';
+  }
+  return [x, y, desc];
+}"#;
+
+/// After an action: the page stops changing (no DOM changes for a quarter
+/// of a second), or a moment and a half passes.
+const QUIET_JS: &str = r#"new Promise((done) => {
+  let t; const end = () => { obs.disconnect(); clearTimeout(t); done(true); };
+  const obs = new MutationObserver(() => { clearTimeout(t); t = setTimeout(end, 250); });
+  obs.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+  t = setTimeout(end, 250);
+  setTimeout(end, 1500);
+})"#;
+
+/// The option labelled `want` in the list combobox `ref` opened (its
+/// `aria-controls` / `aria-owns`, else the list on show): its centre and
+/// label, or the options there are.
+const OPTION_JS: &str = r#"(ref, want) => {
+  __A11Y__
+  const el = byRef(ref);
+  const ids = el ? ((el.getAttribute('aria-controls') || '') + ' ' + (el.getAttribute('aria-owns') || '')).split(' ').filter(Boolean) : [];
+  const own = ids.map(i => document.getElementById(i)).filter(Boolean);
+  const lists = own.length ? own : [...document.querySelectorAll('[role=listbox], [role=menu], [role=tree], [role=grid], [cmdk-list], datalist')].filter(shown);
+  const sel = '[role=option], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=treeitem], [role=gridcell], [cmdk-item]';
+  const opts = (lists.length ? lists : [document]).flatMap(l => [...l.querySelectorAll(sel)]).filter(shown);
+  const label = (o) => clean(name(o, role(o) || 'option') || o.innerText, 80);
+  const w = String(want).trim().toLowerCase();
+  const pick = opts.find(o => label(o).toLowerCase() === w) || opts.find(o => label(o).toLowerCase().startsWith(w)) || opts.find(o => label(o).toLowerCase().includes(w));
+  if (!pick) return { options: opts.slice(0, 40).map(label) };
+  pick.scrollIntoView({ block: 'nearest' });
+  const r = pick.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, label: label(pick) };
 }"#;
 
 /// Shared by read_page and find: roles, names, refs.
 const A11Y_JS: &str = r#"
-  const R = (el) => {
+  // A ref for an element, with what it was (its role and name), so the
+  // same element drawn again later (a re-render) is found again.
+  const R = (el, r, n) => {
     let ref = el.getAttribute('data-larrier-ref');
     if (!ref) { window.__larrierRefN = (window.__larrierRefN || 0) + 1; ref = 'ref_' + window.__larrierRefN; el.setAttribute('data-larrier-ref', ref); }
+    (window.__larrierRefInfo = window.__larrierRefInfo || {})[ref] = { role: r || '', name: n || '', tag: el.tagName.toLowerCase() };
     return ref;
   };
   const clean = (t, n) => (t || '').replace(/\s+/g, ' ').trim().slice(0, n || 100);
@@ -919,13 +1264,26 @@ const A11Y_JS: &str = r#"
     if (!shown(el)) out.push('hidden');
     return out.join(' ');
   };
+  // The element a ref names: the one marked with it, else (the page drew it
+  // again) the one element with the same tag, role and name, marked anew.
+  const byRef = (ref) => {
+    const el = document.querySelector('[data-larrier-ref="' + ref + '"]');
+    if (el) return el;
+    const info = (window.__larrierRefInfo || {})[ref];
+    if (!info || (!info.name && !info.role)) return null;
+    const same = [...document.body.querySelectorAll(info.tag || '*')].filter(e => !e.hasAttribute('data-larrier-ref') && role(e) === info.role && name(e, info.role) === info.name);
+    const seen = same.filter(shown);
+    const pick = seen.length === 1 ? seen[0] : (same.length === 1 ? same[0] : null);
+    if (pick) pick.setAttribute('data-larrier-ref', ref);
+    return pick;
+  };
 "#;
 
 /// The page as an accessibility tree: one line per element with a role,
 /// each with a ref.
 const TREE_JS: &str = r#"(opts) => {
   __A11Y__
-  const root = opts.ref ? document.querySelector('[data-larrier-ref="' + opts.ref + '"]') : document.body;
+  const root = opts.ref ? byRef(opts.ref) : document.body;
   if (!root) return null;
   const lines = [];
   if (opts.interactive) {
@@ -934,7 +1292,7 @@ const TREE_JS: &str = r#"(opts) => {
       if (!INTERACTIVE.has(r) && r !== 'generic-clickable') continue;
       if (!shown(el)) continue;
       const n = name(el, r), p = props(el, r);
-      lines.push('- ' + r + (n ? ' "' + n + '"' : '') + ' [' + R(el) + ']' + (p ? ' ' + p : ''));
+      lines.push('- ' + r + (n ? ' "' + n + '"' : '') + ' [' + R(el, r, n) + ']' + (p ? ' ' + p : ''));
     }
     return lines.join('\n') || '(no interactive elements)';
   }
@@ -953,7 +1311,7 @@ const TREE_JS: &str = r#"(opts) => {
       const r = role(c);
       if (r) {
         const n = name(c, r), p = props(c, r);
-        let line = indent + '- ' + r + (n ? ' "' + n + '"' : '') + ' [' + R(c) + ']' + (p ? ' ' + p : '');
+        let line = indent + '- ' + r + (n ? ' "' + n + '"' : '') + ' [' + R(c, r, n) + ']' + (p ? ' ' + p : '');
         // Leaf text that names nothing yet (a paragraph's words).
         if (!n && (r === 'paragraph' || r === 'listitem' || r === 'cell' || r === 'label') && c.children.length === 0) line += ': ' + clean(c.innerText, 200);
         lines.push(line);
@@ -991,16 +1349,33 @@ const FIND_JS: &str = r#"(query) => {
     if (INTERACTIVE.has(r)) score += 0.5;
     if (shown(el)) score += 1; else score -= 2;
     const snippet = !n && !INTERACTIVE.has(r) ? clean(el.innerText, 80) : '';
-    hits.push([score, '- ' + r + (n ? ' "' + n + '"' : '') + ' [' + R(el) + ']' + (props(el, r) ? ' ' + props(el, r) : '') + (snippet ? ': ' + snippet : '')]);
+    hits.push([score, '- ' + r + (n ? ' "' + n + '"' : '') + ' [' + R(el, r, n) + ']' + (props(el, r) ? ' ' + props(el, r) : '') + (snippet ? ': ' + snippet : '')]);
   }
   hits.sort((a, b) => b[0] - a[0]);
   return { hits: hits.slice(0, 20).map(h => h[1]), more: hits.length > 20 };
 }"#;
 
-/// Set a form element by ref: text, a choice, a checkbox.
+/// Set a form element by ref: text, a choice, a checkbox. A control the page
+/// draws itself comes back as where to click: a combobox (`combo`, picked
+/// by its options' labels), a switch or checkbox to toggle (`press`).
 const FORM_JS: &str = r#"(ref, value) => {
-  const el = document.querySelector('[data-larrier-ref="' + ref + '"]');
+  __A11Y__
+  const el = byRef(ref);
   if (!el) return null;
+  const rl = role(el), nm = name(el, rl);
+  const desc = ref + ' (' + (rl || el.tagName.toLowerCase()) + (nm ? ' "' + clean(nm, 50) + '"' : '') + ')';
+  const centre = (e) => { e.scrollIntoView({ block: 'center', inline: 'center' }); const b = e.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; };
+  const truthy = value === true || value === 'true' || value === 'on' || value === 1 || value === 'checked';
+  if ((rl === 'checkbox' || rl === 'switch' || rl === 'menuitemcheckbox' || rl === 'radio') && !(el.tagName === 'INPUT')) {
+    const is = el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-pressed') === 'true' || el.getAttribute('data-state') === 'checked';
+    if (is === truthy) return (is ? 'Checked ' : 'Unchecked ') + desc + ' (already)';
+    return { press: centre(el), desc };
+  }
+  const pop = el.getAttribute('aria-haspopup');
+  if (el.tagName !== 'SELECT' && (rl === 'combobox' || pop === 'listbox' || pop === 'menu' || pop === 'tree' || pop === 'grid' || (pop === 'true' && el.tagName === 'BUTTON'))) {
+    const [x, y] = centre(el);
+    return { combo: true, x, y, desc, editable: el.tagName === 'INPUT' || el.isContentEditable };
+  }
   const fire = () => { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
   const t = el.tagName.toLowerCase();
   if (t === 'select') {
@@ -1023,18 +1398,26 @@ const FORM_JS: &str = r#"(ref, value) => {
     fire();
     return 'Set ' + ref + ' to ' + JSON.stringify(String(value).slice(0, 80));
   }
-  return ref + ' is a ' + t + ', not a form field';
+  return desc + ' is a ' + (rl || t) + ', not a form field (click it, or use computer to type).';
 }"#;
 
-/// The page's readable text, the article or main part first.
+/// The page's readable text: the article or main part first, then the rest
+/// of the page (side panels, navigation, header, footer).
 const PAGE_TEXT_JS: &str = r#"(() => {
-  const main = document.querySelector('article') || document.querySelector('main, [role=main]') || document.body;
-  const t = (main ? main.innerText : '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  return t || '(the page has no text)';
+  const tidy = (s) => (s || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const all = tidy(document.body ? document.body.innerText : '');
+  const main = document.querySelector('article') || document.querySelector('main, [role=main]');
+  if (!main || main === document.body) return all || '(the page has no text)';
+  const m = tidy(main.innerText);
+  let rest;
+  const i = m ? all.indexOf(m) : -1;
+  if (i >= 0) rest = tidy(all.slice(0, i) + '\n' + all.slice(i + m.length));
+  else { const was = main.style.display; main.style.display = 'none'; rest = tidy(document.body.innerText); main.style.display = was; }
+  return ((m || '') + (rest ? '\n\n--- Elsewhere on the page (side panels, navigation, header, footer) ---\n' + rest : '')) || '(the page has no text)';
 })()"#;
 
 fn tools() -> Value {
-    let tab = json!({"type": "number", "description": "The tab (from tabs_context or tabs_create). Leave it out for the tab shown in Larrier."});
+    let tab = json!({"type": "number", "description": "The tab (from tabs_context or tabs_create). Leave it out for your own tab (opened if you have none)."});
     let obj = |mut props: Value, required: &[&str]| {
         props["tabId"] = tab.clone();
         json!({"type": "object", "properties": props, "required": required})
@@ -1042,8 +1425,10 @@ fn tools() -> Value {
     let ro = json!({"readOnlyHint": true, "openWorldHint": true});
     let act = json!({"readOnlyHint": false, "destructiveHint": false, "openWorldHint": true});
     json!([
-        {"name": "tabs_context", "description": "List the tabs in Larrier's browser (opens one if there's none). Call it first to get tab ids.", "inputSchema": {"type": "object", "properties": {"createIfEmpty": {"type": "boolean"}}}, "annotations": ro},
-        {"name": "tabs_create", "description": "Open a new tab in Larrier's browser (optionally at a URL) and return its id.", "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}}, "annotations": act},
+        {"name": "tabs_context", "description": "List the tabs in this chat's browser in Larrier: yours (reserved for you) and the user's. Call it first to get tab ids.", "inputSchema": {"type": "object", "properties": {"createIfEmpty": {"type": "boolean"}}}, "annotations": ro},
+        {"name": "tabs_create", "description": "Open a new tab of your own (optionally at a URL) and return its id. The user watches your tabs while you work and can unlock one to use it; you're told when they do.", "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}}, "annotations": act},
+        {"name": "tabs_reserve", "description": "Make one of the user's tabs yours, to act in it (navigate, click, type). Reading a tab needs no reservation.", "inputSchema": obj(json!({}), &["tabId"]), "annotations": act},
+        {"name": "tabs_release", "description": "Give a tab of yours back to the user.", "inputSchema": obj(json!({}), &["tabId"]), "annotations": act},
         {"name": "tabs_close", "description": "Close a tab.", "inputSchema": obj(json!({}), &["tabId"]), "annotations": act},
         {"name": "navigate", "description": "Go to a URL (or a host, or words to search for) in a tab, or \"back\" / \"forward\" in its history.", "inputSchema": obj(json!({"url": {"type": "string"}}), &["url"]), "annotations": act},
         {"name": "computer", "description": "Use the mouse and keyboard in a tab, and take screenshots. Coordinates are the page's CSS pixels (the frame screenshots report). Click buttons and links in their centre. Actions: left_click, right_click, double_click, triple_click (coordinate or ref), hover, left_click_drag (start_coordinate → coordinate), type (text into the focused element), key (space-separated keys or chords like \"ctrl+a Backspace\"; repeat), scroll (coordinate, scroll_direction, scroll_amount), scroll_to (ref), wait (duration ≤ 10 s), screenshot (scale ≤ 1 for a smaller image), zoom (region [x0, y0, x1, y1] magnified).",
@@ -1063,8 +1448,8 @@ fn tools() -> Value {
          }), &["action"]), "annotations": act},
         {"name": "read_page", "description": "The page as an accessibility tree: each element's role, name and state, with a ref the other tools take. filter \"interactive\" lists only controls; depth and ref_id focus on part of a big page.", "inputSchema": obj(json!({"filter": {"type": "string", "enum": ["interactive", "all"]}, "depth": {"type": "number"}, "ref_id": {"type": "string"}, "max_chars": {"type": "number"}}), &[]), "annotations": ro},
         {"name": "find", "description": "Find elements by what they are or say (\"search box\", \"add to cart button\"): up to 20 matches with refs.", "inputSchema": obj(json!({"query": {"type": "string"}}), &["query"]), "annotations": ro},
-        {"name": "form_input", "description": "Set a form element by ref: text for fields, a value or label for selects, true/false for checkboxes.", "inputSchema": obj(json!({"ref": {"type": "string"}, "value": {}}), &["ref", "value"]), "annotations": act},
-        {"name": "get_page_text", "description": "The page's text, the article or main part first. Best for reading.", "inputSchema": obj(json!({"max_chars": {"type": "number"}}), &[]), "annotations": ro},
+        {"name": "form_input", "description": "Set a form element by ref: text for fields, a value or label for selects, true/false for checkboxes and switches. Comboboxes the page draws (a button or box that opens a list) are opened and the option with that label clicked; give a list for several.", "inputSchema": obj(json!({"ref": {"type": "string"}, "value": {}}), &["ref", "value"]), "annotations": act},
+        {"name": "get_page_text", "description": "The page's text: the article or main part first, then the rest (side panels, navigation, header, footer). Best for reading.", "inputSchema": obj(json!({"max_chars": {"type": "number"}}), &[]), "annotations": ro},
         {"name": "javascript_tool", "description": "Run JavaScript in the page and get its (awaited) value; `return` works too.", "inputSchema": obj(json!({"text": {"type": "string"}}), &["text"]), "annotations": act},
         {"name": "read_console_messages", "description": "The tab's console messages and errors since the tools attached to it.", "inputSchema": obj(json!({"limit": {"type": "number"}, "onlyErrors": {"type": "boolean"}, "pattern": {"type": "string"}}), &[]), "annotations": ro},
         {"name": "read_network_requests", "description": "The tab's requests since the tools attached to it (method, status, URL), or one response's body by requestId.", "inputSchema": obj(json!({"limit": {"type": "number"}, "urlPattern": {"type": "string"}, "requestId": {"type": "string"}}), &[]), "annotations": ro},

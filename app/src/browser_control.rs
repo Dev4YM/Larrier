@@ -79,20 +79,39 @@ fn answer(req: &Value) -> Value {
     let active = st.active_of(&owner);
     let tabs: Vec<&host::Tab> = st.tabs.iter().filter(|t| t.owner == owner).collect();
     match req["cmd"].as_str().unwrap_or("") {
-        "tabs" => json!({"tabs": tabs.iter().map(|t| json!({"id": t.id, "url": t.url, "title": t.title, "active": Some(t.id) == active, "target": target_of(t.id)})).collect::<Vec<_>>()}),
-        "new_tab" => match host::new_tab_in(Some(&owner), req["url"].as_str().unwrap_or("about:blank")) {
+        "tabs" => {
+            let (notes, seq) = host::agent_notes(&owner);
+            json!({
+                "tabs": tabs.iter().map(|t| json!({"id": t.id, "url": t.url, "title": t.title, "active": Some(t.id) == active, "target": target_of(t.id), "agent": t.agent, "unlocked": t.unlocked})).collect::<Vec<_>>(),
+                // Tabs that left, and why (a tab the agent used may be one).
+                "closed": host::closed_tabs(&owner).iter().map(|c| json!({"id": c.id, "why": c.why, "ago": c.at.elapsed().as_secs()})).collect::<Vec<_>>(),
+                // What the user did with the agent's tabs.
+                "notes": notes.iter().map(|(n, t)| json!({"seq": n, "text": t})).collect::<Vec<_>>(),
+                "seq": seq,
+            })
+        }
+        // The agent's tabs are reserved for it.
+        "new_tab" => match host::new_agent_tab(&owner, req["url"].as_str().unwrap_or("about:blank")) {
             Some(id) => json!({"id": id}),
             None => json!({"error": st.error.unwrap_or_else(|| "Larrier couldn't open a tab".into())}),
         },
+        "reserve" => match host::reserve(req["id"].as_u64().unwrap_or(0), &owner) {
+            Ok(()) => json!({"ok": true}),
+            Err(e) => json!({"error": e}),
+        },
+        "release" => {
+            host::release(req["id"].as_u64().unwrap_or(0), false);
+            json!({"ok": true})
+        }
         // A tab to work in, if there's none yet.
         "ensure" => {
             if tabs.is_empty() {
-                host::new_tab_in(Some(&owner), "about:blank");
+                host::new_agent_tab(&owner, "about:blank");
             }
             json!({"ok": true})
         }
         "close_tab" => {
-            host::close_tab(req["id"].as_u64().unwrap_or(0));
+            host::close_tab_as(req["id"].as_u64().unwrap_or(0), "the browser tools closed it (tabs_close)");
             json!({"ok": true})
         }
         "activate" => {

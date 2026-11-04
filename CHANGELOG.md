@@ -5,6 +5,18 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.41 — 2026-11-04
+
+### New
+
+- Run pages on Chromium's engine inside Larrier
+- Keep a prompt's edit with its chat, focused, closed when untouched
+- Typing with nothing focused goes to the message box
+- Show a chat running in another app as running, disabled
+
+### Fixed
+
+- Build on macOS and Linux again
 ## 0.1.40 — 2026-11-03
 
 ### New

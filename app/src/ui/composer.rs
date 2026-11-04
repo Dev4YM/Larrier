@@ -213,6 +213,10 @@ pub fn Composer(
         move || crate::keep::input(&k)
     });
     let mut text = use_signal(|| kept.text.clone());
+    // Bumped whenever Larrier itself changes the text (not the user typing):
+    // the box takes those writes, and drops older copies of what was typed
+    // that reach it after the user moved on (they'd throw the caret to the end).
+    let put_gen = use_signal(|| 0u64);
     let attachments: Signal<Vec<Part>> = use_signal(|| kept.attachments.clone());
     // The card open above the box (the queue, running agents or terminals),
     // kept with the chat; the queued row being dragged and where it would
@@ -289,7 +293,7 @@ pub fn Composer(
         if !add.is_empty() {
             let cur = text.read().clone();
             let sep = if cur.is_empty() || cur.ends_with(' ') || cur.ends_with('\n') { "" } else { " " };
-            text.set(format!("{cur}{sep}{} ", add.join(" ")));
+            text.set(format!("{cur}{sep}{} ", add.join(" "))); bump(put_gen);
             app.ui.write().focus_composer += 1;
         }
     }));
@@ -330,7 +334,7 @@ pub fn Composer(
             if !add.is_empty() {
                 let cur = text.read().clone();
                 let sep = if cur.is_empty() || cur.ends_with(' ') || cur.ends_with('\n') { "" } else { " " };
-                text.set(format!("{cur}{sep}{} ", add.join(" ")));
+                text.set(format!("{cur}{sep}{} ", add.join(" "))); bump(put_gen);
             }
             document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 30)"));
         }
@@ -355,7 +359,7 @@ pub fn Composer(
         for q in mine {
             let (t, chips) = super::mentions::to_edit(&q.text, &app.sessions.peek());
             let typed = text.peek().clone();
-            text.set(if typed.trim().is_empty() { t.clone() } else { format!("{t}\n{typed}") });
+            text.set(if typed.trim().is_empty() { t.clone() } else { format!("{t}\n{typed}") }); bump(put_gen);
             for c in chips {
                 if !mentions.peek().iter().any(|m| m.marked() == c.marked()) {
                     mentions.write().push(c);
@@ -458,7 +462,7 @@ pub fn Composer(
         }
         let rest = text.peek().clone();
         mentions.write().retain(|c| c.kind != super::mentions::MentionKind::RunAs);
-        text.set(format!("{} {}", chip.marked(), rest.trim_start()));
+        text.set(format!("{} {}", chip.marked(), rest.trim_start())); bump(put_gen);
         mentions.write().push(chip);
     }));
     // The agent's own modes, e.g. Claude Code Auto / Manual / Plan …
@@ -525,7 +529,7 @@ pub fn Composer(
     let run_slash = move |cmd: &str, sid: Option<String>| {
         let mut app = app;
         let mut text = text;
-        text.set(String::new());
+        text.set(String::new()); bump(put_gen);
         match cmd {
             "/plan" => if let Some(p) = plan_k { set_mode(Some(p.to_string()), sid) },
             "/agent" => set_mode(None, sid),
@@ -566,7 +570,7 @@ pub fn Composer(
             let cut = typed_cut(&t);
             let have = mentions.read().iter().find(|c| c.kind == chip.kind && c.value == chip.value).cloned();
             let chip = have.unwrap_or_else(|| super::mentions::unique(&mentions.read(), chip));
-            text.set(format!("{}{} ", &t[..cut], chip.marked()));
+            text.set(format!("{}{} ", &t[..cut], chip.marked())); bump(put_gen);
             // Objects whose tokens are gone from the text are dropped.
             let now = text.read().clone();
             mentions.write().retain(|c| now.contains(&c.marked()));
@@ -582,7 +586,7 @@ pub fn Composer(
                 let old: Vec<MentionChip> = mentions.read().iter().filter(|c| c.kind == super::mentions::MentionKind::RunAs).cloned().collect();
                 for c in old {
                     let t = text.read().replace(&format!("{} ", c.marked()), "").replace(&c.marked(), "");
-                    text.set(t);
+                    text.set(t); bump(put_gen);
                 }
                 put(MentionChip::run_as(&name, &kind));
                 set_run_as(Some(name), sid);
@@ -727,7 +731,7 @@ pub fn Composer(
                     let cfg = app.config.peek();
                     acc_id.as_deref().and_then(|i| cfg.account(i)).or_else(|| cfg.default_account(&AgentKind::ClaudeCode)).cloned()
                 };
-                text.set(String::new());
+                text.set(String::new()); bump(put_gen);
                 mentions.set(Vec::new());
                 crate::keep::set_input(&crate::keep::key(sid.as_deref()), crate::keep::Input::default());
                 match (cmd, acc) {
@@ -744,7 +748,7 @@ pub fn Composer(
                 return;
             }
         }
-        text.set(String::new());
+        text.set(String::new()); bump(put_gen);
         at.set(Vec::new());
         mentions.set(Vec::new());
         let editing = q_edit.read().clone();
@@ -760,7 +764,7 @@ pub fn Composer(
             if let Some(id) = &sid {
                 app.queue_update(id, qid, t, a);
             }
-            text.set(draft);
+            text.set(draft); bump(put_gen);
             at.set(draft_atts);
             mentions.set(draft_chips);
             return;
@@ -804,7 +808,7 @@ pub fn Composer(
         if let Some((_, draft, draft_atts, draft_chips)) = editing {
             let (mut text, mut at, mut mentions) = (text, attachments, mentions);
             q_edit.set(None);
-            text.set(draft);
+            text.set(draft); bump(put_gen);
             at.set(draft_atts);
             mentions.set(draft_chips);
         }
@@ -816,7 +820,7 @@ pub fn Composer(
         q_edit.set(Some((q.id, kept.0, kept.1, kept.2)));
         // Its objects back as objects, not the text the agent reads.
         let (t, chips) = super::mentions::to_edit(&q.text, &app.sessions.peek());
-        text.set(t);
+        text.set(t); bump(put_gen);
         mentions.set(chips);
         at.set(q.attachments.clone());
         document::eval(&format!("setTimeout(() => {{ const el = document.getElementById('{input_id}'); if (el) {{ el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }} }}, 30)"));
@@ -1071,7 +1075,7 @@ pub fn Composer(
                 // (and never loses focus) when the composer grows.
                 div { class: "composer-row cgrid",
                     div { class: "c-plus",
-                        PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), groups: groups.clone(), text, input_id,
+                        PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), groups: groups.clone(), text, put_gen, input_id,
                             onpick: { let sid = session_id.clone(); move |(g, v): (usize, Option<String>)| set_pick(g, v, sid.clone()) } }
                         if q_edit.read().is_some() {
                             span { class: "edit-badge", title: "Editing a queued message",
@@ -1092,6 +1096,8 @@ pub fn Composer(
                         spellcheck: "false",
                         rows: if home { "3" } else { "1" },
                         placeholder: "{placeholder}",
+                        // Before value: the box reads it when the value arrives.
+                        "data-gen": "{put_gen}",
                         value: "{text}",
                         oninput: move |e| {
                             hl.set(0);
@@ -1768,6 +1774,11 @@ fn ModelPicker(
     }
 }
 
+/// Larrier changed the composer's text itself (see `put_gen`).
+fn bump(mut g: Signal<u64>) {
+    g += 1;
+}
+
 /// The "+" menu: attachments, mentions, mode, commands.
 #[component]
 fn PlusMenu(
@@ -1776,6 +1787,7 @@ fn PlusMenu(
     session_id: Option<String>,
     groups: Vec<ModeGroupView>,
     text: Signal<String>,
+    put_gen: Signal<u64>,
     input_id: &'static str,
     onpick: EventHandler<(usize, Option<String>)>,
 ) -> Element {
@@ -1792,7 +1804,7 @@ fn PlusMenu(
                 MenuItem { label: "Mention a file".to_string(), sub: Some("@".to_string()), icon: Some(I::AtSign), onclick: move |_| {
                     open.set(false);
                     let t = text.read().clone();
-                    text.set(if t.is_empty() || t.ends_with(' ') { format!("{t}@") } else { format!("{t} @") });
+                    text.set(if t.is_empty() || t.ends_with(' ') { format!("{t}@") } else { format!("{t} @") }); bump(put_gen);
                     document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
                 } }
                 // The agent's own mode groups, numbered 1–9 across groups.

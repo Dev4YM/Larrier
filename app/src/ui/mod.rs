@@ -636,11 +636,12 @@ pub fn Root() -> Element {
               window.addEventListener('resize', () => document.querySelectorAll('.menu, .mention-menu').forEach(fit));
             }
             // Fast typing: a field's text comes back from Larrier after each
-            // key, and when that lags behind the keys (a slow machine, a
-            // busy webview) an older text would land on newer typing and
-            // eat characters. Text the user has already typed past isn't
-            // put back (Larrier's own changes, like clearing after sending
-            // or inserting an object, still are).
+            // key, applied a frame later, so with quick keys an older text
+            // lands on newer typing: it would eat characters and throw the
+            // caret to the end (typing anywhere, not only at the end). Text
+            // the user has already typed past isn't put back. Larrier's own
+            // changes, like clearing after sending or inserting an object,
+            // still are: a field with data-gen bumps it with each of them.
             if (!window.__larrierTypeGuard) {
               window.__larrierTypeGuard = true;
               const guard = (el) => {
@@ -649,19 +650,28 @@ pub fn Root() -> Element {
                 const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value');
                 if (!d || !d.set) return;
                 const typed = [];
+                const gen = () => el.getAttribute('data-gen');
+                // The data-gen the user typed after: a newer one is Larrier's change.
+                let seen = gen();
                 el.addEventListener('input', () => {
                   const now = performance.now();
                   typed.push({ v: d.get.call(el), t: now });
                   while (typed.length && now - typed[0].t > 2000) typed.shift();
+                  seen = gen();
                 }, true);
+                const put = (v) => { seen = gen(); d.set.call(el, v); };
                 Object.defineProperty(el, 'value', {
                   configurable: true,
                   get() { return d.get.call(el); },
                   set(v) {
+                    v = String(v);
                     const cur = d.get.call(el);
                     const last = typed[typed.length - 1];
-                    const stale = v !== '' && v !== cur && last && last.v === cur && cur.startsWith(v) && typed.some((e) => e.v === v);
-                    if (!stale) d.set.call(el, v);
+                    // An older text of the user's, while the field holds their latest.
+                    const old = v !== cur && last && last.v === cur && typed.some((e) => e.v === v) && (v !== '' || gen() !== null);
+                    if (!old || gen() !== seen) return put(v);
+                    // Larrier's change says so with data-gen, maybe later in this same update.
+                    if (gen() !== null) queueMicrotask(() => { if (gen() !== seen) put(v); });
                   },
                 });
               };

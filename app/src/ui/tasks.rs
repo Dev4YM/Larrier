@@ -167,9 +167,45 @@ pub fn SubagentCard(session_id: String, tool: ToolCall) -> Element {
 }
 
 /// Read-only transcript of one subagent, shown in its own tab.
+/// Where a subagent's transcript was left: scrolled up to `top`; not kept
+/// while at the bottom, following the newest.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct SubScroll {
+    top: f64,
+}
+
 #[component]
 pub fn SubagentTranscript(session_id: String, tool_id: String) -> Element {
     let app = use_app();
+    // Its cards open as they were left, kept with the subagent.
+    use_context_provider(|| super::transcript::CardKeep(format!("{session_id}/{tool_id}")));
+    let body_id = format!("tkb-{}", tool_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect::<String>());
+    let scroll_key = format!("sub.{tool_id}");
+    // Opened where it was left; else at the newest, following it while the
+    // subagent works (until the user scrolls up).
+    let kept = use_hook({
+        let (sid, k) = (session_id.clone(), scroll_key.clone());
+        move || crate::keep::value::<SubScroll>(&sid, &k)
+    });
+    // Run once its transcript is on the page (it may still be loading now).
+    let start_js = {
+        let start = match kept {
+            Some(k) => format!("el.scrollTop = {}; el.__follow = false;", k.top),
+            None => "el.scrollTop = el.scrollHeight; el.__follow = true;".to_string(),
+        };
+        format!(
+            r#"requestAnimationFrame(() => {{
+                const el = document.getElementById('{body_id}'); if (!el || el.__wired) return;
+                el.__wired = true;
+                {start}
+                el.addEventListener('scroll', () => {{ el.__follow = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}, {{ passive: true }});
+                const keepUp = () => {{ if (el.__follow) el.scrollTop = el.scrollHeight; }};
+                const inner = el.firstElementChild;
+                if (inner) new ResizeObserver(keepUp).observe(inner);
+            }})"#
+        )
+    };
+    let mut scroll_gen = use_signal(|| 0u64);
     let show_reasoning = app.config.read().settings.show_reasoning;
     let found = app.with_session(&session_id, |s| (s.title.clone(), find_tool(&s.messages, &tool_id).cloned()));
     let Some((parent_title, tool)) = found else {
@@ -231,7 +267,30 @@ pub fn SubagentTranscript(session_id: String, tool_id: String) -> Element {
                     }
                 }
             }
-            div { class: "tk-tx-body",
+            div { class: "tk-tx-body", id: "{body_id}",
+                onmounted: move |_| {
+                    document::eval(&start_js);
+                },
+                onscroll: {
+                    let (sid, key, bid) = (session_id.clone(), scroll_key.clone(), body_id.clone());
+                    move |_| {
+                        // Kept once it settles.
+                        scroll_gen += 1;
+                        let gen = *scroll_gen.peek();
+                        let (sid, key, bid) = (sid.clone(), key.clone(), bid.clone());
+                        spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                            if *scroll_gen.peek() != gen {
+                                return;
+                            }
+                            let js = format!("return (() => {{ const el = document.getElementById('{bid}'); if (!el) return null; return {{ top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight < 40 }}; }})()");
+                            let Ok(v) = document::eval(&js).join::<serde_json::Value>().await else { return };
+                            let at_bottom = v["bottom"].as_bool().unwrap_or(true);
+                            let top = v["top"].as_f64().unwrap_or(0.0);
+                            crate::keep::set_value(&sid, &key, &(!at_bottom).then_some(SubScroll { top }));
+                        });
+                    }
+                },
                 div { class: "transcript-inner selectable",
                     if let Some(p) = prompt {
                         div { class: "tk-user", span { class: "tk-role", "Task" } "{p}" }

@@ -469,6 +469,47 @@ pub fn Root() -> Element {
             // The Browser tab's page area: where it is, and whether a menu or
             // dialog of the app's is over it (the page is a native view drawn
             // above the app, so it steps aside then). Sent when it changes.
+            // A prompt pinned at the top while its turn scrolls by folds up
+            // as the turn moves under it: its pictures go first, then its
+            // lines, down to three, so it never leaves a gap or hides its
+            // words behind a picture. Drawn only (clip and shift): nothing
+            // in the chat moves.
+            if (!window.__larrierPins) {
+              window.__larrierPins = true;
+              const reset = (c) => { if (c.classList.contains('pinned')) { c.classList.remove('pinned', 'cut'); c.style.removeProperty('--pin-t'); c.style.removeProperty('--pin-vis'); c.style.removeProperty('--pin-cut'); } };
+              const pin = (sc) => {
+                for (const msg of sc.querySelectorAll('.turn > .user-msg')) {
+                  const card = msg.querySelector(':scope > .user-card');
+                  if (!card) continue;
+                  const turn = msg.parentElement;
+                  const d = msg.getBoundingClientRect().top - (turn.getBoundingClientRect().top + (parseFloat(getComputedStyle(turn).paddingTop) || 0));
+                  if (d < 1 || card.classList.contains('expanded') || card.classList.contains('editing')) { reset(card); continue; }
+                  const full = card.offsetHeight;
+                  const imgs = card.querySelector(':scope > .msg-images');
+                  const imgH = imgs ? imgs.offsetHeight + (parseFloat(getComputedStyle(imgs).marginBottom) || 0) : 0;
+                  const lh = parseFloat(getComputedStyle(card).lineHeight) || 22;
+                  const least = Math.min(full - imgH, Math.round(lh * 3 + 20));
+                  const t = Math.round(Math.min(d, imgH));
+                  const vis = Math.round(Math.max(least, full - d));
+                  const cut = Math.max(0, full - t - vis);
+                  if (t === 0 && cut === 0) { reset(card); continue; }
+                  card.classList.add('pinned');
+                  card.classList.toggle('cut', cut > 0);
+                  card.style.setProperty('--pin-t', t + 'px');
+                  card.style.setProperty('--pin-vis', vis + 'px');
+                  card.style.setProperty('--pin-cut', cut + 'px');
+                }
+              };
+              const due = new Set();
+              const later = (sc) => {
+                if (!due.size) requestAnimationFrame(() => { for (const s of due) pin(s); due.clear(); });
+                due.add(sc);
+              };
+              document.addEventListener('scroll', (e) => { const sc = e.target; if (sc && sc.classList && sc.classList.contains('transcript')) later(sc); }, true);
+              const all = () => document.querySelectorAll('.transcript').forEach(later);
+              window.addEventListener('resize', all);
+              document.addEventListener('click', () => setTimeout(all, 0), true);
+            }
             if (!window.__larrierBrowserArea) {
               window.__larrierBrowserArea = true;
               const OVER = '.menu, .ctx-menu, #g-menu, .modal, .palette, .lightbox, .overlay, .menu-backdrop + .menu';

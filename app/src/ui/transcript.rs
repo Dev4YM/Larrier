@@ -113,9 +113,41 @@ struct Scrolled {
     offset: f64,
 }
 
+/// Where open cards are kept: the chat (or a subagent of it) on screen.
+#[derive(Clone, PartialEq)]
+pub struct CardKeep(pub String);
+
+/// A card's open state, kept with the chat it's in (when it has an id), so
+/// it opens again as the user left it.
+pub fn use_card_open(id: Option<String>) -> Signal<bool> {
+    let key = try_use_context::<CardKeep>().zip(id).map(|(c, id)| (c.0, id));
+    let k0 = key.clone();
+    let open = use_signal(move || k0.as_ref().is_some_and(|(chat, id)| crate::keep::value::<Vec<String>>(chat, "cards").unwrap_or_default().contains(id)));
+    use_effect(move || {
+        let on = open();
+        let Some((chat, id)) = &key else { return };
+        let mut v: Vec<String> = crate::keep::value(chat, "cards").unwrap_or_default();
+        let had = v.contains(id);
+        if on == had {
+            return;
+        }
+        if on {
+            v.push(id.clone());
+            // The newest few hundred are enough.
+            let extra = v.len().saturating_sub(400);
+            v.drain(..extra);
+        } else {
+            v.retain(|x| x != id);
+        }
+        crate::keep::set_value(chat, "cards", &v);
+    });
+    open
+}
+
 #[component]
 pub fn Transcript(id: String) -> Element {
     let app = use_app();
+    use_context_provider(|| CardKeep(id.clone()));
     // Opened where it was left (in a past launch too), else at the bottom.
     let kept = use_hook(|| crate::keep::value::<Scrolled>(&id, "scroll"));
     let mut at_bottom = use_signal(|| kept.is_none());
@@ -223,6 +255,20 @@ pub fn Transcript(id: String) -> Element {
                     let pending = false;
                     el.addEventListener('scroll', () => {{ if (!pending) {{ pending = true; requestAnimationFrame(() => {{ pending = false; current(); }}); }} }}, {{ passive: true }});
                     el.__current = current;
+                    // The timeline shows only with room beside the text: near
+                    // it, it would sit on the agent's words.
+                    const fit = () => {{
+                        const n = nav(); const inner = el.querySelector('.transcript-inner');
+                        if (!n || !inner) return;
+                        const left = (n.offsetParent || el).getBoundingClientRect().left;
+                        const text = inner.getBoundingClientRect().left + (parseFloat(getComputedStyle(inner).paddingLeft) || 0);
+                        n.classList.toggle('tight', text - (left + 40) < 16);
+                    }};
+                    const ro = new ResizeObserver(fit);
+                    ro.observe(el);
+                    const inner0 = el.querySelector('.transcript-inner');
+                    if (inner0) ro.observe(inner0);
+                    fit();
                     const mark = () => {{ el.__userAt = performance.now(); }};
                     el.addEventListener('wheel', mark, {{ passive: true }});
                     el.addEventListener('touchmove', mark, {{ passive: true }});
@@ -571,23 +617,20 @@ fn TurnView(
                 }
             }
         }
-        // One layout running and done: the steps stay the same components
-        // when the turn ends, so nothing is made again and nothing moves.
-        if has_work {
-            div { class: if live { "step worked live" } else { "step worked" },
+        // While it runs the steps show as they come, with no heading; once
+        // it ends "Worked for …" heads them. The steps stay the same
+        // components when the turn ends, so nothing is made again.
+        if has_work && !live {
+            div { class: "step worked",
                 onclick: {
                     let (sid, key) = (session_id.clone(), turn_key.clone());
                     move |_| {
-                        if !live {
-                            chosen.set(Some(!open));
-                            set_turn_open(&sid, &key, !open);
-                        }
+                        chosen.set(Some(!open));
+                        set_turn_open(&sid, &key, !open);
                     }
                 },
-                span { class: "verb", if live { "Working" } else { "{label}" } }
-                if !live {
-                    span { class: "chev", if open { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
-                }
+                span { class: "verb", "{label}" }
+                span { class: "chev", if open { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
             }
         }
         if live || open {
@@ -1359,7 +1402,7 @@ fn read_target(t: &ToolCall) -> Option<String> {
 
 #[component]
 fn ExploreGroup(tools: Vec<ToolCall>) -> Element {
-    let mut open = use_signal(|| false);
+    let mut open = use_card_open(tools.first().map(|t| format!("x-{}", t.id)));
     let running = tools.iter().any(is_running);
     if tools.len() == 1 {
         return rsx! { Step { tool: tools[0].clone() } };
@@ -1435,7 +1478,7 @@ fn intent(t: &ToolCall) -> &'static str {
 
 #[component]
 fn Step(tool: ToolCall) -> Element {
-    let mut open = use_signal(|| false);
+    let mut open = use_card_open(Some(tool.id.clone()));
     let (verb, target) = verb_target(&tool);
     let failed = tool.is_error || tool.status == ToolStatus::Failed;
     let has_output = tool.output.as_ref().map(|o| !o.trim().is_empty()).unwrap_or(false);
@@ -1710,7 +1753,7 @@ pub fn line_ops(old: &str, new: &str, context: usize) -> Vec<(&'static str, Stri
 /// Shell command card: description first, the commands it ran muted.
 #[component]
 fn CommandCard(tool: ToolCall) -> Element {
-    let mut open = use_signal(|| false);
+    let mut open = use_card_open(Some(tool.id.clone()));
     let command = tool
         .input
         .get("command")

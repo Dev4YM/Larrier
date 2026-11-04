@@ -747,8 +747,6 @@ select.input { cursor: pointer; padding-right: 4px; }
 /* What arrives animates in (a live turn's parts, a reply's actions); what
    is only drawn again doesn't, so nothing flickers when a chat updates. */
 .msg-actions { animation: rise-in .2s ease-out backwards; }
-.step.worked.live { cursor: default; }
-.step.worked.live:hover .verb { color: var(--fg-2); }
 .chat-row, .repo-row, .nav-row, .menu-item, .icon-btn, .pill-btn, .ghost-btn, .primary-btn, .picker, .env-chip, .tool-link, .select-btn, .plus-btn, .send-btn, .chip, .seg button, .toggle, .toggle::after {
   transition: background-color .12s ease, color .12s ease, border-color .12s ease, opacity .12s ease, transform .12s ease, left .15s ease, box-shadow .12s ease;
 }
@@ -1138,6 +1136,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .tn-meta { font-size: 11px; color: var(--fg-4); margin-top: 2px; }
 .app[data-theme="dark"] .tn-card { box-shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .35); }
 .app.narrow .turn-nav { display: none; }
+.turn-nav.tight { visibility: hidden; pointer-events: none; }
 
 /* Agent modes in the + menu: label, Default badge, description, check, key. */
 .menu-item.mode-row { height: auto; min-height: 44px; padding: 6px 8px; align-items: flex-start; gap: 10px; }
@@ -1271,15 +1270,13 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
    lines tall (double-click shows it all), the rest fading out. */
 .user-card { max-height: calc(var(--lh-prompt, 22px) * 6 + 22px); }
 .user-card.has-images { max-height: calc(var(--lh-prompt, 22px) * 6 + 88px); }
-/* Pinned at the top while its turn scrolls by, a prompt shows three lines,
-   fading out (drawn shorter only: its place in the chat doesn't change, so
-   nothing moves). */
-.turn > .user-msg { container-type: scroll-state; }
-@container scroll-state(stuck: top) {
-  .user-card:not(.expanded):not(.editing):not(.short) { clip-path: inset(0 0 calc(100% - var(--lh-prompt, 22px) * 3 - 20px) 0 round 12px); }
-  /* Its fade moves up to the new bottom. */
-  .user-card:not(.expanded):not(.editing):not(.short)::after { top: calc(var(--lh-prompt, 22px) * 3 - 24px); bottom: auto; }
-}
+/* Pinned at the top while its turn scrolls by, a prompt folds up as the
+   turn moves under it (see the page script): its pictures go first, then
+   its lines, down to three. Drawn only (clipped and shifted), so nothing in
+   the chat moves; its border is redrawn around what shows. */
+.user-card.pinned { transform: translateY(calc(var(--pin-t, 0px) * -1)); clip-path: inset(var(--pin-t, 0px) 0 var(--pin-cut, 0px) 0 round 12px); border-color: transparent; }
+.user-card.pinned::before { content: ""; position: absolute; left: 0; right: 0; top: var(--pin-t, 0px); height: var(--pin-vis, 100%); border: 1px solid var(--border); border-radius: 12px; pointer-events: none; z-index: 2; }
+.user-card.pinned.cut::after { display: block; top: calc(var(--pin-t, 0px) + var(--pin-vis, 0px) - 44px); bottom: auto; }
 .user-card.expanded { max-height: none; }
 .user-card.short::after { display: none; }
 .user-card:not(.expanded)::after { height: 44px; background: linear-gradient(to bottom, transparent, var(--card-2) 88%); }

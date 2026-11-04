@@ -57,7 +57,10 @@ Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
   other configuration, for Customize and the `/` and `@` menus.
 - `git.rs`: changes, commits, pushes, worktrees and pull requests.
 - `browser/`: the browser views agents can drive, served to them as an MCP
-  server (`Larrier mcp-browser`).
+  server (`Larrier mcp-browser`). An agent acts in tabs reserved for it
+  (`tabs_create`, `tabs_reserve`) and reads any; what the user does with
+  its tabs (unlock, lock again, take back, close) comes back as notes in
+  its next tool result.
 
 ## The desktop app
 
@@ -74,9 +77,12 @@ Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
 - `keep.rs`: window state saved to `kept.json` (debounced, flushed on close)
   and restored on start.
 - `browser_host.rs`, `browser_control.rs`: the Browser tab's tabs and
-  the agents' control of them; `browser_cef.rs`: on Windows, the pages
-  themselves, run on Chromium (CEF) inside Larrier's window, with the
-  engine's runtime fetched on first use.
+  the agents' control of them (which tabs are an agent's, the notes for
+  it); `browser_cef.rs`: on Windows, the pages themselves, run on Chromium
+  (CEF) inside Larrier's window, with the engine's runtime fetched on
+  first use. While a chat's agent runs, its tabs' page windows are
+  disabled, so the user's input doesn't reach them (the agent's goes in
+  through DevTools).
 - `ui/editor.rs`: the Files panel's code editor, Monaco, embedded in the
   program (`assets/monaco`, listed by `build.rs`) and served over the
   `larrier://` protocol.

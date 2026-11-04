@@ -63,9 +63,11 @@ onto the chat area:
   where you left it, else at its newest, following it while it works.
   Background Tasks shows each subagent's model, tools and context. Each
   running subagent and background command has its own stop button (Claude
-  Code); Stop All stops the agent and everything it runs. While the agent
-  only waits on its subagents, the box offers to send (into the turn), not
-  to stop.
+  Code); Stop All stops the agent and everything it runs. Background work
+  runs as long as it takes: Larrier sets no limit of its own. Once the
+  agent's reply is done and only its background work runs, the agent is
+  free: the box sends (not stops), and a message goes straight in and
+  shows in the chat at once, whatever Settings say for a busy agent.
 - **Requests from the agent** (approve a command, answer a question, accept
   a plan) wait for you just above the input, once: not in the chat. An
   answered question stays in the chat as one line with what you picked.
@@ -86,7 +88,8 @@ onto the chat area:
 - Paste or drop images and files. Ctrl+Shift+V pastes long text as text.
 - Messages sent while the agent works steer the running turn or wait in a
   queue (Settings → General; Ctrl+Enter does the other). A queued message can be sent at once or taken back.
-  The box goes back to one line once a message is sent.
+  The box goes back to one line once a message is sent. Typing fast,
+  anywhere in the text, keeps the cursor where you type.
 - **Spelling** is checked with Hunspell, the engine Chrome's spelling is
   built on, and its English dictionary. Right-click a misspelled word for
   its corrections (it's selected for you), or Add to Dictionary.
@@ -110,9 +113,16 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   window. Its first use downloads the engine once (about 186 MB, see
   [install.md](install.md#the-browser-engine)). It has its own profile,
   so sign in to sites there separately from your Chrome. On macOS and
-  Linux it uses the system's web view. Agents can drive it through
-  Larrier's browser tools while you watch (its tab opens as a regular tab,
-  not a preview); annotate mode lets you point at
+  Linux it uses the system's web view. Agents drive it through Larrier's
+  browser tools in tabs of their own, so the two of you never fight over a
+  page: a tab the agent opens is its own (marked with its icon), and it
+  opens behind the page you're on. While the agent works, its tabs are
+  locked: you watch, and your clicks and keys don't reach the page. Hover
+  one (or the Agent pill in the address bar) to Unlock it and use it
+  yourself; the agent is told, and it's the agent's alone again once you
+  leave it (another tab, panel or chat), or with Lock again. Your own tabs
+  the agent can read; to act in one it reserves it first, and a tab's
+  menu can Give to Agent or Take Back from Agent. Annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
   A page that can't be reached gets Larrier's own message with Try again,
   pop-ups and new windows open as tabs. Developer tools (F12 or
@@ -182,7 +192,10 @@ chat or page, with each chat's tabs, side panel (browser pages, terminals
 with their recent output, open files, the commit message being typed),
 scroll position, queued and half-typed messages, the sidebar's state, the
 cards and groups left open or folded, and the searches and filters of
-every page.
+every page. A chat is written to disk as soon as its agent rests, and
+every running chat once more as Larrier closes, so an agent's last words
+are there when it reopens (with "Interrupted when Larrier closed" after
+them if it was still running).
 
 ## Keyboard
 

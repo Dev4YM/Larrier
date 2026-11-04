@@ -603,6 +603,64 @@ pub fn DiffView(unified: String) -> Element {
 
 /// The agents' browser, live: what an agent does there shows here, and the
 /// user can click, scroll and type in it too.
+/// The cursor in the Browser tab's address bar (after a new tab opens).
+fn focus_address() {
+    document::eval("setTimeout(() => { const i = document.querySelector('.browser-bar .url-input'); if (i) { i.focus(); i.select(); } }, 30)");
+}
+
+/// Right-click menu of a browser tab.
+#[component]
+fn BrowserTabMenu(id: u64, x: f64, y: f64, onclose: EventHandler<()>) -> Element {
+    use crate::browser_host as host;
+    let app = use_app();
+    use_effect(use_reactive!(|x, y| {
+        document::eval(&super::place_at_js("browser-tab-menu", x, y, true));
+    }));
+    let st = host::STATE();
+    let Some(tab) = st.tabs.iter().find(|t| t.id == id).cloned() else { return rsx! {} };
+    let mine = st.mine();
+    let at = mine.iter().position(|t| t.id == id).unwrap_or(0);
+    let page = !host::is_blank(&tab.url);
+    let web = tab.url.starts_with("http://") || tab.url.starts_with("https://");
+    let item = move |label: &'static str, icon: I, kb: &'static str, enabled: bool, f: Box<dyn Fn()>| {
+        rsx! {
+            button { class: if enabled { "menu-item" } else { "menu-item disabled" },
+                onclick: move |_| {
+                    if enabled {
+                        onclose.call(());
+                        f();
+                    }
+                },
+                span { class: "muted", Icon { i: icon, size: 14 } }
+                span { "{label}" }
+                if !kb.is_empty() { span { class: "kb", "{kb}" } }
+            }
+        }
+    };
+    let (u1, u2) = (tab.url.clone(), tab.url.clone());
+    let owner = tab.owner.clone();
+    rsx! {
+        div { class: "menu-backdrop", style: "z-index: 1499;",
+            onclick: move |_| onclose.call(()),
+            oncontextmenu: move |e| { e.prevent_default(); onclose.call(()); },
+        }
+        div { id: "browser-tab-menu", class: "menu ctx-menu", style: "left: {x}px; top: {y}px; visibility: hidden;",
+            {item("New Tab to the Right", I::Plus, "", true, Box::new(move || { host::new_tab_after(id, ""); focus_address(); }))}
+            div { class: "menu-sep" }
+            {item("Reload", I::Refresh, "", page, Box::new(move || host::reload_tab(id)))}
+            {item("Duplicate", I::CopyPlus, "", page, Box::new(move || host::duplicate_tab(id)))}
+            {item("Copy Address", I::Link, "", page, Box::new(move || app.copy_text(&u1)))}
+            {item("Open in Your Browser", I::External, "", web, Box::new(move || { let _ = open::that(u2.clone()); }))}
+            {item("Add to Chat", I::MessagePlus, "", page, Box::new(move || host::to_chat(&id.to_string(), Some(owner.clone()))))}
+            {item(if tab.devtools { "Close Developer Tools" } else { "Developer Tools" }, I::Code, "F12", page, Box::new(move || { host::activate(id); host::devtools(); }))}
+            div { class: "menu-sep" }
+            {item("Close", I::X, "Middle-click", true, Box::new(move || host::close_tab(id)))}
+            {item("Close Other Tabs", I::X, "", mine.len() > 1, Box::new(move || host::close_others(id, false)))}
+            {item("Close Tabs to the Right", I::X, "", at + 1 < mine.len(), Box::new(move || host::close_others(id, true)))}
+        }
+    }
+}
+
 #[component]
 fn BrowserTab() -> Element {
     use crate::browser_host as host;
@@ -615,6 +673,12 @@ fn BrowserTab() -> Element {
     use_effect(move || host::restore(&owner()));
     let mut input = use_signal(String::new);
     let mut editing = use_signal(|| false);
+    // A tab's right-click menu: (tab, x, y).
+    let mut tab_menu = use_signal(|| None::<(u64, f64, f64)>);
+    let mut dock_menu = use_signal(|| false);
+    // What the engine draws itself follows the theme.
+    let app = use_app();
+    use_effect(move || host::set_dark(app.ui.read().dark));
     // The address follows the page unless the user is typing one.
     let shown_url = active.as_ref().map(|t| t.url.clone()).unwrap_or_default();
     use_effect(use_reactive!(|shown_url| {
@@ -627,6 +691,8 @@ fn BrowserTab() -> Element {
     let url_now = active.as_ref().map(|t| t.url.clone()).unwrap_or_default();
     let external = has_page && (url_now.starts_with("http://") || url_now.starts_with("https://"));
     let url_open = url_now.clone();
+    let tools_on = active.as_ref().is_some_and(|t| t.devtools);
+    let dock_now = host::DEVTOOLS().dock;
     // This chat's tabs (each chat has a browser of its own).
     let mine = st.mine();
     rsx! {
@@ -640,7 +706,20 @@ fn BrowserTab() -> Element {
                             div { key: "{t.id}", class: if on { "browser-tab on" } else { "browser-tab" }, title: "{t.url}",
                                 "data-drag-session": if host::is_blank(&t.url) { String::new() } else { format!("page:{}", t.id) },
                                 "data-drag-title": "{label}",
+                                "data-ctx": "tab",
                                 onclick: move |_| host::activate(t.id),
+                                // The middle button closes it, as in browsers.
+                                onmousedown: move |e| {
+                                    if e.trigger_button() == Some(dioxus::html::input_data::MouseButton::Auxiliary) {
+                                        e.prevent_default();
+                                        host::close_tab(t.id);
+                                    }
+                                },
+                                oncontextmenu: move |e| {
+                                    e.prevent_default();
+                                    let c = e.client_coordinates();
+                                    tab_menu.set(Some((t.id, c.x, c.y)));
+                                },
                                 if t.loading { super::loaders::Orbit { size: 12 } } else { Icon { i: I::Globe, size: 12 } }
                                 span { class: "t", "{label}" }
                                 button { class: "x", title: "Close tab",
@@ -687,7 +766,7 @@ fn BrowserTab() -> Element {
             button { class: "icon-btn sm", title: "New tab",
                 onclick: move |_| {
                     host::new_tab("");
-                    document::eval("setTimeout(() => document.querySelector('.browser-bar .url-input')?.focus(), 30)");
+                    focus_address();
                 },
                 Icon { i: I::Plus, size: 14 }
             }
@@ -697,12 +776,42 @@ fn BrowserTab() -> Element {
                 onclick: move |_| host::annotate(!host::ANNOTATING()),
                 Icon { i: I::Annotate, size: 14 }
             }
-            button { class: "icon-btn sm", title: "Developer tools", disabled: !has_page, onclick: move |_| host::devtools(), Icon { i: I::Code, size: 13 } }
+            div { class: "menu-anchor tools-split",
+                button { class: if tools_on { "icon-btn sm tools on" } else { "icon-btn sm tools" },
+                    title: if tools_on { "Developer tools: close (F12)" } else { "Developer tools (F12)" },
+                    disabled: !has_page,
+                    onclick: move |_| host::devtools(),
+                    Icon { i: I::Code, size: 13 }
+                }
+                if cfg!(windows) {
+                    button { class: if dock_menu() { "icon-btn sm dock-btn open" } else { "icon-btn sm dock-btn" }, title: "Where developer tools show",
+                        onclick: move |_| dock_menu.set(true),
+                        Icon { i: I::ChevronDown, size: 10 }
+                    }
+                    super::Dropdown { open: dock_menu, up: false, right: true,
+                        div { class: "menu-label", "Developer tools" }
+                        for (d, label, icon) in [(host::Dock::Right, "Dock to the right", I::PanelRight), (host::Dock::Bottom, "Dock to the bottom", I::PanelBottom), (host::Dock::Window, "Separate window", I::AppWindow)] {
+                            button { key: "{label}", class: "menu-item",
+                                onclick: move |_| {
+                                    dock_menu.set(false);
+                                    host::set_dock(d);
+                                },
+                                span { class: "muted", Icon { i: icon, size: 14 } }
+                                span { "{label}" }
+                                if dock_now == d { span { class: "check", Icon { i: I::Check, size: 13 } } }
+                            }
+                        }
+                    }
+                }
+            }
             button { class: "icon-btn sm", title: "Open in your browser", disabled: !external,
                 onclick: move |_| { let _ = open::that(url_open.clone()); },
                 Icon { i: I::External, size: 13 }
             }
             if loading { div { class: "browser-progress" } }
+        }
+        if let Some((id, x, y)) = tab_menu() {
+            BrowserTabMenu { id, x, y, onclose: move |_| tab_menu.set(None) }
         }
         // The page itself is a native view laid over this area.
         div { id: "lb-area", class: "browser-area",

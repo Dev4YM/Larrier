@@ -58,6 +58,7 @@ icons! {
     Search => "search",
     PanelLeft => "panel-left",
     PanelRight => "panel-right",
+    MessagePlus => "message-square-plus",
     X => "x",
     ChevronDown => "chevron-down",
     ChevronRight => "chevron-right",

@@ -32,6 +32,8 @@ pub struct Tab {
     /// The page couldn't load (Chrome's error code): Larrier says so in its
     /// place.
     pub error: Option<String>,
+    /// Its DevTools are open.
+    pub devtools: bool,
 }
 
 /// What the Browser tab shows.
@@ -71,6 +73,56 @@ impl State {
 }
 
 pub static STATE: GlobalSignal<State> = Signal::global(State::default);
+
+/// Where DevTools shows: beside the page (on its right or below it), or in
+/// a window of its own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Dock {
+    #[default]
+    Right,
+    Bottom,
+    Window,
+}
+
+/// Where DevTools shows and its share of the Browser tab when docked, as
+/// the user left them (kept for every page and the next launch).
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DevtoolsLayout {
+    pub dock: Dock,
+    /// Its share of the width, docked on the right.
+    pub right: f64,
+    /// Its share of the height, docked below.
+    pub bottom: f64,
+}
+
+impl Default for DevtoolsLayout {
+    fn default() -> Self {
+        DevtoolsLayout { dock: Dock::Right, right: 0.45, bottom: 0.4 }
+    }
+}
+
+pub static DEVTOOLS: GlobalSignal<DevtoolsLayout> = Signal::global(|| crate::keep::value(crate::keep::WINDOW, "browser.devtools").unwrap_or_default());
+
+/// Show DevTools there from now on (open ones move).
+pub fn set_dock(dock: Dock) {
+    DEVTOOLS.write().dock = dock;
+    keep_devtools();
+}
+
+fn keep_devtools() {
+    let l = *DEVTOOLS.peek();
+    crate::keep::set_value(crate::keep::WINDOW, "browser.devtools", &l);
+    #[cfg(windows)]
+    crate::browser_cef::set_tools_layout(l);
+}
+
+/// Larrier's theme, for what the engine draws itself.
+pub fn set_dark(dark: bool) {
+    #[cfg(windows)]
+    crate::browser_cef::set_dark(dark);
+    #[cfg(not(windows))]
+    let _ = dark;
+}
 
 /// Where the browser engine stands (Windows: its runtime comes once;
 /// elsewhere the system's web views are always ready).
@@ -201,6 +253,12 @@ pub(crate) enum Ev {
     /// loaded (`None`).
     #[cfg(windows)]
     PageError { id: u64, code: Option<String> },
+    /// Tab `id`'s DevTools opened or closed.
+    #[cfg(windows)]
+    Tools { id: u64, open: bool },
+    /// Docked DevTools were sized by dragging the line beside them.
+    #[cfg(windows)]
+    ToolsSize { right: f64, bottom: f64 },
     Failed { id: u64, error: String },
     Nav { id: u64, back: bool, forward: bool },
     /// A message from the page's annotate script.
@@ -244,6 +302,7 @@ pub fn set_app(app: crate::state::App) {
     {
         use dioxus::desktop::tao::platform::windows::WindowExtWindows;
         crate::browser_cef::setup(dioxus::desktop::window().window.hwnd(), events(), annotate_script());
+        crate::browser_cef::set_tools_layout(*DEVTOOLS.peek());
         events();
     }
 }
@@ -430,6 +489,21 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                         }
                         #[cfg(windows)]
                         Ev::EngineFailed { error } => *ENGINE.write() = Engine::Failed(error),
+                        #[cfg(windows)]
+                        Ev::Tools { id, open } => {
+                            if let Some(t) = STATE.write().tabs.iter_mut().find(|t| t.id == id) {
+                                t.devtools = open;
+                            }
+                        }
+                        #[cfg(windows)]
+                        Ev::ToolsSize { right, bottom } => {
+                            {
+                                let mut l = DEVTOOLS.write();
+                                l.right = right;
+                                l.bottom = bottom;
+                            }
+                            crate::keep::set_value(crate::keep::WINDOW, "browser.devtools", &*DEVTOOLS.peek());
+                        }
                         #[cfg(windows)]
                         Ev::PageError { id, code } => {
                             let changed = {
@@ -788,6 +862,56 @@ pub fn stop() {
         return;
     }
     active_view(|v| v.evaluate_script("window.stop()"));
+}
+
+/// Tab `id`'s address.
+fn url_of(id: u64) -> Option<String> {
+    STATE.peek().tabs.iter().find(|t| t.id == id).map(|t| t.url.clone())
+}
+
+/// Reload tab `id`, shown or not.
+pub fn reload_tab(id: u64) {
+    #[cfg(windows)]
+    if chrome() {
+        to_chrome(crate::browser_cef::Cmd::Reload { id });
+        return;
+    }
+    activate(id);
+    reload();
+}
+
+/// A new tab right after tab `id`, at `url` (blank: an empty one).
+pub fn new_tab_after(id: u64, url: &str) {
+    let owner = STATE.peek().tabs.iter().find(|t| t.id == id).map(|t| t.owner.clone());
+    let Some(new) = (if url.is_empty() || is_blank(url) { new_tab_in(owner.as_deref(), "") } else { new_tab_in(owner.as_deref(), url) }) else { return };
+    let mut st = STATE.write();
+    if let (Some(from), Some(at)) = (st.tabs.iter().position(|t| t.id == new), st.tabs.iter().position(|t| t.id == id)) {
+        let t = st.tabs.remove(from);
+        let at = if from < at { at } else { at + 1 };
+        let at = at.min(st.tabs.len());
+        st.tabs.insert(at, t);
+    }
+}
+
+/// Tab `id` again, in a new tab beside it.
+pub fn duplicate_tab(id: u64) {
+    if let Some(url) = url_of(id) {
+        new_tab_after(id, &url);
+    }
+}
+
+/// Close the other tabs of tab `id`'s browser (`right`: only those after it).
+pub fn close_others(id: u64, right: bool) {
+    let st = STATE.peek().clone();
+    let Some(owner) = st.tabs.iter().find(|t| t.id == id).map(|t| t.owner.clone()) else { return };
+    let mine: Vec<u64> = st.tabs.iter().filter(|t| t.owner == owner).map(|t| t.id).collect();
+    let at = mine.iter().position(|t| *t == id).unwrap_or(0);
+    for (i, t) in mine.into_iter().enumerate() {
+        if t != id && (!right || i > at) {
+            close_tab(t);
+        }
+    }
+    activate(id);
 }
 
 pub fn devtools() {

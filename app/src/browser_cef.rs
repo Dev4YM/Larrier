@@ -25,19 +25,19 @@ use cef::*;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedSender;
 use windows::core::{w, HSTRING};
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{GetStockObject, HBRUSH, WHITE_BRUSH};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, FillRect, GetStockObject, InvalidateRect, ScreenToClient, HBRUSH, HDC, WHITE_BRUSH};
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, SetDllDirectoryW};
 use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetFocus, SetFocus, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetFocus, ReleaseCapture, SetCapture, SetFocus, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, PostMessageW, GetCursorPos, GetWindowThreadProcessId, GetWindowRect, IsChild, IsWindowVisible, RegisterClassW, SetWindowPos, WindowFromPoint, HWND_TOP,
-    SET_WINDOW_POS_FLAGS, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WA_CLICKACTIVE, WA_INACTIVE, WM_ACTIVATE, WM_CLOSE, WM_DESTROY, WM_SETFOCUS,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GetAncestor, GetClientRect, LoadCursorW, PostMessageW, SetCursor, SetWindowTextW, GA_ROOT, IDC_SIZENS, IDC_SIZEWE, GetCursorPos, GetWindowThreadProcessId, GetWindowRect, IsChild, IsWindowVisible, RegisterClassW, SetWindowPos, WindowFromPoint, HWND_TOP,
+    SET_WINDOW_POS_FLAGS, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WA_CLICKACTIVE, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_SETCURSOR, WM_SETFOCUS,
     WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOPARENTNOTIFY, WS_VISIBLE,
 };
 
-use crate::browser_host::{Area, Ev};
+use crate::browser_host::{Area, DevtoolsLayout, Dock, Ev};
 
 // ------------------------------------------------------------- the engine
 
@@ -313,6 +313,22 @@ struct Page {
     target: Option<String>,
     /// Keeps its DevTools messages coming.
     observer: Option<Registration>,
+    /// Chromium's DevTools for it, while open.
+    tools: Option<Tools>,
+    /// Its DevTools close to open again elsewhere (the user moved them
+    /// between docked and a window).
+    reopen_tools: bool,
+    /// What was asked of it while its page was still being made (many tabs
+    /// coming back at once): done once it's there.
+    waiting: Vec<Cmd>,
+}
+
+/// A page's DevTools: docked beside it in the frame, or a window of its own.
+struct Tools {
+    browser: Browser,
+    /// Its window (0 until Chromium has made it).
+    hwnd: isize,
+    window: bool,
 }
 
 struct Shared {
@@ -330,8 +346,16 @@ static ANNOTATE: OnceLock<String> = OnceLock::new();
 static MAIN: AtomicIsize = AtomicIsize::new(0);
 /// Commands that came before the engine was there.
 static QUEUED: Mutex<Vec<Cmd>> = Mutex::new(Vec::new());
-/// Tabs the engine opens itself (pop-ups, DevTools): ids of their own.
+/// Tabs the engine opens itself (pop-ups): ids of their own.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1 << 40);
+/// Where DevTools goes and how big, as the user left it.
+static TOOLS_AT: Mutex<Option<DevtoolsLayout>> = Mutex::new(None);
+/// Larrier's theme is dark (the frame's own color, between page and DevTools).
+static DARK: AtomicBool = AtomicBool::new(false);
+
+fn tools_at() -> DevtoolsLayout {
+    TOOLS_AT.lock().unwrap().unwrap_or_default()
+}
 
 fn pages<R>(f: impl FnOnce(&mut HashMap<u64, Page>) -> R) -> R {
     let mut g = PAGES.lock().unwrap();
@@ -422,17 +446,31 @@ fn child_info() -> WindowInfo {
 }
 
 fn run(cmd: Cmd) {
+    // A tab whose page is still being made: what's asked of it waits.
+    let tab = match &cmd {
+        Cmd::Navigate { id, .. } | Cmd::History { id, .. } | Cmd::Reload { id } | Cmd::Stop { id } | Cmd::DevTools { id } | Cmd::Script { id, .. } => Some(*id),
+        _ => None,
+    };
+    if let Some(id) = tab.filter(|id| browser(*id).is_none()) {
+        pages(|p| {
+            if let Some(x) = p.get_mut(&id) {
+                x.waiting.push(cmd);
+            }
+        });
+        return;
+    }
     match cmd {
         Cmd::NewTab { id, url } => {
             pages(|p| {
                 p.entry(id).or_default();
             });
-            let mut client = PageClient::new(id);
+            let mut client = PageClient::new(id, PAGE);
             browser_host_create_browser(Some(&child_info()), Some(&mut client), Some(&CefString::from(url.as_str())), Some(&BrowserSettings::default()), None, None);
         }
         Cmd::Close { id } => {
             if let Some(b) = pages(|p| p.remove(&id)).and_then(|x| x.browser) {
                 if let Some(h) = b.host() {
+                    h.close_dev_tools();
                     h.close_browser(1);
                 }
             }
@@ -461,17 +499,7 @@ fn run(cmd: Cmd) {
                 b.stop_load();
             }
         }
-        Cmd::DevTools { id } => {
-            // Chromium's DevTools for the page, in a tab beside it.
-            let Some(host) = browser(id).and_then(|b| b.host()) else { return };
-            let tools = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-            pages(|p| {
-                p.entry(tools).or_default();
-            });
-            emit(Ev::Popup { id: tools, url: "devtools://devtools".into(), from: Some(id), background: false });
-            let mut client = PageClient::new(tools);
-            host.show_dev_tools(Some(&child_info()), Some(&mut client), Some(&BrowserSettings::default()), None);
-        }
+        Cmd::DevTools { id } => toggle_tools(id, None),
         Cmd::Script { id, js } => {
             if let Some(f) = browser(id).and_then(|b| b.main_frame()) {
                 f.execute_java_script(Some(&CefString::from(js.as_str())), Some(&CefString::from("")), 0);
@@ -503,6 +531,10 @@ fn created(id: u64, browser: Option<Browser>) {
         return;
     }
     lay_out();
+    let waiting = pages(|p| p.get_mut(&id).map(|x| std::mem::take(&mut x.waiting)).unwrap_or_default());
+    for c in waiting {
+        run(c);
+    }
 }
 
 fn mark_js(id: u64) -> String {
@@ -521,6 +553,133 @@ fn page_js(id: u64) -> String {
 }
 
 /// Tab `id`'s browser closed by itself (the page closed it).
+/// Tab `id`'s DevTools: opened where the user keeps them (at a point of the
+/// page: the element there inspected), or closed. Engine UI thread.
+fn toggle_tools(id: u64, at: Option<(i32, i32)>) {
+    let Some(host) = browser(id).and_then(|b| b.host()) else { return };
+    let open = pages(|p| p.get(&id).is_some_and(|x| x.tools.is_some()));
+    if open && at.is_none() {
+        host.close_dev_tools();
+        return;
+    }
+    open_tools(&host, id, at);
+}
+
+fn open_tools(host: &BrowserHost, id: u64, at: Option<(i32, i32)>) {
+    let window = tools_at().dock == Dock::Window;
+    let info = if window {
+        // A window of its own: Chrome's own undocked DevTools window (a
+        // top-level window can't be Alloy-style).
+        WindowInfo { runtime_style: RuntimeStyle::CHROME, ..Default::default() }.set_as_popup(sys::HWND(std::ptr::null_mut()), "DevTools")
+    } else {
+        child_info()
+    };
+    let mut client = PageClient::new(id, if window { WINDOW_TOOLS } else { DOCKED_TOOLS });
+    let point = at.map(|(x, y)| Point { x, y });
+    host.show_dev_tools(Some(&info), Some(&mut client), Some(&BrowserSettings::default()), point.as_ref());
+}
+
+/// DevTools were made for tab `tab`, docked or (`window`) in a window.
+fn tools_created(tab: u64, browser: Option<Browser>, window: bool) {
+    let Some(b) = browser else { return };
+    let Some(host) = b.host() else { return };
+    let hwnd = host.window_handle().0 as isize;
+    let known = pages(|p| p.get_mut(&tab).map(|x| x.tools = Some(Tools { browser: b.clone(), hwnd, window })).is_some());
+    if !known {
+        host.close_browser(1);
+        return;
+    }
+    emit(Ev::Tools { id: tab, open: true });
+    if hwnd == 0 {
+        // Its window comes a moment later: laid out once it's there.
+        std::thread::spawn(move || {
+            for _ in 0..40 {
+                std::thread::sleep(Duration::from_millis(50));
+                let (tx, rx) = mpsc::channel();
+                on_ui(move || {
+                    let h = pages(|p| {
+                        let t = p.get_mut(&tab)?.tools.as_mut()?;
+                        if t.hwnd == 0 {
+                            t.hwnd = t.browser.host()?.window_handle().0 as isize;
+                        }
+                        Some(t.hwnd)
+                    });
+                    let _ = tx.send(h);
+                });
+                match rx.recv_timeout(Duration::from_secs(2)).ok().flatten() {
+                    Some(0) => continue,
+                    Some(_) => {
+                        lay_out();
+                        return;
+                    }
+                    None => return,
+                }
+            }
+        });
+    }
+    lay_out();
+}
+
+/// Tab `tab`'s DevTools closed (or are moving elsewhere).
+fn tools_closed(tab: u64) {
+    let reopen = pages(|p| p.get_mut(&tab).map(|x| {
+        x.tools = None;
+        std::mem::take(&mut x.reopen_tools)
+    }));
+    lay_out();
+    if reopen.is_some() {
+        // Shown closed until (if) they open again elsewhere.
+        emit(Ev::Tools { id: tab, open: false });
+    }
+    if reopen == Some(true) {
+        if let Some(h) = browser(tab).and_then(|b| b.host()) {
+            open_tools(&h, tab, None);
+        }
+    }
+}
+
+/// Where DevTools shows (the user's choice), its sizes included: open ones
+/// move there.
+pub fn set_tools_layout(l: DevtoolsLayout) {
+    let before = TOOLS_AT.lock().unwrap().replace(l);
+    if STARTED.get() != Some(&true) {
+        return;
+    }
+    let window = l.dock == Dock::Window;
+    if before.map(|b| b.dock == Dock::Window) != Some(window) {
+        // Between docked and a window: made again where they now go.
+        on_ui(move || {
+            let moving: Vec<Browser> = pages(|p| {
+                p.values_mut()
+                    .filter(|x| x.tools.as_ref().is_some_and(|t| t.window != window))
+                    .filter_map(|x| {
+                        x.reopen_tools = true;
+                        x.browser.clone()
+                    })
+                    .collect()
+            });
+            for b in moving {
+                if let Some(h) = b.host() {
+                    h.close_dev_tools();
+                }
+            }
+        });
+    }
+    lay_out();
+}
+
+/// Larrier's theme, for the frame's own color.
+pub fn set_dark(dark: bool) {
+    if DARK.swap(dark, Ordering::Relaxed) != dark {
+        let frame = FRAME.load(Ordering::Relaxed);
+        if frame != 0 {
+            unsafe {
+                let _ = InvalidateRect(Some(HWND(frame as *mut _)), None, true);
+            }
+        }
+    }
+}
+
 fn closed(id: u64) {
     let (was, left) = pages(|p| (p.remove(&id).is_some(), p.len()));
     if CLOSING.load(Ordering::Relaxed) != OPEN {
@@ -537,22 +696,41 @@ fn closed(id: u64) {
 
 // ------------------------------------------------------------- handlers
 
+/// What a client is for: a page, or its DevTools docked or in a window.
+const PAGE: u8 = 0;
+const DOCKED_TOOLS: u8 = 1;
+const WINDOW_TOOLS: u8 = 2;
+
 wrap_client! {
+    // A page's (`PAGE`), or its DevTools'.
     struct PageClient {
         tab: u64,
+        kind: u8,
     }
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(PageLife::new(self.tab))
+            Some(PageLife::new(self.tab, self.kind))
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
-            Some(PageLoad::new(self.tab))
+            (self.kind == PAGE).then(|| PageLoad::new(self.tab))
         }
 
         fn display_handler(&self) -> Option<DisplayHandler> {
-            Some(PageDisplay::new(self.tab))
+            Some(PageDisplay::new(self.tab, self.kind != PAGE))
+        }
+
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(PageKeys::new(self.tab))
+        }
+
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            (self.kind == PAGE).then(|| PageMenu::new(self.tab))
+        }
+
+        fn focus_handler(&self) -> Option<FocusHandler> {
+            Some(PageFocus::new())
         }
     }
 }
@@ -560,6 +738,7 @@ wrap_client! {
 wrap_life_span_handler! {
     struct PageLife {
         tab: u64,
+        kind: u8,
     }
 
     impl LifeSpanHandler {
@@ -586,7 +765,7 @@ wrap_life_span_handler! {
                 *w = child_info();
             }
             if let Some(c) = client {
-                *c = Some(PageClient::new(id));
+                *c = Some(PageClient::new(id, PAGE));
             }
             pages(|p| {
                 p.entry(id).or_default();
@@ -598,7 +777,11 @@ wrap_life_span_handler! {
         }
 
         fn on_after_created(&self, browser: Option<&mut Browser>) {
-            created(self.tab, browser.cloned());
+            if self.kind == PAGE {
+                created(self.tab, browser.cloned());
+            } else {
+                tools_created(self.tab, browser.cloned(), self.kind == WINDOW_TOOLS);
+            }
         }
 
         fn do_close(&self, browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
@@ -614,7 +797,78 @@ wrap_life_span_handler! {
         }
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            closed(self.tab);
+            if self.kind == PAGE {
+                closed(self.tab);
+            } else {
+                tools_closed(self.tab);
+            }
+        }
+    }
+}
+
+/// Modifier keys in a key event's flags.
+const SHIFT: u32 = 1 << 1;
+const CONTROL: u32 = 1 << 2;
+
+wrap_keyboard_handler! {
+    struct PageKeys {
+        tab: u64,
+    }
+
+    impl KeyboardHandler {
+        fn on_pre_key_event(&self, _browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: Option<&mut sys::MSG>, _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>) -> ::std::os::raw::c_int {
+            let Some(e) = event else { return 0 };
+            if e.type_.get_raw() != KeyEventType::RAWKEYDOWN.get_raw() {
+                return 0;
+            }
+            // F12 or Ctrl+Shift+I, as in Chrome: DevTools open or close.
+            let ctrl_shift = e.modifiers & (SHIFT | CONTROL) == SHIFT | CONTROL;
+            if e.windows_key_code == 0x7B || (ctrl_shift && e.windows_key_code == 0x49) {
+                toggle_tools(self.tab, None);
+                return 1;
+            }
+            0
+        }
+    }
+}
+
+/// The page's right-click menu: Chromium's, and Inspect.
+const INSPECT: i32 = sys::cef_menu_id_t::MENU_ID_USER_FIRST as i32;
+
+wrap_context_menu_handler! {
+    struct PageMenu {
+        tab: u64,
+    }
+
+    impl ContextMenuHandler {
+        fn on_before_context_menu(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, _params: Option<&mut ContextMenuParams>, model: Option<&mut MenuModel>) {
+            if let Some(m) = model {
+                if m.count() > 0 {
+                    m.add_separator();
+                }
+                m.add_item(INSPECT, Some(&CefString::from("Inspect")));
+            }
+        }
+
+        fn on_context_menu_command(&self, _browser: Option<&mut Browser>, _frame: Option<&mut Frame>, params: Option<&mut ContextMenuParams>, command_id: ::std::os::raw::c_int, _event_flags: EventFlags) -> ::std::os::raw::c_int {
+            if command_id != INSPECT {
+                return 0;
+            }
+            let at = params.map(|p| (p.xcoord(), p.ycoord())).unwrap_or((0, 0));
+            toggle_tools(self.tab, Some(at));
+            1
+        }
+    }
+}
+
+wrap_focus_handler! {
+    struct PageFocus;
+
+    impl FocusHandler {
+        fn on_set_focus(&self, _browser: Option<&mut Browser>, source: FocusSource) -> ::std::os::raw::c_int {
+            // A page loading (one an agent drives, a new tab) doesn't take
+            // the keyboard from where the user is typing; clicking it does.
+            (source.get_raw() == FocusSource::NAVIGATION.get_raw()) as ::std::os::raw::c_int
         }
     }
 }
@@ -659,20 +913,38 @@ wrap_load_handler! {
 wrap_display_handler! {
     struct PageDisplay {
         tab: u64,
+        tools: bool,
     }
 
     impl DisplayHandler {
         fn on_address_change(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
-            if is_main(&frame) {
+            if !self.tools && is_main(&frame) {
                 emit(Ev::Url { id: self.tab, url: url.map(|u| u.to_string()).unwrap_or_default() });
             }
         }
 
-        fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
-            emit(Ev::Title { id: self.tab, title: title.map(|t| t.to_string()).unwrap_or_default() });
+        fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
+            let title = title.map(|t| t.to_string()).unwrap_or_default();
+            if !self.tools {
+                emit(Ev::Title { id: self.tab, title });
+                return;
+            }
+            // DevTools in a window of its own: the window says what it inspects.
+            if let Some(h) = browser.and_then(|b| b.host()) {
+                let hwnd = HWND(h.window_handle().0 as *mut _);
+                if !in_frame(hwnd) {
+                    unsafe {
+                        let root = GetAncestor(hwnd, GA_ROOT);
+                        let _ = SetWindowTextW(root, &HSTRING::from(title.as_str()));
+                    }
+                }
+            }
         }
 
         fn on_console_message(&self, _browser: Option<&mut Browser>, _level: LogSeverity, message: Option<&CefString>, _source: Option<&CefString>, _line: ::std::os::raw::c_int) -> ::std::os::raw::c_int {
+            if self.tools {
+                return 0;
+            }
             // The annotate script reporting back: taken, never shown.
             let text = message.map(|m| m.to_string()).unwrap_or_default();
             match text.strip_prefix(POST) {
@@ -814,12 +1086,126 @@ fn make_frame(main: isize) -> Option<isize> {
 }
 
 unsafe extern "system" fn frame_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    if msg == WM_DESTROY && STARTED.get() == Some(&true) {
-        // The app's window is going (its pages already closed): the engine
-        // stops.
-        let _ = std::panic::catch_unwind(shutdown);
+    match msg {
+        WM_DESTROY if STARTED.get() == Some(&true) => {
+            // The app's window is going (its pages already closed): the
+            // engine stops.
+            let _ = std::panic::catch_unwind(shutdown);
+        }
+        // What shows of the frame is the line between a page and its
+        // DevTools: in the app's border color.
+        WM_ERASEBKGND => unsafe {
+            let mut r = RECT::default();
+            let _ = GetClientRect(h, &mut r);
+            let c = if DARK.load(Ordering::Relaxed) { COLORREF(0x0036_3A3A) } else { COLORREF(0x00DA_DEDE) };
+            let brush = CreateSolidBrush(c);
+            FillRect(HDC(wp.0 as *mut _), &r, brush);
+            let _ = DeleteObject(brush.into());
+            return LRESULT(1);
+        },
+        // Dragging that line sizes DevTools.
+        WM_SETCURSOR => {
+            let mut p = POINT::default();
+            unsafe {
+                let _ = GetCursorPos(&mut p);
+                let _ = ScreenToClient(h, &mut p);
+            }
+            if let Some((_, across)) = split_line().filter(|(r, _)| inside(r, p)) {
+                unsafe {
+                    let _ = SetCursor(LoadCursorW(None, if across { IDC_SIZEWE } else { IDC_SIZENS }).ok());
+                }
+                return LRESULT(1);
+            }
+        }
+        WM_LBUTTONDOWN => {
+            let p = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
+            if split_line().is_some_and(|(r, _)| inside(&r, p)) {
+                DRAGGING.store(true, Ordering::Relaxed);
+                unsafe {
+                    SetCapture(h);
+                }
+                return LRESULT(0);
+            }
+        }
+        // Only moves with the button held drag (not the system's own
+        // reports of where the pointer is).
+        WM_MOUSEMOVE if DRAGGING.load(Ordering::Relaxed) && wp.0 & 0x0001 != 0 => {
+            let p = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
+            drag_to(p);
+            return LRESULT(0);
+        }
+        WM_LBUTTONUP | WM_CAPTURECHANGED if DRAGGING.swap(false, Ordering::Relaxed) => {
+            if msg == WM_LBUTTONUP {
+                unsafe {
+                    let _ = ReleaseCapture();
+                }
+            }
+            // Kept as the user left it.
+            let l = tools_at();
+            emit(Ev::ToolsSize { right: l.right, bottom: l.bottom });
+            return LRESULT(0);
+        }
+        _ => {}
     }
     unsafe { DefWindowProcW(h, msg, wp, lp) }
+}
+
+/// The line between a page and its docked DevTools is being dragged.
+static DRAGGING: AtomicBool = AtomicBool::new(false);
+/// That line's thickness, and the least a page or DevTools gets.
+const LINE: i32 = 5;
+const LEAST: i32 = 160;
+
+fn inside(r: &RECT, p: POINT) -> bool {
+    p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom
+}
+
+/// A frame of `size` holding a page and (`tools`) its docked DevTools: the
+/// page's rectangle, DevTools', and the line between them (x, y, w, h).
+fn split(size: (i32, i32), tools: bool, l: &DevtoolsLayout) -> [(i32, i32, i32, i32); 3] {
+    let (w, h) = size;
+    if !tools || l.dock == Dock::Window {
+        return [(0, 0, w, h), (AWAY, 0, 1, 1), (0, 0, 0, 0)];
+    }
+    let fit = |total: i32, share: f64| ((total as f64 * share).round() as i32).clamp(LEAST.min(total / 2), (total - LINE - LEAST).max(total / 2));
+    match l.dock {
+        Dock::Bottom => {
+            let th = fit(h, l.bottom);
+            [(0, 0, w, (h - th - LINE).max(1)), (0, h - th, w, th), (0, h - th - LINE, w, LINE)]
+        }
+        _ => {
+            let tw = fit(w, l.right);
+            [(0, 0, (w - tw - LINE).max(1), h), (w - tw, 0, tw, h), (w - tw - LINE, 0, LINE, h)]
+        }
+    }
+}
+
+/// The line between the shown page and its docked DevTools (and whether it
+/// runs top to bottom), in the frame's pixels.
+fn split_line() -> Option<(RECT, bool)> {
+    let (shown, size) = SHARED.lock().unwrap().as_ref().map(|s| (s.shown, s.size))?;
+    let docked = pages(|p| shown.and_then(|id| p.get(&id)).and_then(|x| x.tools.as_ref()).is_some_and(|t| !t.window && t.hwnd != 0));
+    let l = tools_at();
+    if !docked || l.dock == Dock::Window {
+        return None;
+    }
+    let (x, y, w, h) = split(size, true, &l)[2];
+    // A little wider to grab than it looks.
+    let r = if l.dock == Dock::Bottom { RECT { left: x, top: y - 2, right: x + w, bottom: y + h + 2 } } else { RECT { left: x - 2, top: y, right: x + w + 2, bottom: y + h } };
+    Some((r, l.dock != Dock::Bottom))
+}
+
+/// The line dragged to `p`: DevTools' share follows.
+fn drag_to(p: POINT) {
+    let Some(size) = SHARED.lock().unwrap().as_ref().map(|s| s.size) else { return };
+    let mut l = tools_at();
+    match l.dock {
+        Dock::Bottom => l.bottom = ((size.1 - p.y - LINE / 2) as f64 / size.1.max(1) as f64).clamp(0.1, 0.9),
+        Dock::Right => l.right = ((size.0 - p.x - LINE / 2) as f64 / size.0.max(1) as f64).clamp(0.1, 0.9),
+        Dock::Window => return,
+    }
+    *TOOLS_AT.lock().unwrap() = Some(l);
+    lay_out();
 }
 
 /// Closing the app: the pages close first, while the app's window still
@@ -891,14 +1277,23 @@ pub fn place(area: Option<Area>, active: Option<u64>) {
 /// the thread that owns it), and without waiting on another thread's.
 fn lay_out() {
     let Some((frame, rect, shown, size)) = SHARED.lock().unwrap().as_ref().map(|s| (s.frame, s.rect, s.shown, s.size)) else { return };
-    let list: Vec<(u64, isize)> = pages(|p| p.iter().filter(|(_, x)| x.hwnd != 0).map(|(id, x)| (*id, x.hwnd)).collect());
-    for &(id, h) in &list {
-        let x = if Some(id) == shown { 0 } else { AWAY };
-        unsafe {
-            let _ = SetWindowPos(HWND(h as *mut _), None, x, 0, size.0, size.1, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+    let l = tools_at();
+    // Each page, and its DevTools when they're docked beside it.
+    let list: Vec<(u64, isize, Option<isize>)> = pages(|p| p.iter().filter(|(_, x)| x.hwnd != 0).map(|(id, x)| (*id, x.hwnd, x.tools.as_ref().filter(|t| !t.window && t.hwnd != 0).map(|t| t.hwnd))).collect());
+    let mv = |h: isize, (x, y, w, hh): (i32, i32, i32, i32)| unsafe {
+        // Async: the page windows are the engine thread's.
+        let _ = SetWindowPos(HWND(h as *mut _), None, x, y, w.max(1), hh.max(1), SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+    };
+    for &(id, h, tools) in &list {
+        let [page, dev, _] = split(size, tools.is_some(), &l);
+        let away = |(_, y, w, hh): (i32, i32, i32, i32)| (AWAY, y, w, hh);
+        let on = Some(id) == shown;
+        mv(h, if on { page } else { away(page) });
+        if let Some(t) = tools {
+            mv(t, if on { dev } else { away(dev) });
         }
     }
-    let shows = list.iter().any(|&(id, _)| Some(id) == shown);
+    let shows = list.iter().any(|&(id, _, _)| Some(id) == shown);
     let frame = HWND(frame as *mut _);
     let own = unsafe { GetWindowThreadProcessId(frame, None) == GetCurrentThreadId() };
     let wait = if own { SET_WINDOW_POS_FLAGS(0) } else { SWP_ASYNCWINDOWPOS };

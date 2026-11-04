@@ -256,9 +256,6 @@ pub struct ClaudeLive {
     /// The stop under way is the reply's alone (`TurnCommand::Interrupt`):
     /// background work keeps running after it.
     reply_only: bool,
-    /// Background work ended while waiting and Claude hasn't reported back:
-    /// past this, the turn ends anyway.
-    linger: Option<std::time::Instant>,
 }
 
 impl ClaudeLive {
@@ -316,6 +313,17 @@ impl ClaudeLive {
             line["priority"] = json!("now");
         }
         line.to_string()
+    }
+
+    /// Claude took in the message line `uuid` (the prompt, or one sent
+    /// during the turn). Once per message, whichever sign comes first.
+    fn taken_in(&mut self, uuid: &str, sink: &EventSink) {
+        if self.prompt.as_deref() == Some(uuid) {
+            self.prompt = None;
+        } else if let Some((text, parts, _)) = self.steers.remove(uuid) {
+            self.waiting = false;
+            sink.send(AgentEvent::Steered { text, attachments: parts });
+        }
     }
 
     fn reply(&mut self, request_id: &str, response: Value) {
@@ -471,7 +479,6 @@ impl ClaudeLive {
         // just the reply leaves them running too.
         if self.background > 0 && (if stopped { self.reply_only } else { ok }) {
             self.waiting = true;
-            self.linger = None;
             self.stop_at = None;
             self.reply_only = false;
             sink.send(AgentEvent::Waiting);
@@ -493,7 +500,14 @@ impl super::process::Interactive for ClaudeLive {
         // background work): a stop now is the reply's.
         if self.waiting && matches!(s(&v, "type"), Some("assistant" | "stream_event")) && v["parent_tool_use_id"].is_null() {
             self.waiting = false;
-            self.linger = None;
+        }
+        // Claude asks the model with these messages now: they're taken in.
+        // (It echoes them back only once the reply starts, seconds later
+        // with thinking; the message would wait greyed out until then.)
+        if s(&v, "type") == Some("system") && s(&v, "subtype") == Some("status") {
+            for u in v["user_message_uuids"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                self.taken_in(u, sink);
+            }
         }
         match s(&v, "type").unwrap_or("") {
             "control_request" => self.on_request(&v, sink),
@@ -526,13 +540,8 @@ impl super::process::Interactive for ClaudeLive {
             // A prompt line taken in: messages sent during the turn are
             // recorded where Claude read them.
             "user" if v["isReplay"].as_bool() == Some(true) => {
-                let uuid = s(&v, "uuid");
-                if uuid.is_some() && uuid == self.prompt.as_deref() {
-                    self.prompt = None;
-                } else if let Some((text, parts, _)) = uuid.and_then(|u| self.steers.remove(u)) {
-                    self.waiting = false;
-                    self.linger = None;
-                    sink.send(AgentEvent::Steered { text, attachments: parts });
+                if let Some(u) = s(&v, "uuid") {
+                    self.taken_in(u, sink);
                 }
             }
             "system" if s(&v, "subtype") == Some("background_tasks_changed") => {
@@ -541,10 +550,8 @@ impl super::process::Interactive for ClaudeLive {
                     .as_array()
                     .map(|a| a.iter().filter_map(|t| Some((s(t, "task_id")?.to_string(), s(t, "description").map(String::from)))).collect())
                     .unwrap_or_default();
-                // Claude reports back on finished work in a turn of its own.
-                if self.waiting && self.background == 0 {
-                    self.linger = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
-                }
+                // Claude reports back on finished work in a turn of its own,
+                // however long that takes: no limit of Larrier's.
                 self.inner.handle(line, sink);
             }
             // The mode Claude runs in; it changes when a plan is approved.
@@ -631,7 +638,7 @@ impl super::process::Interactive for ClaudeLive {
     }
 
     fn stop_deadline(&self) -> Option<std::time::Instant> {
-        self.stop_at.or(self.linger)
+        self.stop_at
     }
 }
 
@@ -1682,6 +1689,20 @@ mod tests {
         let ev = feed(&mut p, &[stopped]);
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })), "{ev:?}");
         assert!(p.finished());
+        // Taken in as soon as Claude asks the model with it (2.1.317's
+        // status line), not when the reply starts; the echo then is no news.
+        let mut r = ClaudeLive::default();
+        feed(&mut r, &[bg, end]);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        r.command(TurnCommand::Steer { text: "and then".into(), attachments: Vec::new(), now: false, key: 2 }, &EventSink::new(tx));
+        let uuid = serde_json::from_str::<Value>(&r.take_output()[0]).unwrap()["uuid"].as_str().unwrap().to_string();
+        let asking = json!({"type": "system", "subtype": "status", "status": "requesting", "uuid": "x1", "user_message_uuids": [uuid]}).to_string();
+        let ev = feed(&mut r, &[asking.as_str()]);
+        assert!(matches!(ev.last(), Some(AgentEvent::Steered { text, .. }) if text == "and then"), "{ev:?}");
+        assert!(!r.waiting);
+        let echo = json!({"type": "user", "isReplay": true, "uuid": uuid, "message": {"role": "user", "content": "and then"}}).to_string();
+        let ev = feed(&mut r, &[echo.as_str()]);
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Steered { .. })), "{ev:?}");
         // A background subagent writing isn't the agent replying.
         let mut q = ClaudeLive::default();
         feed(&mut q, &[bg, end, r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m4"}},"parent_tool_use_id":"agent_1"}"#]);

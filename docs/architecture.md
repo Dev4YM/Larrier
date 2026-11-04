@@ -77,6 +77,9 @@ Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
   the agents' control of them; `browser_cef.rs`: on Windows, the pages
   themselves, run on Chromium (CEF) inside Larrier's window, with the
   engine's runtime fetched on first use.
+- `ui/editor.rs`: the Files panel's code editor, Monaco, embedded in the
+  program (`assets/monaco`, listed by `build.rs`) and served over the
+  `larrier://` protocol.
 - `update.rs`, `install.rs`, `version.rs`: self-install (Windows) and
   updates from GitHub releases on every system (the `.exe`, the whole
   Larrier.app, or the Linux program, swapped on restart).

@@ -46,7 +46,7 @@ them into one window:
 | | |
 |---|---|
 | **Live agents** | Approvals, questions and plans answered just above the input; steering, queued follow-ups and clean stops. |
-| **Side panel** | Git changes with commit / push / PR, a real browser agents can drive, terminals and a file viewer, per chat. |
+| **Side panel** | Git changes with commit / push / PR, a real browser agents can drive, terminals and a code editor, per chat. |
 | **Parallel work** | Run one prompt on several agents (Multitask), side-by-side chats, optional per-agent git worktrees. |
 | **Accounts** | Several logins, API keys (in the OS keychain) or environment presets per agent; pick one per chat. |
 | **Models** | Each agent's own model list, reasoning effort and context options, plus your own endpoints. |
@@ -148,4 +148,8 @@ described in [SECURITY.md](SECURITY.md).
 owners and are listed with their sources in
 [app/assets/logos/LICENSES.md](app/assets/logos/LICENSES.md). The English
 spelling dictionary is SCOWL's, under its own license:
-[app/dict/en/license](app/dict/en/license).
+[app/dict/en/license](app/dict/en/license). The code editor is Monaco
+(MIT): [app/assets/monaco/LICENSE](app/assets/monaco/LICENSE), with its
+notices in [ThirdPartyNotices.txt](app/assets/monaco/ThirdPartyNotices.txt).
+On Windows the browser runs on Chromium through the Chromium Embedded
+Framework; their notices come with the engine (`CREDITS.html`).

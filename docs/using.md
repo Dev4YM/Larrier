@@ -38,7 +38,10 @@ onto the chat area:
 
 ## A chat
 
-- Prompts sit in sticky cards. Click one to edit it and send it again as a
+- Prompts sit in sticky cards: pinned at the top while their turn scrolls
+  by, a card folds up as the turn moves under it (its pictures go first,
+  then its lines, down to three), never leaving a gap. Click one to edit
+  it and send it again as a
   fork: the cursor is in it, after its text. Esc or clicking elsewhere
   closes the editor; with unsaved changes it asks whether to keep editing.
   An edit stays with its chat when you switch chats, close Larrier or
@@ -46,16 +49,23 @@ onto the chat area:
   you changed stays open.
 - Reading, searching and thinking steps fold into "Explored …"; commands,
   edits (with inline diffs), plans and to-dos get their own cards.
-- A turn's work sits under "Working", then "Worked for 16s" with 👍 👎,
-  copy, fork and the time. A turn you watched stays open when it ends;
-  older ones are folded to their answer (and any error, where it came).
-  Opening or folding one is remembered.
+- A turn's steps show as they come; once it ends they sit under "Worked
+  for 16s" with 👍 👎, copy, fork and the time. A turn you watched stays
+  open when it ends; older ones are folded to their answer (and any
+  error, where it came). Opening or folding one is remembered, and so are
+  the cards you opened (commands, steps, explored files).
 - A prompt timeline runs down the left edge: hover it to preview a prompt,
-  click to jump there.
+  click to jump there. It shows when there's room beside the text, and
+  steps away when the text comes close.
 - **Subagents and background work** are tracked live: pills in the row
   above the composer list what's running (with the queue and the changes
-  beside them), and each subagent opens its own transcript in a tab.
-  Background Tasks shows each subagent's model, tools and context.
+  beside them), and each subagent opens its own transcript in a tab:
+  where you left it, else at its newest, following it while it works.
+  Background Tasks shows each subagent's model, tools and context. Each
+  running subagent and background command has its own stop button (Claude
+  Code); Stop All stops the agent and everything it runs. While the agent
+  only waits on its subagents, the box offers to send (into the turn), not
+  to stop.
 - **Requests from the agent** (approve a command, answer a question, accept
   a plan) wait for you just above the input, once: not in the chat. An
   answered question stays in the chat as one line with what you picked.
@@ -105,12 +115,25 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   not a preview); annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
   A page that can't be reached gets Larrier's own message with Try again,
-  pop-ups and new windows open as tabs, and Developer tools opens
-  Chromium's DevTools in a tab beside the page.
+  pop-ups and new windows open as tabs. Developer tools (F12 or
+  Ctrl+Shift+I in the page, or Inspect in its right-click menu) opens
+  Chromium's DevTools docked on the page's right, below it, or in a window
+  of its own (the arrow beside the button picks; drag the line between
+  page and DevTools to size it; both are remembered). A tab's right-click
+  menu offers New Tab to the Right, Reload, Duplicate, Copy Address, Open
+  in Your Browser, Add to Chat, Developer Tools and the Close actions; the
+  middle button closes a tab. A new tab puts the cursor in the address
+  bar, and a page loading never takes the keyboard from where you type.
 - **Terminal:** real terminals (your shell: PowerShell on Windows, `$SHELL`
   on macOS and Linux), plus read-only views of
   the agent's own background commands.
-- **Files:** tabs, quick open, a file tree and a highlighted viewer.
+- **Files:** tabs, quick open, a file tree and a code editor: Monaco (VS
+  Code's editor) in Larrier's colors, with the code theme you picked in
+  Appearance and the Text Size. It edits any text file; Ctrl+S saves, a
+  dot marks a tab with unsaved changes, and a change made on disk (an
+  agent's edit) comes in when you haven't changed the file yourself. JSON,
+  CSS and HTML are checked and completed as you type; other languages are
+  colored. Wrap and the minimap are buttons in the path bar.
 
 ## New Agent
 

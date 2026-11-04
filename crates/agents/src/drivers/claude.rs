@@ -245,6 +245,10 @@ pub struct ClaudeLive {
     prompt: Option<String>,
     /// Background tasks running, as Claude counts them.
     background: usize,
+    /// Those tasks: Claude's task id, and what each said it does.
+    tasks: Vec<(String, Option<String>)>,
+    /// `stop_task` requests in flight, by request id.
+    stopping: HashSet<String>,
     /// The reply is done and background tasks still run: the turn goes on
     /// until they end (Claude reports back on them), or the user stops it.
     /// Claude is idle meanwhile and takes new messages.
@@ -255,6 +259,23 @@ pub struct ClaudeLive {
     /// Background work ended while waiting and Claude hasn't reported back:
     /// past this, the turn ends anyway.
     linger: Option<std::time::Instant>,
+}
+
+impl ClaudeLive {
+    /// Claude's task id for the work tool call `tool_id` started: from its
+    /// result (a background command's or agent's id), else the one running
+    /// task that says the same as the call.
+    fn task_of(&self, tool_id: &str, description: Option<&str>) -> Option<String> {
+        if let Some((task, _)) = self.inner.bg_by_task.iter().find(|(_, t)| *t == tool_id) {
+            return Some(task.clone());
+        }
+        let d = description?.trim();
+        let mut same = self.tasks.iter().filter(|(_, x)| x.as_deref().map(str::trim) == Some(d));
+        match (same.next(), same.next()) {
+            (Some((task, _)), None) => Some(task.clone()),
+            _ => None,
+        }
+    }
 }
 
 /// Images Claude takes inline (the API's limit is 5 MB each).
@@ -483,9 +504,16 @@ impl super::process::Interactive for ClaudeLive {
                     }
                 }
             }
-            // Claude's answer to taking a message back.
+            // Claude's answer to taking a message back, or to stopping a task.
             "control_response" => {
                 let r = &v["response"];
+                if let Some(id) = s(r, "request_id").filter(|id| self.stopping.remove(*id)) {
+                    if s(r, "subtype") == Some("error") {
+                        sink.notice(format!("Couldn't stop that task: {}", s(r, "error").unwrap_or("Claude Code refused")));
+                    }
+                    let _ = id;
+                    return;
+                }
                 if let Some(key) = s(r, "request_id").and_then(|id| self.unsteers.remove(id)) {
                     let taken_back = s(r, "subtype") == Some("success") && r["response"]["cancelled"].as_bool() == Some(true);
                     if taken_back {
@@ -509,6 +537,10 @@ impl super::process::Interactive for ClaudeLive {
             }
             "system" if s(&v, "subtype") == Some("background_tasks_changed") => {
                 self.background = v["tasks"].as_array().map(|a| a.len()).unwrap_or(0);
+                self.tasks = v["tasks"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|t| Some((s(t, "task_id")?.to_string(), s(t, "description").map(String::from)))).collect())
+                    .unwrap_or_default();
                 // Claude reports back on finished work in a turn of its own.
                 if self.waiting && self.background == 0 {
                     self.linger = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
@@ -556,6 +588,15 @@ impl super::process::Interactive for ClaudeLive {
                 }
             }
             TurnCommand::Permission { request_id, reply } => self.answer(&request_id, reply, sink),
+            TurnCommand::StopTask { tool_id, description } => match self.task_of(&tool_id, description.as_deref()) {
+                Some(task) => {
+                    self.host_requests += 1;
+                    let rid = format!("larrier_{}", self.host_requests);
+                    self.stopping.insert(rid.clone());
+                    self.out.push(json!({"type": "control_request", "request_id": rid, "request": {"subtype": "stop_task", "task_id": task}}).to_string());
+                }
+                None => sink.notice("Claude Code doesn't list that task as running, so it couldn't be stopped on its own"),
+            },
             TurnCommand::Steer { text, attachments, now, key } => {
                 if self.finished {
                     return;
@@ -1968,6 +2009,28 @@ mod tests {
         assert_eq!(count(|e| matches!(e, AgentEvent::Model { model } if model == "claude-haiku-4-5")), 1);
         assert_eq!(count(|e| matches!(e, AgentEvent::Usage { usage } if usage.context_tokens == Some(1200))), 1);
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Completed), .. } if id == "agent_1")));
+    }
+
+    /// One task stopped alone: by the id its result gave, else by the one
+    /// running task that says the same; nothing sent when none does.
+    #[test]
+    fn stops_one_task() {
+        let mut p = ClaudeLive::default();
+        feed(&mut p, &[
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"a7","task_type":"local_agent","description":"Audit the docs"},{"task_id":"b2","task_type":"local_bash","description":"npm run dev"}]}"#,
+            r#"{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"bash1","name":"Bash","input":{"command":"npm run dev","run_in_background":true}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bash1","content":"Command running in background with ID: b2"}]}}"#,
+        ]);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = EventSink::new(tx);
+        let sent = |p: &mut ClaudeLive| p.take_output().iter().map(|l| serde_json::from_str::<Value>(l).unwrap()["request"].clone()).collect::<Vec<_>>();
+        p.command(TurnCommand::StopTask { tool_id: "bash1".into(), description: None }, &sink);
+        assert_eq!(sent(&mut p), [json!({"subtype": "stop_task", "task_id": "b2"})]);
+        p.command(TurnCommand::StopTask { tool_id: "agent1".into(), description: Some("Audit the docs".into()) }, &sink);
+        assert_eq!(sent(&mut p), [json!({"subtype": "stop_task", "task_id": "a7"})]);
+        p.command(TurnCommand::StopTask { tool_id: "agent2".into(), description: Some("Something else".into()) }, &sink);
+        assert!(p.take_output().is_empty());
+        assert!(matches!(rx.try_recv(), Ok(AgentEvent::Notice { .. })));
     }
 
     /// The reply ends while a background subagent still works: the turn

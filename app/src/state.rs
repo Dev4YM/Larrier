@@ -400,6 +400,9 @@ pub struct App {
     /// Running sessions whose agent finished its reply while background work
     /// (subagents, commands) keeps the turn open: not "generating".
     pub idle: Signal<HashSet<String>>,
+    /// Running sessions whose agent's reply stopped at subagents it started
+    /// and waits for them: it isn't writing itself, its subagents are.
+    pub delegating: Signal<HashSet<String>>,
     pub update: Signal<UpdateState>,
     /// Each agent's own models and defaults, by agent id (see
     /// `crate::agent_models`).
@@ -501,6 +504,7 @@ impl App {
             drag: root_signal(None),
             live: root_signal(HashMap::new()),
             idle: root_signal(HashSet::new()),
+            delegating: root_signal(HashSet::new()),
             update: root_signal(UpdateState::default()),
             native_models: root_signal(crate::agent_models::load()),
             models_refreshing: root_signal(HashSet::new()),
@@ -1418,6 +1422,14 @@ impl App {
                         last_row = Instant::now();
                     }
                 }
+                let waits = sig.peek().messages.last().is_some_and(waits_on_subagents);
+                if waits != app.delegating.peek().contains(&id) {
+                    if waits {
+                        app.delegating.write().insert(id.clone());
+                    } else {
+                        app.delegating.write().remove(&id);
+                    }
+                }
                 if let Some(v) = idle.filter(|v| *v != app.idle.peek().contains(&id)) {
                     if v {
                         app.idle.write().insert(id.clone());
@@ -1467,6 +1479,9 @@ impl App {
             crate::ui::usage::turn_ended();
             if app.idle.peek().contains(&id) {
                 app.idle.write().remove(&id);
+            }
+            if app.delegating.peek().contains(&id) {
+                app.delegating.write().remove(&id);
             }
             crate::live::mark_idle(&id);
             if let Some((t, st)) = &title {
@@ -1532,6 +1547,20 @@ impl App {
         if let Some(c) = self.running.read().get(id) {
             self.stopping.write().entry(id.to_string()).or_insert(false);
             c.cancel();
+        }
+    }
+
+    /// The running agent can stop one of its tasks alone (a subagent, a
+    /// background command): Claude Code can.
+    pub fn can_stop_tasks(&self, id: &str) -> bool {
+        self.is_running(id) && self.peek_session(id, |s| s.agent == AgentKind::ClaudeCode).unwrap_or(false)
+    }
+
+    /// Stop one task the agent runs: the work tool call `tool_id` started
+    /// (`description`: what the call said it does).
+    pub fn stop_task(self, id: &str, tool_id: &str, description: Option<String>) {
+        if let Some(c) = self.running.read().get(id) {
+            c.stop_task(tool_id.to_string(), description);
         }
     }
 
@@ -2479,6 +2508,23 @@ fn without_session(history: Vec<View>, pos: usize, id: &str) -> (Vec<View>, usiz
         }
     }
     (kept, at)
+}
+
+/// The agent's reply `m` stopped at subagents it started that still run:
+/// what follows its last words is only them.
+pub fn waits_on_subagents(m: &Message) -> bool {
+    if m.role != Role::Assistant {
+        return false;
+    }
+    let mut running = false;
+    for p in m.parts.iter().rev() {
+        match p {
+            Part::Tool(t) if t.is_subagent() => running |= matches!(t.status, larrier_core::lsf::ToolStatus::Running | larrier_core::lsf::ToolStatus::Pending),
+            Part::Tool(_) => return false,
+            _ => break,
+        }
+    }
+    running
 }
 
 pub fn external_active(s: &SessionSummary, live_recent: bool) -> bool {

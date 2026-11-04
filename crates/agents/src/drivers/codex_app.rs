@@ -813,6 +813,8 @@ impl Interactive for CodexLive {
                 let taken_back = self.waiting.len() + self.restart.len() < held;
                 sink.send(AgentEvent::Unsteered { key, taken_back });
             }
+            // Codex has no way to stop one task alone.
+            TurnCommand::StopTask { .. } => {}
         }
     }
 

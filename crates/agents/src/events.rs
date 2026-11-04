@@ -171,6 +171,10 @@ pub enum TurnCommand {
     /// Take back a `Steer` message the agent hasn't read yet; answered with
     /// `AgentEvent::Unsteered`.
     Unsteer { key: u64 },
+    /// Stop one piece of work the agent runs (a subagent, a background
+    /// command), named by its tool call and what the call said it does.
+    /// Agents that can't stop one alone ignore it.
+    StopTask { tool_id: String, description: Option<String> },
 }
 
 /// The user's answer to a request.
@@ -220,6 +224,10 @@ impl TurnControl {
 
     pub fn unsteer(&self, key: u64) {
         let _ = self.tx.send(TurnCommand::Unsteer { key });
+    }
+
+    pub fn stop_task(&self, tool_id: String, description: Option<String>) {
+        let _ = self.tx.send(TurnCommand::StopTask { tool_id, description });
     }
 }
 

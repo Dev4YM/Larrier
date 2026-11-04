@@ -428,6 +428,9 @@ pub fn Composer(
     };
     // Writing its reply; only background work left counts as finished.
     let running = session_id.as_ref().map(|id| app.generating(id)).unwrap_or(false);
+    // Only its subagents are working: the agent itself waits on them, so
+    // the box offers to send (into the turn), not to stop.
+    let delegating = session_id.as_ref().is_some_and(|id| app.delegating.read().contains(id));
     let permission = match &session_id {
         Some(_) => sess.read().as_ref().and_then(|s| s.permission.clone()),
         None => app.draft.read().permission.clone(),
@@ -1217,7 +1220,7 @@ pub fn Composer(
                         button { class: "send-btn stop c-send", disabled: true, title: "Running in {agent.display_name()} — stop it there",
                             Icon { i: I::Stop, size: 10 }
                         }
-                    } else if running {
+                    } else if running && !delegating {
                         button { class: "send-btn stop c-send", title: "Stop (Ctrl+.)",
                             onclick: move |_| if let Some(id) = &sid_stop { app.stop_reply(id) },
                             Icon { i: I::Stop, size: 10 }

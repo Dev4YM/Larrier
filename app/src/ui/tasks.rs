@@ -80,6 +80,8 @@ pub(crate) const CSS: &str = r#"
 .tk-card-head .grow { flex: 1; }
 .tk-card-head .icon-btn { width: 22px; height: 22px; }
 .tk-stop-all { height: 20px; padding: 0 5px; border-radius: 5px; color: var(--fg-2); font-size: 12px; }
+.tk-stop { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; color: var(--fg-3); }
+.tk-stop:hover { background: var(--hover); color: var(--red); }
 .tk-stop-all:hover { background: var(--hover); color: var(--red); }
 .tk-card-list { max-height: min(220px, 36vh); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .tk-item { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px;
@@ -376,7 +378,28 @@ fn CardItem(session_id: String, row: TaskRow) -> Element {
                 span { class: "act", {row.activity.clone().unwrap_or_default()} }
             }
             Elapsed { class: "when", active: true, started: row.started, ms: row.ms }
+            StopTask { session_id: session_id.clone(), row: row.clone() }
             span { class: "go", Icon { i: I::ChevronRight, size: 12 } }
+        }
+    }
+}
+
+/// Stop one task (a subagent, a background command) the agent runs, where
+/// the agent can stop one alone.
+#[component]
+fn StopTask(session_id: String, row: TaskRow) -> Element {
+    let app = use_app();
+    if !row.active || !app.can_stop_tasks(&session_id) {
+        return rsx! {};
+    }
+    let what = if row.kind == TaskKind::Subagent { "Stop this subagent" } else { "Stop this command" };
+    rsx! {
+        button { class: "tk-stop", title: "{what}",
+            onclick: move |e| {
+                e.stop_propagation();
+                app.stop_task(&session_id, &row.id, row.desc.clone());
+            },
+            Icon { i: I::Stop, size: 9 }
         }
     }
 }
@@ -526,6 +549,7 @@ fn TaskRowView(session_id: String, row: TaskRow) -> Element {
                     span { class: "tk-row-title", title: "{row.title}", "{row.title}" }
                     if row.active {
                         Elapsed { class: "tk-row-when", active: true, started: row.started, ms: None }
+                        StopTask { session_id: session_id.clone(), row: row.clone() }
                     } else {
                         span { class: "tk-row-when", "{done}" }
                     }
@@ -577,6 +601,8 @@ pub struct TaskRow {
     /// What it is doing now: a subagent's latest step, a command's latest
     /// output line.
     pub activity: Option<String>,
+    /// What its call said it does (how the agent names the task).
+    pub desc: Option<String>,
 }
 
 /// Subagents and terminals running right now (recursive): the chips.
@@ -666,6 +692,7 @@ fn task_row(t: &ToolCall) -> TaskRow {
         ms: if active { None } else { run_ms(t, Utc::now()) },
         meta,
         activity: activity(t),
+        desc: t.input.get("description").and_then(|d| d.as_str()).map(String::from),
     }
 }
 

@@ -273,6 +273,64 @@ pub fn css_for(light: Option<&str>, dark: Option<&str>) -> String {
     css
 }
 
+/// The code editor's token colors from code theme `name` (the light or
+/// dark one): each kind of token Monaco's colorers name gets the color the
+/// theme gives its TextMate scope, so the editor reads like the chat's code.
+pub fn monaco_rules(name: Option<&str>, dark: bool) -> serde_json::Value {
+    use syntect::highlighting::{Color, FontStyle, Highlighter};
+    const KINDS: &[(&str, &str)] = &[
+        ("comment", "comment.line"),
+        ("comment.doc", "comment.block.documentation"),
+        ("string", "string.quoted.double"),
+        ("string.escape", "constant.character.escape"),
+        ("string.key.json", "support.type.property-name.json"),
+        ("string.value.json", "string.quoted.double.json"),
+        ("regexp", "string.regexp"),
+        ("number", "constant.numeric"),
+        ("constant", "constant.language"),
+        ("keyword", "keyword.control"),
+        ("keyword.json", "constant.language.json"),
+        ("operator", "keyword.operator"),
+        ("type", "entity.name.type"),
+        ("type.identifier", "entity.name.type"),
+        ("tag", "entity.name.tag"),
+        ("metatag", "meta.tag.preprocessor"),
+        ("annotation", "storage.type.annotation"),
+        ("attribute.name", "entity.other.attribute-name"),
+        ("attribute.value", "string.quoted.double"),
+        ("predefined", "support.function"),
+        ("variable", "variable.other"),
+        ("variable.predefined", "variable.language"),
+        ("namespace", "entity.name.namespace"),
+        ("key", "entity.name.tag.yaml"),
+        ("delimiter", "punctuation.separator"),
+    ];
+    let ts = themes_set();
+    let pick = match name {
+        Some(n) if ts.themes.contains_key(n) => n,
+        _ if dark => DEFAULT_DARK,
+        _ => DEFAULT_LIGHT,
+    };
+    let theme = &ts.themes[pick];
+    let h = Highlighter::new(theme);
+    let hex = |c: Color| format!("{:02x}{:02x}{:02x}", c.r, c.g, c.b);
+    let fg = theme.settings.foreground.map(hex);
+    let mut rules = vec![serde_json::json!({ "token": "", "foreground": fg })];
+    for (token, scope) in KINDS {
+        let stack: Vec<Scope> = Scope::new(scope).into_iter().collect();
+        let st = h.style_for_stack(&stack);
+        let mut style = Vec::new();
+        if st.font_style.contains(FontStyle::ITALIC) {
+            style.push("italic");
+        }
+        if st.font_style.contains(FontStyle::BOLD) {
+            style.push("bold");
+        }
+        rules.push(serde_json::json!({ "token": token, "foreground": hex(st.foreground), "fontStyle": style.join(" ") }));
+    }
+    serde_json::json!({ "rules": rules, "selection": theme.settings.selection.map(hex) })
+}
+
 /// One code theme scoped under `scope` — lets the Appearance preview show
 /// the light or dark code theme regardless of the window's current theme.
 pub fn scoped_theme_css(name: Option<&str>, dark: bool, scope: &str) -> String {

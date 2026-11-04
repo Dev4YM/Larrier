@@ -1,6 +1,6 @@
 //! Files panel: open-file tabs with language icons, a breadcrumb with
-//! back / forward, quick open, a lazy file tree and a virtualized,
-//! syntax-highlighted viewer with line numbers.
+//! back / forward, quick open, a lazy file tree and a code editor (Monaco,
+//! see `editor`) for any text file.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -13,8 +13,6 @@ use crate::icons::{has_icon, Lucide};
 use crate::logos::{logo, Logo};
 use crate::state::use_app;
 
-const LINE_H: f64 = 20.0;
-const OVERSCAN: usize = 60;
 const MAX_TEXT: u64 = 12 * 1024 * 1024;
 const MAX_IMAGE: u64 = 8 * 1024 * 1024;
 const MAX_INDEX: usize = 50_000;
@@ -289,7 +287,8 @@ fn read_dir_sorted(dir: &str) -> Vec<Entry> {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Loaded {
-    Text { lines: Vec<String>, lang: Option<&'static str> },
+    /// The file (`path`) as it is on disk, its line endings kept.
+    Text { path: String, text: String, lang: Option<&'static str> },
     Image { url: String, bytes: u64 },
     Binary { bytes: u64 },
     TooLarge { bytes: u64 },
@@ -326,11 +325,9 @@ fn load(path: &str) -> Loaded {
     if data.iter().take(8000).any(|b| *b == 0) {
         return Loaded::Binary { bytes };
     }
-    let text = String::from_utf8_lossy(&data).replace("\r\n", "\n");
+    let text = String::from_utf8_lossy(&data).to_string();
     let lang = highlight::syntax_name(&name);
-    let lines = highlight::highlight_lines(&text, Some(&name))
-        .unwrap_or_else(|| text.lines().map(highlight::escape).collect());
-    Loaded::Text { lines, lang }
+    Loaded::Text { path: path.to_string(), text, lang }
 }
 
 fn human_bytes(n: u64) -> String {
@@ -355,9 +352,6 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
     let mut hl = use_signal(|| 0usize);
     let expanded: Signal<BTreeSet<String>> = crate::keep::use_kept(&session_id, "files.dirs", BTreeSet::new);
     let mut dirs: Signal<HashMap<String, Vec<Entry>>> = use_signal(HashMap::new);
-    let mut scroll_top = use_signal(|| 0.0f64);
-    let mut view_h = use_signal(|| 900.0f64);
-    let mut cur_line = use_signal(|| None::<usize>);
 
     let _ = rev();
     let tabs = with_tabs(&session_id, |t| t.clone());
@@ -399,8 +393,6 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
         if full.is_file() {
             open_tab(&sid_r, &full.to_string_lossy(), false);
             quick_open.set(false);
-            cur_line.set(None);
-            scroll_top.set(0.0);
             rev += 1;
         } else {
             quick.set(p.clone());
@@ -449,9 +441,6 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
             quick_open.set(false);
             quick.set(String::new());
             hl.set(0);
-            cur_line.set(None);
-            scroll_top.set(0.0);
-            document::eval("const c = document.getElementById('fv-code'); if (c) c.scrollTop = 0;");
             rev += 1;
         }
     };
@@ -465,14 +454,8 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
 
     // Visible window of lines.
     let loaded = content.read().clone().flatten();
-    let line_count = match &loaded {
-        Some(Loaded::Text { lines, .. }) => lines.len(),
-        _ => 0,
-    };
-    let start = ((scroll_top() / LINE_H) as usize).saturating_sub(OVERSCAN).min(line_count);
-    let visible = (view_h() / LINE_H).ceil() as usize + OVERSCAN * 2;
-    let end = (start + visible).min(line_count);
-    let gutter_ch = line_count.max(1).to_string().len().max(3);
+    let editing = matches!(loaded, Some(Loaded::Text { .. }));
+    let dirty = super::editor::DIRTY();
 
     let sid_tabs = session_id.clone();
     let sid_nav = session_id.clone();
@@ -492,12 +475,16 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                         let preview = tabs.preview.as_deref() == Some(f.as_str());
                         let (f1, f2, f3) = (f.clone(), f.clone(), f.clone());
                         let (s1, s2, s3) = (sid_tabs.clone(), sid_tabs.clone(), sid_tabs.clone());
-                        let cls = match (is_active, preview) {
+                        let mut cls = match (is_active, preview) {
                             (true, true) => "fv-tab on preview",
                             (true, false) => "fv-tab on",
                             (false, true) => "fv-tab preview",
                             (false, false) => "fv-tab",
-                        };
+                        }
+                        .to_string();
+                        if dirty.contains(f) {
+                            cls.push_str(" dirty");
+                        }
                         rsx! {
                             div {
                                 key: "{f}",
@@ -507,7 +494,6 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                                 onclick: move |_| {
                                     open_tab(&s1, &f1, false);
                                     quick_open.set(false);
-                                    cur_line.set(None);
                                     rev += 1;
                                 },
                                 ondoubleclick: move |_| {
@@ -525,7 +511,7 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                                 span { class: "fv-tab-name", "{name}" }
                                 button {
                                     class: "fv-x",
-                                    title: "Close",
+                                    title: if dirty.contains(f) { "Close (unsaved changes stay until you close Larrier)" } else { "Close" },
                                     onclick: {
                                         let (s, f) = (sid_tabs.clone(), f.clone());
                                         move |e: MouseEvent| {
@@ -553,11 +539,11 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
             // ---- breadcrumb bar
             div { class: "fv-crumbs",
                 button { class: "fv-btn", title: "Back", disabled: !can_back,
-                    onclick: move |_| { go_history(&sid_nav, -1); cur_line.set(None); rev += 1; },
+                    onclick: move |_| { go_history(&sid_nav, -1); rev += 1; },
                     Lucide { name: "arrow-left".to_string(), size: 14, stroke: 1.5 }
                 }
                 button { class: "fv-btn", title: "Forward", disabled: !can_fwd,
-                    onclick: move |_| { go_history(&sid_nav2, 1); cur_line.set(None); rev += 1; },
+                    onclick: move |_| { go_history(&sid_nav2, 1); rev += 1; },
                     Lucide { name: "arrow-right".to_string(), size: 14, stroke: 1.5 }
                 }
                 div { class: "fv-path",
@@ -570,6 +556,25 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                 }
                 if let Some(Loaded::Text { lang: Some(l), .. }) = &loaded {
                     span { class: "fv-lang", "{l}" }
+                }
+                if editing {
+                    {
+                        let unsaved = active.as_ref().is_some_and(|a| dirty.contains(a));
+                        rsx! {
+                            button { class: if unsaved { "fv-btn fv-save on" } else { "fv-btn fv-save" }, title: "Save (Ctrl+S)", disabled: !unsaved,
+                                onclick: move |_| super::editor::save(),
+                                Lucide { name: "save".to_string(), size: 14, stroke: 1.5 }
+                            }
+                            button { class: if super::editor::wrap() { "fv-btn on" } else { "fv-btn" }, title: "Wrap long lines",
+                                onclick: move |_| super::editor::set_wrap(!super::editor::wrap()),
+                                Lucide { name: "wrap-text".to_string(), size: 14, stroke: 1.5 }
+                            }
+                            button { class: if super::editor::minimap() { "fv-btn on" } else { "fv-btn" }, title: "Minimap",
+                                onclick: move |_| super::editor::set_minimap(!super::editor::minimap()),
+                                Lucide { name: "map".to_string(), size: 14, stroke: 1.5 }
+                            }
+                        }
+                    }
                 }
                 button { class: "fv-btn", title: "Quick open (search files)",
                     onclick: move |_| {
@@ -613,9 +618,6 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                                 move |p: String| {
                                     open_tab(&sid, &p, false);
                                     quick_open.set(false);
-                                    cur_line.set(None);
-                                    scroll_top.set(0.0);
-                                    document::eval("const c = document.getElementById('fv-code'); if (c) c.scrollTop = 0;");
                                     rev += 1;
                                 }
                             },
@@ -690,30 +692,10 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                                     div { class: "fv-note", "{human_bytes(bytes)}" }
                                 }
                             },
-                            Some(Loaded::Text { lines, .. }) => rsx! {
-                                div {
-                                    id: "fv-code",
-                                    class: "fv-code hl-code selectable",
-                                    onscroll: move |e| {
-                                        let d = e.data();
-                                        scroll_top.set(d.scroll_top());
-                                        view_h.set(d.client_height() as f64);
-                                    },
-                                    div { class: "fv-lines", style: "padding-top: {start as f64 * LINE_H}px; padding-bottom: {(line_count - end) as f64 * LINE_H}px;",
-                                        for i in start..end {
-                                            div {
-                                                key: "{i}",
-                                                class: if cur_line() == Some(i) { "fv-row cur" } else { "fv-row" },
-                                                onclick: move |_| cur_line.set(Some(i)),
-                                                span { class: "fv-ln", style: "width: {gutter_ch + 2}ch;", "{i + 1}" }
-                                                span { class: "fv-tx", dangerous_inner_html: "{lines[i]}" }
-                                            }
-                                        }
-                                        if line_count == 0 {
-                                            div { class: "fv-note", "Empty file" }
-                                        }
-                                    }
-                                }
+                            // The file this text is of (not the tab just
+                            // picked, whose text may still be on its way).
+                            Some(Loaded::Text { path, text, .. }) => rsx! {
+                                super::editor::CodeEditor { path, text }
                             },
                         }
                     }
@@ -845,14 +827,15 @@ const CSS: &str = r#"
 .fv-note { padding: 18px; color: var(--fg-3); font-size: 12px; text-align: center; }
 .fv-image { flex: 1; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 8px; background-image: linear-gradient(45deg, var(--hover) 25%, transparent 25%), linear-gradient(-45deg, var(--hover) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--hover) 75%), linear-gradient(-45deg, transparent 75%, var(--hover) 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
 .fv-image img { max-width: 100%; max-height: 80%; object-fit: contain; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
-.fv-code { flex: 1; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 20px; }
-.fv-lines { min-width: max-content; }
-.fv-row { display: flex; height: 20px; white-space: pre; cursor: text; }
-.fv-row:hover { background: color-mix(in srgb, var(--hover) 60%, transparent); }
-.fv-row.cur { background: var(--hover); }
-.fv-ln { position: sticky; left: 0; flex-shrink: 0; text-align: right; padding-right: 16px; color: var(--fg-4); background: var(--pane); user-select: none; }
-.fv-row.cur .fv-ln { color: var(--fg-2); }
-.fv-tx { padding-right: 24px; }
+.fv-editor { flex: 1; min-height: 0; min-width: 0; position: relative; overflow: hidden; }
+.fv-editor .monaco-editor { --vscode-font-family: var(--font, system-ui); }
+.fv-editor .monaco-editor .suggest-widget, .fv-editor .monaco-editor .monaco-hover, .monaco-editor .suggest-widget, .monaco-editor .monaco-hover { border-radius: 8px; overflow: hidden; }
+.fv-tab.dirty .fv-x { opacity: 1; }
+.fv-tab.dirty .fv-x svg { display: none; }
+.fv-tab.dirty .fv-x::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-2); }
+.fv-tab.dirty .fv-x:hover svg { display: block; }
+.fv-tab.dirty .fv-x:hover::before { display: none; }
+.fv-save.on { color: var(--accent-c, var(--blue)); }
 "#;
 
 #[cfg(test)]
@@ -913,8 +896,8 @@ mod tests {
         let t = dir.join("x.rs");
         std::fs::write(&t, "fn a() {}\nfn b() {}\n").unwrap();
         match load(&t.to_string_lossy()) {
-            Loaded::Text { lines, lang } => {
-                assert_eq!(lines.len(), 2);
+            Loaded::Text { text, lang, .. } => {
+                assert_eq!(text.lines().count(), 2);
                 assert_eq!(lang, Some("Rust"));
             }
             other => panic!("{other:?}"),

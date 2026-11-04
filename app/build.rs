@@ -13,6 +13,7 @@ fn main() {
     let (commit, date) = build_info();
     println!("cargo:rustc-env=LARRIER_COMMIT={commit}");
     println!("cargo:rustc-env=LARRIER_COMMIT_DATE={date}");
+    monaco_files();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
@@ -56,6 +57,35 @@ const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
   </compatibility>
 </assembly>
 "#;
+
+/// The code editor's files (`assets/monaco`), included in the program as a
+/// table of (path under `vs/`'s parent, bytes): the Files panel's editor is
+/// served from it.
+fn monaco_files() {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, std::path::PathBuf)>) {
+        let Ok(list) = std::fs::read_dir(dir) else { return };
+        for e in list.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, root, out);
+            } else if let Ok(rel) = p.strip_prefix(root) {
+                out.push((rel.to_string_lossy().replace('\\', "/"), p.clone()));
+            }
+        }
+    }
+    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join("assets").join("monaco");
+    println!("cargo:rerun-if-changed=assets/monaco");
+    let mut files = Vec::new();
+    walk(&root, &root, &mut files);
+    files.sort();
+    let mut src = String::from("pub static FILES: &[(&str, &[u8])] = &[\n");
+    for (rel, abs) in files {
+        src.push_str(&format!("    ({rel:?}, include_bytes!({:?})),\n", abs.to_string_lossy()));
+    }
+    src.push_str("];\n");
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("monaco_files.rs");
+    std::fs::write(out, src).expect("write the editor's file table");
+}
 
 /// The commit being built and its date (`LARRIER_COMMIT` /
 /// `LARRIER_COMMIT_DATE` override them, e.g. for builds outside a checkout).

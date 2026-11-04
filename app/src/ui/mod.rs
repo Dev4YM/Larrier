@@ -6,6 +6,7 @@ mod automations;
 mod chat;
 mod composer;
 mod customize;
+pub mod editor;
 mod files;
 mod home;
 pub mod loaders;
@@ -758,6 +759,9 @@ pub fn Root() -> Element {
                 dioxus.send({ t: 'paste-plain' });
                 return;
               }
+              // In the code editor its own keys win (comment, go to line,
+              // select line, chords, quick fixes).
+              if (e.target && e.target.closest && e.target.closest('.monaco-editor') && ['/','g','l','k','p','e','i','d','f','h'].includes(k)) return;
               if (['k','n','b','j',',','l','p','r','w','e','g','i','.','/','=','+','-','0','tab'].includes(k)) {
                 e.preventDefault();
                 dioxus.send({ t: 'key', k, shift: e.shiftKey, alt: e.altKey });

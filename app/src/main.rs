@@ -193,6 +193,8 @@ fn main() {
             Ok(port) if !port.is_empty() => format!("--remote-debugging-port={port}"),
             _ => String::new(),
         })
+        // The code editor's files (Monaco), served from the program.
+        .with_custom_protocol("larrier", |_, req| ui::editor::serve(req))
         .with_navigation_handler(|url: &str| {
             let internal = url.contains("dioxus.") || url.starts_with("about:") || url.starts_with("data:");
             if !internal && (url.starts_with("http://") || url.starts_with("https://")) {

@@ -6,3 +6,6 @@ Dockerfile text eol=lf
 
 # The spelling dictionary is read as is (Hunspell files, Unix line endings).
 app/dict/** text eol=lf
+
+# The code editor (Monaco), vendored as published: kept byte for byte.
+app/assets/monaco/** -text

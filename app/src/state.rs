@@ -588,6 +588,12 @@ impl App {
         self.is_running(id) && !self.idle.read().contains(id)
     }
 
+    /// The agent itself is writing its reply: not done, and not only waiting
+    /// on its subagents (a message then goes straight in).
+    pub fn replying(&self, id: &str) -> bool {
+        self.generating(id) && !self.delegating.read().contains(id)
+    }
+
     /// Mid-turn in the agent's own app (a terminal CLI, Claude's or Cursor's
     /// app), not run by Larrier: Larrier can't reach that process, and
     /// running the agent here at the same time would fork the conversation.
@@ -1223,7 +1229,10 @@ impl App {
         }
         let id = match session_id {
             Some(id) => {
-                if self.is_running(&id) && !self.generating(&id) {
+                // The reply is done and only background work (commands,
+                // subagents) runs: the agent is free, so it takes the
+                // message now, whatever a busy agent would do with it.
+                if self.is_running(&id) && !self.replying(&id) {
                     self.send_into_turn(&id, Queued { id: rand_id(), text, attachments });
                     return;
                 }
@@ -1645,7 +1654,7 @@ impl App {
         let item = self.queue.peek().get(id).and_then(|v| v.iter().find(|x| x.id == qid).cloned());
         let Some(item) = item else { return };
         self.queue_remove(id, qid);
-        if self.generating(id) {
+        if self.replying(id) {
             self.send_while_busy(id, item.text, item.attachments, how);
         } else {
             self.send(Some(id.to_string()), item.text, item.attachments);

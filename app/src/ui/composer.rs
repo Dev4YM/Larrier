@@ -426,8 +426,9 @@ pub fn Composer(
             (d.agent.clone(), d.model.clone(), d.mode.clone(), d.worktree, None)
         }
     };
-    // Writing its reply; only background work left counts as finished.
-    let running = session_id.as_ref().map(|id| app.generating(id)).unwrap_or(false);
+    // Writing its reply; only background work left (commands, subagents)
+    // counts as finished: a message then goes straight in.
+    let running = session_id.as_ref().map(|id| app.replying(id)).unwrap_or(false);
     // Only its subagents are working: the agent itself waits on them, so
     // the box offers to send (into the turn), not to stop.
     let delegating = session_id.as_ref().is_some_and(|id| app.delegating.read().contains(id));
@@ -792,7 +793,7 @@ pub fn Composer(
             app.set_edit(None);
         }
         match (&sid, how) {
-            (Some(id), Some(h)) if app.generating(id) => app.send_while_busy(id, t, a, h),
+            (Some(id), Some(h)) if app.replying(id) => app.send_while_busy(id, t, a, h),
             _ => app.send(sid, t, a),
         }
     };

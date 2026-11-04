@@ -5,6 +5,17 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.42 — 2026-11-04
+
+### New
+
+- DevTools beside the page, a tab menu, pages that wait
+- Stop one background task; send while only subagents work
+- A code editor in the Files panel (Monaco)
+
+### Fixed
+
+- No Working heading, a prompt that folds, state kept per view
 ## 0.1.41 — 2026-11-04
 
 ### New

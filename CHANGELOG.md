@@ -5,6 +5,18 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.43 — 2026-11-04
+
+### New
+
+- The agent's own tabs, and steadier browser tools
+
+### Fixed
+
+- Take a message in when Claude asks with it; no time limit
+- Send straight in while only background work runs
+- Keep the caret where you type, typing fast anywhere
+- Keep an agent's last words when Larrier closes
 ## 0.1.42 — 2026-11-04
 
 ### New

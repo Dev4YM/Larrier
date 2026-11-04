@@ -175,13 +175,21 @@ pub fn Transcript(id: String) -> Element {
                 let last_reply = msgs.iter().rev().find(|m| m.role != Role::User && m.role != Role::System);
                 let fb = last_reply.and_then(|m| s.extra.get(&format!("feedback:{}", m.id))).and_then(|v| v.as_str());
                 let next = spans.get(first + i + 1).map(|n| s.messages[n.start].created_at);
+                // A reply that rested on background work ended when it did,
+                // not when the next prompt came.
+                let rested = last_reply
+                    .and_then(|m| s.extra.get(&format!("ended:{}", m.id)))
+                    .and_then(|v| v.as_str())
+                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                    .map(|t| t.with_timezone(&chrono::Utc));
+                let ended = next.unwrap_or(s.updated_at);
                 TurnRow {
                     key: sp.key.clone(),
                     start: sp.start,
                     end: sp.end,
                     fp: turn_fp(msgs, fb),
                     started: msgs[0].created_at,
-                    ended: next.unwrap_or(s.updated_at),
+                    ended: rested.map(|r| r.min(ended)).unwrap_or(ended),
                 }
             })
             .collect();
@@ -503,15 +511,20 @@ pub fn Transcript(id: String) -> Element {
 struct Turn {
     user: Option<Message>,
     replies: Vec<Message>,
+    /// Larrier's notes before the replies, and after them (one that came
+    /// after the agent's words, like "Interrupted when Larrier closed",
+    /// shows after them).
     system: Vec<Message>,
+    after: Vec<Message>,
 }
 
 fn build_turn(msgs: &[Message]) -> Turn {
-    let mut t = Turn { user: None, replies: Vec::new(), system: Vec::new() };
+    let mut t = Turn { user: None, replies: Vec::new(), system: Vec::new(), after: Vec::new() };
     for m in msgs {
         match m.role {
             Role::User if t.user.is_none() => t.user = Some(m.clone()),
-            Role::System => t.system.push(m.clone()),
+            Role::System if t.replies.is_empty() => t.system.push(m.clone()),
+            Role::System => t.after.push(m.clone()),
             _ => t.replies.push(m.clone()),
         }
     }
@@ -651,6 +664,14 @@ fn TurnView(
                     part: turn.replies[mi].parts[pi].clone(),
                     live: false,
                     show_reasoning,
+                }
+            }
+        }
+        for m in turn.after.iter() {
+            for p in m.parts.iter() {
+                match p {
+                    Part::Notice { text } | Part::Text { text } => rsx! { div { class: "notice", "{text}" } },
+                    _ => rsx! {},
                 }
             }
         }

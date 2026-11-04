@@ -1323,7 +1323,29 @@ impl App {
                 crate::live::mark_idle(&id);
                 return;
             };
-            while let Some(first) = handle.events.recv().await {
+            // Changes not on disk yet.
+            let mut dirty = false;
+            loop {
+                // What came since the last save is written once things go
+                // quiet for a moment, not only when more comes (a reply done
+                // while background work runs can be the last for a long time).
+                let first = if dirty {
+                    match tokio::time::timeout(Duration::from_secs(2), handle.events.recv()).await {
+                        Ok(Some(e)) => e,
+                        Ok(None) => break,
+                        Err(_) => {
+                            save_async(sig.peek().clone());
+                            last_save = Instant::now();
+                            dirty = false;
+                            continue;
+                        }
+                    }
+                } else {
+                    match handle.events.recv().await {
+                        Some(e) => e,
+                        None => break,
+                    }
+                };
                 let mut batch = vec![first];
                 while let Ok(e) = handle.events.try_recv() {
                     batch.push(e);
@@ -1335,6 +1357,8 @@ impl App {
                 // The reply's turn ended with only background work left:
                 // the agent takes the next queued message now.
                 let mut resting = false;
+                // The reply came to rest in this batch (whatever came after).
+                let mut rested = false;
                 {
                     let mut s = sig.write();
                     let s = &mut *s;
@@ -1344,6 +1368,7 @@ impl App {
                             AgentEvent::Waiting => {
                                 idle = Some(true);
                                 resting = true;
+                                rested = true;
                             }
                             AgentEvent::TextDelta { .. }
                             | AgentEvent::Text { .. }
@@ -1420,11 +1445,28 @@ impl App {
                         }
                         rec.apply(s, e);
                     }
+                    // When the reply ended (it may rest a long while on
+                    // background work): "Worked for" counts to here.
+                    if let Some(m) = s.messages.iter().rev().find(|m| m.role == Role::Assistant) {
+                        let key = format!("ended:{}", m.id);
+                        // (Its subagents working on isn't the reply going
+                        // on; a reply that goes on rests again later, or
+                        // ends, and then it counts to its end.)
+                        if rested {
+                            s.extra.insert(key, serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+                        } else if done && s.extra.contains_key(&key) {
+                            s.extra.remove(&key);
+                        }
+                    }
                     // Save every few seconds and refresh the sidebar row a few
-                    // times a second — never per token.
-                    if done || last_save.elapsed() > Duration::from_secs(3) {
+                    // times a second — never per token — and as soon as the
+                    // agent rests.
+                    if done || idle == Some(true) || last_save.elapsed() > Duration::from_secs(3) {
                         save_async(s.clone());
                         last_save = Instant::now();
+                        dirty = false;
+                    } else {
+                        dirty = true;
                     }
                     if last_row.elapsed() > Duration::from_millis(400) {
                         snapshot = Some(s.summary());
@@ -1549,6 +1591,18 @@ impl App {
         }
         self.steering.write().entry(id.to_string()).or_default().push(item);
         self.idle.write().remove(id);
+    }
+
+    /// Write every running chat as it is now: Larrier is closing, and the
+    /// agents' latest words can't wait for the next save.
+    pub fn save_running(&self) {
+        let ids: Vec<String> = self.running.peek().keys().cloned().collect();
+        let open = self.open.peek();
+        for id in ids {
+            if let Some(sig) = open.get(&id) {
+                save_async(sig.peek().clone());
+            }
+        }
     }
 
     /// Stop the agent and everything it runs.

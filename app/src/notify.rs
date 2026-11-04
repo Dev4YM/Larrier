@@ -505,6 +505,7 @@ pub fn track_window() {
                 WindowEvent::Moved(_) | WindowEvent::Resized(_) => record(false),
                 WindowEvent::CloseRequested | WindowEvent::Destroyed => {
                     record(true);
+                    app.save_running();
                     crate::state::flush_saves();
                     if matches!(event, WindowEvent::CloseRequested) {
                         app.install_on_exit();

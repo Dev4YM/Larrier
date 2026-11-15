@@ -424,7 +424,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                                 }
                                 span { class: "nm", "{name}" }
                             }
-                            Dropdown { open: me_menu, up: true, class: "me-menu".to_string(),
+                            Dropdown { open: me_menu, up: true, class: "me-menu center".to_string(),
                                 MenuItem { label: "Profile".to_string(), icon: Some(I::CircleUser), onclick: move |_| go(SettingsTab::Profile) }
                                 MenuItem { label: "Settings".to_string(), icon: Some(I::Settings), sub: Some(crate::platform::keys("Ctrl+,")), onclick: move |_| go(SettingsTab::General) }
                                 MenuItem { label: "Plan & Usage".to_string(), icon: Some(I::Gauge), onclick: move |_| go(SettingsTab::Usage) }

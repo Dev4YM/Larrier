@@ -72,7 +72,7 @@ pub(crate) const CSS: &str = r#"
 .tk-card { order: -1; flex: 0 0 100%; min-width: 0; margin-bottom: 2px; background: var(--card); border: 1px solid var(--border);
   border-radius: var(--r-lg); box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .14); padding: 2px 4px 4px; transform-origin: 50% 100%;
   animation: tk-card-in var(--t-2) var(--ease); }
-@keyframes tk-card-in { from { opacity: 0; } }
+@keyframes tk-card-in { from { opacity: 0; transform: translateY(4px); } }
 .app.no-motion .tk-card { animation: none; }
 .tk-card-head { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 8px; font-size: var(--ui-sm); color: var(--fg-3); }
 .tk-card-head .tk-ic { color: var(--fg-3); }

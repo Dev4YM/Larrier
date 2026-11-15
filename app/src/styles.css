@@ -73,11 +73,12 @@
   color-scheme: dark;
 }
 
-/* Motion: quick and plain. Colors change in --t-1, things that open fade in
-   over --t-2, a bar or meter settles in --t-3. Layout (widths, heights,
-   margins, rows) never animates and nothing scales: a panel opens at once and
-   its content fades in, so text never re-wraps or shrinks frame by frame. */
-:root { --ease: cubic-bezier(.2, 0, 0, 1); --t-1: 70ms; --t-2: 110ms; --t-3: 160ms; }
+/* Motion: fast and smooth. Colors change in --t-1, what opens slides a few
+   px and fades in over --t-2, panels and bars settle in --t-3, all on one
+   easing that slows into place. Layout (widths, heights, margins, rows)
+   never animates and nothing scales: a panel takes its place at once and
+   glides in, so text never re-wraps or shrinks frame by frame. */
+:root { --ease: cubic-bezier(.22, .61, .36, 1); --t-1: 100ms; --t-2: 160ms; --t-3: 220ms; }
 /* Corners: one moderate scale. Controls take --r-sm, rows, menus and cards
    --r-md, dialogs and large surfaces --r-lg; a nested corner is its parent's
    minus the padding between them. Dots and avatars stay round. Appearance →
@@ -575,7 +576,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .toast { background: var(--card-2); color: var(--fg); padding: 8px 12px; border-radius: var(--r-md); font-size: var(--ui-sm); box-shadow: var(--shadow-pop); max-width: 520px; display: flex; gap: 8px; align-items: center; animation: toast-in var(--t-2) ease-out; }
 .toast .ic { color: var(--green); }
 .toast.error .ic { color: var(--red); }
-@keyframes toast-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--fg-3); font-size: var(--ui-sm); }
 .scroll-bottom { position: absolute; bottom: 8px; right: 14px; z-index: 4; }
@@ -758,14 +759,15 @@ select.input { cursor: pointer; padding-right: 4px; }
 .app a, .md a { color: var(--accent-c); }
 .send-btn.ready:hover { filter: brightness(1.1); }
 
-/* What opens fades in where it will stay: no slide, no scale, so text and
-   icons are in place and at size on the first frame. Closing is instant. */
-@keyframes menu-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes menu-in-up { from { opacity: 0; } to { opacity: 1; } }
+/* What opens comes in from where it's anchored: a short slide (a few px)
+   and a fade, never a scale, so text and icons are at size on the first
+   frame. Closing is instant. */
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes rise-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes pop-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes slide-in-right { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes slide-in-right { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 .menu.in { animation: menu-in var(--t-2) var(--ease); }
 .menu.in.flip-up { animation-name: menu-in-up; }
 .overlay { animation: fade-in var(--t-1) ease-out; }
@@ -1134,7 +1136,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 /* Streaming motion: new steps of the running turn fade in where they land
    (existing ones never move) and things that open fade in. All of it is off with Reduce
    Motion (.app.no-motion). */
-@keyframes stream-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes stream-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .turn.live .a-block > *, .turn.live > .user-msg, .turn.live .tool-images img { animation: stream-in var(--t-3) var(--ease) backwards; }
 /* A prompt being edited, or back from it, is the same card: no slide-in. */
 .turn.live > .user-msg.editing, .turn.live > .user-msg.still { animation: none; }
@@ -1352,7 +1354,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .tool-card.live .tool-card-head .name { background: linear-gradient(90deg, var(--fg-3) 0%, var(--fg) 45%, var(--fg-3) 90%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.8s linear infinite; }
 .tool-card.live { border-color: color-mix(in srgb, var(--accent-c, var(--blue)) 30%, var(--border)); }
 .tool-card.live .preview .pv-line:last-child { animation: pv-in var(--t-3) ease-out; }
-@keyframes pv-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pv-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 .tool-card .desc.shimmer { color: transparent; }
 
 /* A thought the model kept to itself: a plain row, nothing to open */
@@ -1496,7 +1498,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .req-note { flex: 1; min-width: 180px; height: 28px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); padding: 0 9px; font-size: var(--ui-sm); outline: none; }
 .req-note:focus { border-color: var(--border-2); }
 .req-actions .primary-btn, .req-actions .ghost-btn { height: 28px; }
-@keyframes req-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes req-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* The rail switches between its folded card and the full column at once;
    what it shows fades in. */
@@ -1504,14 +1506,15 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .rail-wrap.folded { width: 56px; }
 .rail-wrap > .tools-col:not(.collapsed) { flex: 0 0 264px; animation: rail-content-in var(--t-3) ease-out backwards; }
 .rail-wrap > .tools-col.collapsed { animation: rail-card-in var(--t-3) var(--ease) backwards; }
-@keyframes rail-content-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes rail-card-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rail-content-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@keyframes rail-card-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 
 /* The sidebar opens and closes at once, so the chat beside it is laid out
    once instead of on every frame; it fades in when it comes back. In a
    narrow window it is a drawer over the chat, and slides. */
 .app-body { position: relative; }
-.sidebar:not(.closed):not(.parked) { animation: fade-in var(--t-2) ease-out; }
+.sidebar:not(.closed):not(.parked) { animation: side-in var(--t-3) var(--ease); }
+@keyframes side-in { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
 .sidebar.closed { margin-left: calc(-1 * var(--sidebar-w, 300px)); opacity: 0; visibility: hidden; pointer-events: none; }
 .app.sidebar-right .sidebar.closed { margin-left: 0; margin-right: calc(-1 * var(--sidebar-w, 300px)); }
 .app.narrow .sidebar.closed { margin-left: 0; transform: translateX(-100%); }
@@ -1522,7 +1525,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
    (even translateX(0)) traps the menus inside, which are placed against the
    window (position: fixed). */
 .right-pane { animation: pane-in var(--t-3) var(--ease) backwards; }
-@keyframes pane-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pane-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 
 /* Pane toggles stay put: one button each, at the same spot whether its
    pane is open or closed; the headers under them leave room. */
@@ -1574,7 +1577,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* The queue: a card like the running agents' and terminals' (tk-card), opened
    from its pill in the row above the box. */
 .queue-card .queue-list { gap: 1px; }
-@keyframes queue-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes queue-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .queue-head { display: flex; align-items: center; gap: 6px; padding: 2px 4px 4px 10px; font-size: var(--ui-sm); color: var(--fg-2); }
 .queue-head .n { font-weight: 500; }
 .queue-head .grow { flex: 1; }
@@ -1689,7 +1692,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
   font-size: var(--ui-sm); font-weight: 500; white-space: nowrap; animation: quote-pop-in var(--t-2) ease-out; }
 .quote-pop:hover { background: var(--hover); }
 .quote-pop svg { color: var(--fg-2); }
-@keyframes quote-pop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes quote-pop-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 /* An agent's words: the text cursor over the text itself, the pointer
    elsewhere (the browser decides, as on any page). */
 .a-text { cursor: auto; }

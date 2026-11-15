@@ -738,23 +738,33 @@ pub fn Root() -> Element {
             window.addEventListener('mouseup', (e) => {
               if (e.button === 3 || e.button === 4) { e.preventDefault(); dioxus.send({ t: 'nav', d: e.button === 3 ? -1 : 1 }); }
             });
+            // Menus don't block the window. A press outside every open menu
+            // closes them (each backdrop is its menu's close handler) and
+            // goes on to what was pressed; a press on a menu's own button
+            // only closes it, so it doesn't open again on the click.
+            window.addEventListener('pointerdown', (e) => {
+              const backs = document.querySelectorAll('.menu-backdrop, .mp-edit-backdrop');
+              if (!backs.length) return;
+              const t = e.target instanceof Element ? e.target : null;
+              if (t && t.closest('.menu, .mp-edit')) return;
+              // The window's own bar (dragging it, its buttons) isn't part
+              // of the app: pressing there leaves menus as they are. Its
+              // File, Edit, View and Help open menus of their own.
+              if (t && (t.closest('.drag, .win-controls') || (t.closest('.menubar') && !t.closest('.mb-item')))) return;
+              const anchor = t && t.closest('.menu-anchor');
+              const own = (anchor && anchor.querySelector('.menu')) || (t && t.closest('.mb-item.open'));
+              for (const b of backs) b.click();
+              if (own) {
+                const eat = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+                window.addEventListener('click', eat, { capture: true, once: true });
+                setTimeout(() => window.removeEventListener('click', eat, { capture: true }), 600);
+              }
+            }, true);
             // Larrier's own right-click menu everywhere (never the browser's).
             window.addEventListener('contextmenu', (e) => {
               e.preventDefault();
               let t = e.target instanceof Element ? e.target : document.body;
               let later = false;
-              // Right-clicking while a menu is open: that menu closes (its
-              // backdrop handles that) and the click goes to what's underneath.
-              if (t.closest('.menu-backdrop')) {
-                const under = document.elementsFromPoint(e.clientX, e.clientY).find(el => !el.closest('.menu-backdrop, .menu'));
-                if (!under) return;
-                if (under.closest('[data-ctx]')) {
-                  const x = e.clientX, y = e.clientY;
-                  setTimeout(() => under.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 })), 0);
-                  return;
-                }
-                t = under; later = true;
-              }
               if (t.closest('.menu')) return;
               if (t.closest('[data-ctx]')) return; // components with their own menu
               const ed = t.closest('input, textarea, [contenteditable="true"]');
@@ -1808,7 +1818,8 @@ pub fn place_js(id: &str, prefer_up: bool, align_right: bool) -> String {
   const m = document.getElementById('{id}'); if (!m) return;
   const anchor = m.parentElement; if (!anchor) return;
   const focusFirst = true;
-  const a = anchor.getBoundingClientRect();
+  // A select's menu lines up with its button, not the box around it.
+  const a = ((m.classList.contains('select-menu') && anchor.querySelector('.select-btn')) || anchor).getBoundingClientRect();
   const vw = window.innerWidth, vh = window.innerHeight, pad = 8, gap = 4;
   const cap = parseFloat(getComputedStyle(m).getPropertyValue('--menu-max')) || 440;
   m.style.position = 'fixed'; m.style.bottom = 'auto'; m.style.right = 'auto'; m.style.maxHeight = 'none';

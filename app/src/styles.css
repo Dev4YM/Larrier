@@ -389,7 +389,13 @@ svg { flex-shrink: 0; display: block; }
 .menu-item.disabled { opacity: .45; cursor: default; }
 .menu-item .check { margin-left: auto; color: var(--fg-2); padding-left: 8px; }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
-.menu-backdrop { position: fixed; inset: 0; z-index: 40; }
+/* A menu's backdrop doesn't catch the pointer: what's outside an open menu
+   stays hoverable and clickable. It's kept as the menu's close handler,
+   which the window's pointerdown handler (ui/mod.rs) clicks. */
+.menu-backdrop { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+/* The button whose menu is open stays lit until the menu closes. */
+.menu-anchor:has(> .menu) > :is(button, [role="button"]):not(.primary-btn) { color: var(--fg); background: var(--hover); }
+.menu-anchor:has(> .menu) > :is(button, [role="button"]):not(.primary-btn) :is(span, svg) { color: inherit; }
 
 /* ---------------------------------------------------------------- command palette */
 .overlay { position: fixed; inset: 0; z-index: 100; background: var(--overlay); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
@@ -921,6 +927,9 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 
 /* Selects */
 .menu-anchor.select.wide .select-btn { min-width: 220px; }
+/* In a form, a select fills its column like the inputs beside it. */
+.kv > .menu-anchor.select { display: flex; width: 100%; }
+.kv > .menu-anchor.select .select-btn { width: 100%; max-width: none; }
 .select-btn { height: 30px; border-radius: var(--r-md); background: var(--card-2); border-color: var(--border); box-shadow: 0 1px 1px rgba(0,0,0,.02); transition: border-color var(--t-1), box-shadow var(--t-1), background-color var(--t-1); }
 .select-btn:hover { border-color: var(--border-2); background: var(--card); }
 .select-btn:focus-visible, .select-btn.open { outline: none; border-color: color-mix(in srgb, var(--accent-c) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c) 14%, transparent); }
@@ -1149,13 +1158,13 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .turn-nav.tight { visibility: hidden; pointer-events: none; }
 
 /* Agent modes in the + menu: label, Default badge, description, check, key. */
-.menu-item.mode-row { height: auto; min-height: 44px; padding: 6px 8px; align-items: flex-start; gap: 10px; }
+.menu-item.mode-row { height: auto; min-height: 40px; padding: 6px 8px; align-items: flex-start; gap: 8px; }
 .mode-row .mo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
 .mode-row .mo-top { display: flex; align-items: center; gap: 6px; }
-.mode-row .mo-label { font-size: 13px; color: var(--fg); }
+.mode-row .mo-label { font-size: 12px; line-height: 16px; color: var(--fg); }
 .mode-row.checked .mo-label { font-weight: 500; }
 .mode-row .mo-default { font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: var(--r-md); border: 1px solid var(--border-2); color: var(--fg-3); }
-.mode-row .mo-desc { font-size: 11.5px; line-height: 15px; color: var(--fg-3); white-space: normal; }
+.mode-row .mo-desc { font-size: 11px; line-height: 15px; color: var(--fg-3); white-space: normal; }
 .mode-row .mo-check { width: 16px; flex-shrink: 0; display: flex; justify-content: center; color: var(--blue); padding-top: 2px; }
 .mode-row .mo-num { width: 12px; flex-shrink: 0; text-align: right; font-size: 11.5px; color: var(--fg-3); padding-top: 2px; font-variant-numeric: tabular-nums; }
 
@@ -1826,7 +1835,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .mp-row:hover .mp-edit-btn, .mp-row.editing .mp-edit-btn { display: inline-flex; }
 .mp-row:hover .mp-meta, .mp-row.editing .mp-meta { display: none; }
 .mp-row.editing { background: var(--hover); }
-.mp-edit-backdrop { position: fixed; inset: 0; z-index: 59; }
+.mp-edit-backdrop { position: fixed; inset: 0; z-index: 59; pointer-events: none; }
 .menu.mp-edit { position: fixed; z-index: 60; min-width: 190px; animation: menu-in var(--t-1) var(--ease); }
 .mp-edit .menu-item { height: 28px; }
 .mp-edit .menu-item .check { margin-left: auto; }

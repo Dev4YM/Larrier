@@ -10,8 +10,7 @@ All systems: Rust 1.85 or newer (`rustup` recommended) and Git.
 
 | System | Also needs |
 |---|---|
-| Windows 10 / 11 | The MSVC build tools ("Desktop development with C++") with the C++ CMake tools, which bring CMake and Ninja (the browser engine's bindings are built with them; `scripts
-inja.ps1` finds Visual Studio's Ninja). WebView2 is part of Windows. |
+| Windows 10 / 11 | The MSVC build tools ("Desktop development with C++") with the C++ CMake tools, which bring CMake and Ninja (the browser engine's bindings are built with them; `scripts/ninja.ps1` finds Visual Studio's Ninja). WebView2 is part of Windows. |
 | macOS 11+ | The Xcode command line tools: `xcode-select --install`. |
 | Linux | A C toolchain, `pkg-config` and the WebKitGTK 4.1 / GTK 3 development packages (below). |
 
@@ -52,6 +51,10 @@ cargo run -p larrier-app
 cargo test --workspace
 cargo build --release -p larrier-app
 ```
+
+On Windows the scripts put Visual Studio's Ninja on `PATH` themselves; before
+running Cargo directly in a shell without Ninja, dot-source
+`. ./scripts/ninja.ps1` once.
 
 ## Packages
 

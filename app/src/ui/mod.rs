@@ -469,8 +469,11 @@ pub fn Root() -> Element {
                 const cap = parseFloat(getComputedStyle(m).getPropertyValue('--menu-max')) || 440;
                 if (m.classList.contains('flip-up')) {
                   // Grows upward from where it was anchored, and shrinks back
-                  // when its content does: measured at its own height.
-                  const end = r.bottom;
+                  // when its content does: measured at its own height. Its
+                  // bottom is where it's anchored, not where its opening
+                  // animation has it for now (4px lower: that cut its padding).
+                  const anchored = parseFloat(m.style.bottom);
+                  const end = m.style.bottom && m.style.bottom !== 'auto' && Number.isFinite(anchored) ? innerHeight - anchored : r.bottom;
                   const was = m.style.top;
                   m.style.top = 'auto';
                   const own = m.scrollHeight;

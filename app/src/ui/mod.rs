@@ -17,6 +17,7 @@ pub mod menubar;
 mod agent_models;
 mod models;
 mod overlays;
+mod emoji;
 pub mod projects;
 mod profile;
 mod request;
@@ -1838,7 +1839,7 @@ pub fn place_js(id: &str, _prefer_up: bool, align_right: bool) -> String {
   const cap = parseFloat(getComputedStyle(m).getPropertyValue('--menu-max')) || 440;
   m.style.position = 'fixed'; m.style.bottom = 'auto'; m.style.right = 'auto'; m.style.maxHeight = 'none';
   m.style.maxWidth = (vw - pad * 2) + 'px';
-  if (m.classList.contains('select-menu')) m.style.minWidth = Math.min(a.width, vw - pad * 2) + 'px';
+  if (m.classList.contains('select-menu') || m.classList.contains('center')) m.style.minWidth = Math.min(a.width, vw - pad * 2) + 'px';
   const mw = Math.min(m.offsetWidth, vw - pad * 2), mh = Math.min(m.scrollHeight, cap);
   const below = vh - a.bottom - pad - gap, above = a.top - pad - gap;
   const need = Math.min(mh, 260);
@@ -1848,7 +1849,7 @@ pub fn place_js(id: &str, _prefer_up: bool, align_right: bool) -> String {
   const room = Math.max(120, up ? above : below);
   const h = Math.min(mh, room);
   const top = up ? Math.max(pad, a.top - gap - h) : Math.min(a.bottom + gap, vh - pad - h);
-  let left = {align_right} ? a.right - mw : a.left;
+  let left = m.classList.contains('center') ? a.left + (a.width - mw) / 2 : {align_right} ? a.right - mw : a.left;
   left = Math.max(pad, Math.min(left, vw - mw - pad));
   m.style.left = left + 'px'; m.style.maxHeight = Math.min(cap, room) + 'px';
   if (up) {{ m.style.top = 'auto'; m.style.bottom = (vh - (a.top - gap)) + 'px'; }} else {{ m.style.top = top + 'px'; }}

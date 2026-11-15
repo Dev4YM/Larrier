@@ -25,6 +25,11 @@ pub struct Config {
     pub providers: Vec<Provider>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
+    /// Home, the project of chats without a folder: its name, look,
+    /// agents and where its new chats run, as a project with no folders
+    /// (see [`Config::home_project`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_project: Option<Workspace>,
     #[serde(default)]
     pub custom_agents: Vec<CustomAgent>,
     #[serde(default)]
@@ -76,6 +81,7 @@ impl Default for Config {
             accounts: Vec::new(),
             providers: Vec::new(),
             workspaces: Vec::new(),
+            home_project: None,
             custom_agents: Vec::new(),
             automations: Vec::new(),
             profile: Profile::default(),
@@ -221,6 +227,16 @@ impl Config {
         project_in(&self.workspaces, path)
     }
 
+    /// Home as a project: as the user set it up, else named Home.
+    pub fn home_project(&self) -> Workspace {
+        self.home_project.clone().unwrap_or_else(|| {
+            let mut w = Workspace::new("");
+            w.id = HOME_PROJECT.to_string();
+            w.name = "Home".to_string();
+            w
+        })
+    }
+
     pub fn add_workspace(&mut self, path: &str) -> Workspace {
         if let Some(w) = self.workspace_by_path(path) {
             return w.clone();
@@ -234,6 +250,9 @@ impl Config {
         self.custom_agents.iter().find(|c| c.id == id)
     }
 }
+
+/// Home's id among projects (see [`Config::home_project`]).
+pub const HOME_PROJECT: &str = "home";
 
 /// The project among `projects` that a folder belongs to (see
 /// [`Config::project_for`]).

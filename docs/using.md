@@ -98,8 +98,9 @@ onto the chat area:
   its corrections (it's selected for you), or Add to Dictionary.
 - Below it: the branch, where the chat runs (this PC, in a worktree or the
   checkout itself), the agent's mode, and two rings for plan usage and
-  context; hover them for the breakdown. What the context is made of is checked after each turn
-  and kept with the chat.
+  context; hover them for the breakdown. What a Claude Code chat's context is
+  made of is checked when you open the context ring (Claude Code counts it,
+  which doesn't use your plan) and kept with the chat.
 
 ## The side panel
 

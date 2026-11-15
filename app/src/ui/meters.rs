@@ -263,8 +263,11 @@ pub fn ContextRing(session_id: String, agent: AgentKind, context: Option<(u64, O
     let is_open = open();
     let claude = agent == AgentKind::ClaudeCode;
     let sid = session_id.clone();
-    // What it's made of, kept from before; asked again after each turn (and
-    // when the panel opens), so it's always there and up to date.
+    // What it's made of, kept from before; asked again only while the panel
+    // is open and the chat isn't working (here or in its own app). Asking
+    // starts a Claude Code of its own on the whole session and has it count
+    // every part (about 34 token-counting requests), so it isn't done after
+    // every turn or for every chat shown.
     use_hook({
         let sid = sid.clone();
         move || {
@@ -275,9 +278,9 @@ pub fn ContextRing(session_id: String, agent: AgentKind, context: Option<(u64, O
             }
         }
     });
-    let running = app.is_running(&session_id);
-    use_effect(use_reactive!(|is_open, messages, running| {
-        if claude && (is_open || !running) && messages > 0 {
+    let busy = app.is_active(&session_id);
+    use_effect(use_reactive!(|is_open, messages, busy| {
+        if claude && is_open && !busy && messages > 0 {
             ask(app, sid.clone(), messages);
         }
     }));

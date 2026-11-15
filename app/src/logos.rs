@@ -51,6 +51,7 @@ fn agent_logo_id(kind: &AgentKind) -> Option<&'static str> {
         AgentKind::Kimi => "kimi",
         AgentKind::Droid => "droid",
         AgentKind::Aider => "aider",
+        AgentKind::Grok => "grok",
         AgentKind::Chat => "larrier",
         AgentKind::ChatGpt => "openai",
         AgentKind::ClaudeAi => "claude",

@@ -73,6 +73,8 @@ pub fn of(kind: &AgentKind) -> Option<Versions> {
         ),
         // Its installer sets up its own environment; update it from its site.
         A::Aider => (Source::PyPi("aider-chat"), None),
+        // Published on npm as the ACP registry lists it; `grok update` updates it.
+        A::Grok => (Source::Npm("@xai-official/grok"), Some(Update::Itself(&["update"]))),
         _ => return None,
     };
     Some(Versions { source, update })

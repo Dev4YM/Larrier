@@ -23,6 +23,8 @@ pub enum AgentKind {
     Kimi,
     Droid,
     Aider,
+    /// xAI's Grok Build.
+    Grok,
     /// Larrier's built-in chat over a model provider API.
     Chat,
     /// Imported ChatGPT conversations.
@@ -49,6 +51,7 @@ impl AgentKind {
         AgentKind::Kimi,
         AgentKind::Droid,
         AgentKind::Aider,
+        AgentKind::Grok,
         AgentKind::Chat,
         AgentKind::ChatGpt,
         AgentKind::ClaudeAi,
@@ -77,6 +80,7 @@ impl AgentKind {
             AgentKind::Kimi => "kimi",
             AgentKind::Droid => "droid",
             AgentKind::Aider => "aider",
+            AgentKind::Grok => "grok",
             AgentKind::Chat => "chat",
             AgentKind::ChatGpt => "chatgpt",
             AgentKind::ClaudeAi => "claude-ai",
@@ -99,6 +103,7 @@ impl AgentKind {
                 "copilot-cli" | "github-copilot" => AgentKind::Copilot,
                 "qwen-code" => AgentKind::Qwen,
                 "factory" | "factory-droid" => AgentKind::Droid,
+                "grok-build" | "grok-cli" => AgentKind::Grok,
                 other => AgentKind::Custom(other.to_string()),
             })
     }
@@ -482,7 +487,7 @@ pub fn runnable() -> impl Iterator<Item = &'static AgentSpec> {
     CATALOG.iter().filter(|s| s.can_run)
 }
 
-static CATALOG: [AgentSpec; 17] = [
+static CATALOG: [AgentSpec; 18] = [
     AgentSpec {
         kind: AgentKind::ClaudeCode,
         name: "Claude Code",
@@ -807,6 +812,33 @@ static CATALOG: [AgentSpec; 17] = [
         can_import: true,
         can_export_native: false,
         session_location: "<repo>/.aider.chat.history.md",
+    },
+    AgentSpec {
+        kind: AgentKind::Grok,
+        name: "Grok Build",
+        vendor: "xAI",
+        tagline: "xAI's coding agent CLI",
+        binaries: &["grok"],
+        install: &[
+            ("macOS / Linux", "curl -fsSL https://x.ai/cli/install.sh | bash"),
+            ("Windows", "irm https://x.ai/cli/install.ps1 | iex"),
+        ],
+        homepage: "https://docs.x.ai/build/overview",
+        color: "#0a0a0a",
+        glyph: "G",
+        // Its headless mode can't take a conversation on stdin; xAI's
+        // embedding path is its built-in ACP server.
+        protocol: Protocol::Acp,
+        acp_command: Some(&["grok", "agent", "stdio"]),
+        models: &["default"],
+        mode_groups: &[],
+        key_env: &["XAI_API_KEY"],
+        home_env: None,
+        login_command: Some("grok login"),
+        can_run: true,
+        can_import: false,
+        can_export_native: false,
+        session_location: "~/.grok",
     },
     AgentSpec {
         kind: AgentKind::Chat,

@@ -364,6 +364,10 @@ pub struct Draft {
     pub run_as: Option<String>,
     pub workspace: Option<String>,
     pub worktree: bool,
+    /// With `worktree`: run in this worktree that's already there instead
+    /// of a new one.
+    #[serde(default)]
+    pub existing_worktree: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -446,6 +450,7 @@ impl App {
             run_as: None,
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
             worktree: cfg.settings.use_worktrees,
+            existing_worktree: None,
         };
         // A message left on the new agent screen comes back with its picks.
         let draft = crate::keep::load().unwrap_or(draft);
@@ -1754,7 +1759,12 @@ impl App {
         if d.worktree {
             if let Some(w) = &ws {
                 let repo = PathBuf::from(&w.path);
-                if git::is_repo(&repo) {
+                // A worktree that's already there: the chat runs in it.
+                let existing = d.existing_worktree.as_ref().and_then(|p| git::worktrees(&repo).into_iter().find(|t| &t.path == p));
+                if let Some(t) = existing {
+                    let branch = t.name();
+                    s.environment = Environment::Worktree { path: t.path, branch, base: w.branch.clone() };
+                } else if git::is_repo(&repo) {
                     let short = &s.id[s.id.len() - 6..];
                     let branch = format!("larrier/agent-{short}");
                     let base_dir = self
@@ -1958,10 +1968,12 @@ impl App {
 
     pub fn delete(self, id: &str) {
         self.stop(id);
-        // Clean up a worktree we created.
+        // Clean up a worktree we created (one that was there before stays).
         if let Some(s) = self.peek_session(id, |s| s.clone()).or_else(|| store().load(id).ok()) {
-            if let (Environment::Worktree { path, .. }, Some(ws)) = (&s.environment, &s.workspace) {
-                let _ = git::remove_worktree(&PathBuf::from(&ws.path), &PathBuf::from(path));
+            if let (Environment::Worktree { path, branch, .. }, Some(ws)) = (&s.environment, &s.workspace) {
+                if branch.starts_with("larrier/") {
+                    let _ = git::remove_worktree(&PathBuf::from(&ws.path), &PathBuf::from(path));
+                }
             }
         }
         crate::keep::forget(id);

@@ -257,7 +257,7 @@ fn SourceControl() -> Element {
         div { class: "set-group-title", "Worktrees" }
         div { class: "set-card",
             Row { title: "Use Worktrees by Default".to_string(), desc: Some("Start each new agent in its own git worktree so parallel agents never collide.".to_string()),
-                Toggle { on: s.use_worktrees, onchange: move |v| { app.update_config(|c| c.settings.use_worktrees = v); app.draft.write().worktree = v; } }
+                Toggle { on: s.use_worktrees, onchange: move |v| { app.update_config(|c| c.settings.use_worktrees = v); let mut d = app.draft.write(); d.worktree = v; d.existing_worktree = None; } }
             }
             Row { title: "Worktrees Folder".to_string(), desc: Some(dir.clone()),
                 button { class: "ghost-btn",

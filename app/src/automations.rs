@@ -155,6 +155,7 @@ fn launch(mut app: App, a: &Automation) -> Option<String> {
         d.account_id = None;
         d.workspace = a.workspace.clone();
         d.worktree = a.worktree;
+        d.existing_worktree = None;
     }
     app.send(None, a.prompt.clone(), Vec::new());
 

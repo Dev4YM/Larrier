@@ -1977,10 +1977,13 @@ pub fn MenuItem(
     #[props(default = false)] disabled: bool,
     onclick: EventHandler<()>,
     #[props(default)] lead: Option<Element>,
+    /// Its tooltip (a project's path, what an option does).
+    #[props(default)]
+    title: Option<String>,
 ) -> Element {
     let cls = format!("menu-item{}{}{}", if danger { " danger" } else { "" }, if disabled { " disabled" } else { "" }, if checked { " checked" } else { "" });
     rsx! {
-        button { class: "{cls}",
+        button { class: "{cls}", title: title.unwrap_or_default(),
             onclick: move |e| {
                 e.stop_propagation();
                 if !disabled {

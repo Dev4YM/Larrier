@@ -242,6 +242,52 @@ pub fn create_worktree(repo: &Path, dir: &Path, branch: &str) -> Result<PathBuf>
     Ok(dir.to_path_buf())
 }
 
+/// A linked worktree of a repository (not the main checkout).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Worktree {
+    pub path: String,
+    /// Its branch; `None` when its HEAD is detached.
+    pub branch: Option<String>,
+}
+
+impl Worktree {
+    /// Its branch, or its folder's name when it has none.
+    pub fn name(&self) -> String {
+        self.branch.clone().unwrap_or_else(|| Path::new(&self.path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| self.path.clone()))
+    }
+}
+
+/// The repository's linked worktrees that are still there, without the main
+/// checkout.
+pub fn worktrees(repo: &Path) -> Vec<Worktree> {
+    let mut c = git(repo);
+    c.args(["worktree", "list", "--porcelain"]);
+    run(c).map(|out| parse_worktrees(&out)).unwrap_or_default()
+}
+
+fn parse_worktrees(out: &str) -> Vec<Worktree> {
+    let mut all = Vec::new();
+    for block in out.split("\n\n") {
+        let mut path = None;
+        let mut branch = None;
+        let mut skip = false;
+        for line in block.lines() {
+            if let Some(p) = line.strip_prefix("worktree ") {
+                path = Some(p.trim().to_string());
+            } else if let Some(b) = line.strip_prefix("branch ") {
+                branch = Some(b.trim().trim_start_matches("refs/heads/").to_string());
+            } else if line == "bare" || line.starts_with("prunable") {
+                skip = true;
+            }
+        }
+        if let Some(path) = path {
+            all.push((Worktree { path, branch }, skip));
+        }
+    }
+    // The first is the main checkout.
+    all.into_iter().skip(1).filter(|(_, skip)| !skip).map(|(w, _)| w).collect()
+}
+
 pub fn remove_worktree(repo: &Path, dir: &Path) -> Result<()> {
     let mut c = git(repo);
     c.args(["worktree", "remove", "--force"]);
@@ -326,5 +372,21 @@ pub fn branch_slug(title: &str) -> String {
         "agent".into()
     } else {
         s.trim_end_matches('-').to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worktrees_leave_out_the_main_checkout() {
+        let out = "worktree D:/repo\nHEAD 1111\nbranch refs/heads/main\n\nworktree D:/wt/feature\nHEAD 2222\nbranch refs/heads/feature/login\n\nworktree D:/wt/detached\nHEAD 3333\ndetached\n\nworktree D:/wt/gone\nHEAD 4444\nbranch refs/heads/old\nprunable gitdir file points to non-existent location\n";
+        let w = parse_worktrees(out);
+        assert_eq!(w.len(), 2);
+        assert_eq!(w[0].path, "D:/wt/feature");
+        assert_eq!(w[0].name(), "feature/login");
+        assert_eq!(w[1].branch, None);
+        assert_eq!(w[1].name(), "detached");
     }
 }

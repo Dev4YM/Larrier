@@ -602,6 +602,8 @@ pub fn Root() -> Element {
                 const chained = !row && performance.now() < warm;
                 const show = () => {
                   if (target !== el || !el.isConnected) return;
+                  // A menu is open: only what's in it gets a tooltip.
+                  if (document.querySelector('.menu-backdrop') && !el.closest('.menu')) return;
                   const root = document.querySelector('.larrier-root');
                   tip.classList.toggle('dark', !!root && root.getAttribute('data-theme') === 'dark');
                   tip.classList.toggle('still', !!root && root.classList.contains('no-motion'));
@@ -615,6 +617,7 @@ pub fn Root() -> Element {
                 if (chained) show(); else timer = setTimeout(show, row ? 900 : 500);
               }, true);
               document.addEventListener('mousedown', hide, true);
+              document.addEventListener('contextmenu', hide, true);
               document.addEventListener('keydown', hide, true);
               document.addEventListener('scroll', hide, true);
               window.addEventListener('blur', hide);
@@ -1813,7 +1816,10 @@ pub fn Dropdown(
     }
     let cls = format!("menu {} {} {}", if up { "up" } else { "down" }, if right { "right" } else { "" }, class.unwrap_or_default());
     rsx! {
-        div { class: "menu-backdrop", onclick: move |_| open.set(false), oncontextmenu: move |e| { e.prevent_default(); open.set(false); } }
+        // Its close handler, clicked by the window's script (see the
+        // pointerdown handler): the click stops here, so a row the menu sits
+        // in (a project's "…") isn't clicked too.
+        div { class: "menu-backdrop", onclick: move |e| { e.stop_propagation(); open.set(false); }, oncontextmenu: move |e| { e.prevent_default(); e.stop_propagation(); open.set(false); } }
         div { id: "{id}", class: "{cls}", style: "visibility: hidden;", role: "menu", onclick: move |e| e.stop_propagation(), {children} }
     }
 }

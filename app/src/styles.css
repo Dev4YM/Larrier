@@ -482,6 +482,7 @@ svg { flex-shrink: 0; display: block; }
 .code-status { font-size: var(--ui-2xs); font-weight: 600; width: 14px; text-align: center; }
 .code-status.M { color: var(--amber); } .code-status.A, .code-status.Q { color: var(--green); } .code-status.D, .code-status.U { color: var(--red); } .code-status.R { color: var(--blue); }
 .diff-body { font-family: var(--mono); font-size: var(--ui-xs); line-height: 19px; overflow-x: auto; padding: 2px 0 6px; user-select: text; }
+.diff-lines { width: max-content; min-width: 100%; }
 .diff-line { display: flex; white-space: pre; min-width: max-content; }
 .diff-line .ln { width: 48px; flex-shrink: 0; text-align: right; padding-right: 14px; color: var(--fg-4); user-select: none; }
 .diff-line .tx { padding-right: 16px; }

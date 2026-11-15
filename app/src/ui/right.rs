@@ -620,10 +620,14 @@ pub fn DiffView(unified: String) -> Element {
     rows.truncate(3000);
     rsx! {
         div { class: "diff-body",
-            for (i, (kind, ln, text)) in rows.into_iter().enumerate() {
-                div { key: "{i}", class: "diff-line {kind}",
-                    span { class: "ln", {ln.map(|n| n.to_string()).unwrap_or_default()} }
-                    span { class: "tx", "{text}" }
+            // As wide as the longest line: every line's color reaches the end
+            // when the diff is scrolled sideways.
+            div { class: "diff-lines",
+                for (i, (kind, ln, text)) in rows.into_iter().enumerate() {
+                    div { key: "{i}", class: "diff-line {kind}",
+                        span { class: "ln", {ln.map(|n| n.to_string()).unwrap_or_default()} }
+                        span { class: "tx", "{text}" }
+                    }
                 }
             }
             if truncated {

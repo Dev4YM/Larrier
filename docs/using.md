@@ -12,8 +12,17 @@ bar and the traffic lights sit over Larrier's top bar.
 **Sidebar.**
 
 - New Agent, Automations and Customize at the top.
-- Pinned chats, then every project with its chats nested under it. Chats
-  without a folder live in **Home**.
+- Pinned chats, then every project with its chats nested under it (pinned
+  projects first). Chats without a folder live in **Home**. Hover a chat to
+  pin it; a project's **…** has New chat, Pin project, Edit project and
+  Open folder.
+- **Projects** are yours to make (the folder icon beside Projects, or New
+  project in the composer's project menu): a name, an icon and a color, a
+  main folder and more folders if you like (Claude Code and Codex can work
+  in those too), the agents it works with (the first starts its new chats)
+  and whether its new chats run in the folder or a new worktree. A folder
+  your chats ran in shows as a project on its own; edit it to give it all
+  of this.
 - The filter menu groups by status, project or agent, sorts by activity,
   creation or name, and can show archived chats. Search opens from the
   magnifier icon.

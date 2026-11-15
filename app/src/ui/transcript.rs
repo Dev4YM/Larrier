@@ -1800,7 +1800,7 @@ fn CommandCard(tool: ToolCall) -> Element {
                         span { class: if running { "desc shimmer" } else { "desc" }, "{d}" }
                         span { class: "meta", "{programs}" }
                     },
-                    None => rsx! { span { class: "desc mono", style: "font-size: 11px;", "{larrier_core::lsf::first_line(&command)}" } },
+                    None => rsx! { span { class: "desc mono", style: "font-size: var(--ui-xs);", "{larrier_core::lsf::first_line(&command)}" } },
                 }
                 if let Some(label) = skipped { span { class: "skip-tag", "{label}" } }
             }

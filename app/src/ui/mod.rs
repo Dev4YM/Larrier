@@ -1511,7 +1511,7 @@ fn InterruptedBanner() -> Element {
     let n = ids.len();
     let ids2 = ids.clone();
     rsx! {
-        div { style: "display: flex; align-items: center; gap: 10px; margin: 8px 12px 0; padding: 8px 12px; border-radius: var(--r-lg); background: var(--amber-bg); color: var(--fg); font-size: 12.5px; animation: rise-in var(--t-2) ease-out;",
+        div { style: "display: flex; align-items: center; gap: 10px; margin: 8px 12px 0; padding: 8px 12px; border-radius: var(--r-lg); background: var(--amber-bg); color: var(--fg); font-size: var(--ui-sm); animation: rise-in var(--t-2) ease-out;",
             Icon { i: I::Alert, size: 14 }
             span { style: "flex: 1;", if n == 1 { "1 agent was interrupted when Larrier closed." } else { "{n} agents were interrupted when Larrier closed." } }
             if n == 1 {

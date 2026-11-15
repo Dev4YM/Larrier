@@ -13,24 +13,24 @@ const CSS: &str = r#"
 .setup-head { display: flex; align-items: center; gap: 14px; }
 .setup-mark { width: 52px; height: 52px; flex: none; }
 .setup-mark svg { width: 100%; height: 100%; }
-.setup h1 { font-size: 20px; line-height: 26px; font-weight: 600; margin: 0; }
-.setup .sub { color: var(--fg-3); font-size: 12.5px; }
-.setup-note { font-size: 12.5px; line-height: 18px; color: var(--fg-2); background: var(--chip); border-radius: var(--r-md); padding: 8px 10px; }
+.setup h1 { font-size: var(--ui-xl); line-height: 26px; font-weight: 600; margin: 0; }
+.setup .sub { color: var(--fg-3); font-size: var(--ui-sm); }
+.setup-note { font-size: var(--ui-sm); line-height: 18px; color: var(--fg-2); background: var(--chip); border-radius: var(--r-md); padding: 8px 10px; }
 .setup-opts { display: flex; flex-direction: column; gap: 8px; }
 .setup-opt { display: flex; gap: 12px; align-items: flex-start; text-align: left; width: 100%; padding: 12px 14px; border-radius: var(--r-lg);
   border: 1px solid var(--border); background: var(--card); cursor: pointer; transition: border-color var(--t-2), background var(--t-2); }
 .setup-opt:hover { border-color: var(--border-2); }
 .setup-opt.on { border-color: var(--accent-c); background: color-mix(in srgb, var(--accent-c) 6%, var(--card)); }
 .setup-opt .ic { display: inline-flex; color: var(--fg-2); margin-top: 1px; }
-.setup-opt .t { font-weight: 600; font-size: 13.5px; }
-.setup-opt .d { font-size: 12.5px; line-height: 18px; color: var(--fg-3); margin-top: 2px; }
-.setup-opt .path { font-family: var(--mono); font-size: 11.5px; color: var(--fg-3); margin-top: 4px; word-break: break-all; }
-.setup-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--fg-2); cursor: pointer; user-select: none; }
+.setup-opt .t { font-weight: 600; font-size: var(--ui-md); }
+.setup-opt .d { font-size: var(--ui-sm); line-height: 18px; color: var(--fg-3); margin-top: 2px; }
+.setup-opt .path { font-family: var(--mono); font-size: var(--ui-xs); color: var(--fg-3); margin-top: 4px; word-break: break-all; }
+.setup-check { display: flex; align-items: center; gap: 8px; font-size: var(--ui-sm); color: var(--fg-2); cursor: pointer; user-select: none; }
 .setup-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .setup-actions .grow { flex: 1; }
-.setup-actions button { height: 32px; padding: 0 14px; font-size: 13px; }
-.setup-error { color: var(--red); font-size: 12.5px; line-height: 18px; white-space: pre-wrap; }
-.setup-done { display: flex; align-items: center; gap: 8px; color: var(--green); font-size: 13px; }
+.setup-actions button { height: 32px; padding: 0 14px; font-size: var(--ui-md); }
+.setup-error { color: var(--red); font-size: var(--ui-sm); line-height: 18px; white-space: pre-wrap; }
+.setup-done { display: flex; align-items: center; gap: 8px; color: var(--green); font-size: var(--ui-md); }
 "#;
 
 /// Close the installer / uninstaller window.

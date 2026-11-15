@@ -487,7 +487,7 @@ const CSS: &str = r#"
 .term-item.agent .term-name { font-family: var(--mono); font-size: 12px; }
 .aterm { position: absolute; inset: 0; display: flex; flex-direction: column; }
 .aterm-banner { display: flex; align-items: center; gap: 8px; margin: 8px 10px 0; padding: 6px 10px; border-radius: var(--r-md); background: var(--chip);
-  color: var(--fg-2); font-size: 12px; flex-shrink: 0; min-width: 0; }
+  color: var(--fg-2); font-size: var(--ui-sm); flex-shrink: 0; min-width: 0; }
 .aterm-banner > span:not(.tk-ic) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aterm-banner .tk-ic { display: inline-flex; color: var(--fg-3); }
 .aterm-scroll { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 12px 14px; }

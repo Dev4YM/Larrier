@@ -458,7 +458,7 @@ fn WhatsNewModal(version: String, updated: bool) -> Element {
     rsx! {
         div { class: "modal-head",
             if updated { "Larrier is now {version}" } else { "What's new in Larrier {version}" }
-            if !date.is_empty() { span { class: "faint", style: "font-weight: 400; margin-left: 8px; font-size: 12px;", "{date}" } }
+            if !date.is_empty() { span { class: "faint", style: "font-weight: 400; margin-left: 8px; font-size: var(--ui-sm);", "{date}" } }
         }
         div { class: "modal-body whats-new md", dangerous_inner_html: "{html}" }
         div { class: "modal-foot",

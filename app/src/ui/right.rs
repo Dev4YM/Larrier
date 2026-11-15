@@ -143,7 +143,7 @@ pub fn RightPane(id: String) -> Element {
                                         let (i, label, _) = tab_meta(t);
                                         rsx! {
                                             button { key: "{label}", class: "tile",
-                                                style: "height: 120px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-2); font-size: 13px;",
+                                                style: "height: 120px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-2); font-size: var(--ui-md);",
                                                 onclick: move |_| app.ui.write().open_panel(t, false),
                                                 Icon { i, size: 18, stroke: 1.5 }
                                                 "{label}"
@@ -491,8 +491,8 @@ fn GitFile(cwd: String, file: FileStatus, start_open: bool, on_change: EventHand
                     }
                 }
                 div { class: "actions",
-                    span { class: "add", style: "font-size: 11px;", "+{file.added}" }
-                    span { class: "del", style: "font-size: 11px;", "-{file.removed}" }
+                    span { class: "add", style: "font-size: var(--ui-xs);", "+{file.added}" }
+                    span { class: "del", style: "font-size: var(--ui-xs);", "-{file.removed}" }
                     button { class: "icon-btn sm", title: "Discard changes",
                         onclick: move |e| {
                             e.stop_propagation();
@@ -539,8 +539,8 @@ fn AgentDiff(d: FileDiff) -> Element {
                     }
                 }
                 div { class: "actions",
-                    span { class: "add", style: "font-size: 11px;", "+{d.added}" }
-                    span { class: "del", style: "font-size: 11px;", "-{d.removed}" }
+                    span { class: "add", style: "font-size: var(--ui-xs);", "+{d.added}" }
+                    span { class: "del", style: "font-size: var(--ui-xs);", "-{d.removed}" }
                 }
             }
             if open() {

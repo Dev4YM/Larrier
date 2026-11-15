@@ -782,10 +782,10 @@ fn TreeLevel(
 
 const CSS: &str = r#"
 .fv { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--pane); }
-.fv-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--fg-3); font-size: 12px; }
+.fv-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--fg-3); font-size: var(--ui-sm); }
 .fv-tabs { display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 8px; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; flex-shrink: 0; scrollbar-width: none; }
 .fv-tabs::-webkit-scrollbar { display: none; }
-.fv-tab { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; border-radius: var(--r-md); font-size: 13px; color: var(--fg-2); cursor: pointer; flex-shrink: 0; max-width: 220px; user-select: none; }
+.fv-tab { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; border-radius: var(--r-md); font-size: var(--ui-md); color: var(--fg-2); cursor: pointer; flex-shrink: 0; max-width: 220px; user-select: none; }
 .fv-tab:hover { background: var(--hover); color: var(--fg); }
 .fv-tab.on { background: var(--selected); color: var(--fg); }
 .fv-tab.preview .fv-tab-name { font-style: italic; }
@@ -800,14 +800,14 @@ const CSS: &str = r#"
 .fv-grow { flex: 1; }
 .fv-ic { display: inline-flex; color: var(--fg-3); }
 .fv-crumbs { display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; min-width: 0; }
-.fv-path { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; white-space: nowrap; font-size: 12.5px; color: var(--fg-3); padding-left: 4px; }
+.fv-path { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; white-space: nowrap; font-size: var(--ui-sm); color: var(--fg-3); padding-left: 4px; }
 .fv-crumb.last { color: var(--fg); }
 .fv-sep { display: inline-flex; color: var(--fg-4); }
 .fv-crumb-item { display: inline-flex; align-items: center; gap: 2px; }
-.fv-lang { font-size: 11px; color: var(--fg-3); padding: 0 8px; white-space: nowrap; }
+.fv-lang { font-size: var(--ui-xs); color: var(--fg-3); padding: 0 8px; white-space: nowrap; }
 .fv-body { flex: 1; min-height: 0; display: flex; }
 .fv-tree { width: 230px; flex-shrink: 0; overflow: auto; border-right: 1px solid var(--border); padding: 4px 0 12px; }
-.fv-node { height: 24px; display: flex; align-items: center; gap: 5px; padding-right: 8px; font-size: 12.5px; color: var(--fg-2); cursor: pointer; white-space: nowrap; user-select: none; }
+.fv-node { height: 24px; display: flex; align-items: center; gap: 5px; padding-right: 8px; font-size: var(--ui-sm); color: var(--fg-2); cursor: pointer; white-space: nowrap; user-select: none; }
 .fv-node:hover { background: var(--hover); color: var(--fg); }
 .fv-node.on { background: var(--selected); color: var(--fg); }
 .fv-chev { width: 12px; display: inline-flex; color: var(--fg-4); flex-shrink: 0; }
@@ -815,16 +815,16 @@ const CSS: &str = r#"
 .fv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .fv-quick { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card-2); display: flex; flex-direction: column; gap: 6px; max-height: 60%; }
 .fv-quick.centered { border: none; background: none; flex: 1; max-height: none; align-items: stretch; padding: 12vh 24px 24px; }
-.fv-quick-title { font-size: 15px; font-weight: 500; color: var(--fg); margin-bottom: 4px; text-align: center; }
+.fv-quick-title { font-size: var(--ui-lg); font-weight: 500; color: var(--fg); margin-bottom: 4px; text-align: center; }
 .fv-quick-input { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); color: var(--fg-3); }
 .fv-quick-input:focus-within { border-color: var(--fg-4); }
-.fv-quick-input input { flex: 1; border: none; outline: none; background: transparent; font-size: 13px; color: var(--fg); min-width: 0; }
+.fv-quick-input input { flex: 1; border: none; outline: none; background: transparent; font-size: var(--ui-md); color: var(--fg); min-width: 0; }
 .fv-results { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; min-height: 0; }
-.fv-result { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--r-md); font-size: 13px; cursor: pointer; min-width: 0; }
+.fv-result { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--r-md); font-size: var(--ui-md); cursor: pointer; min-width: 0; }
 .fv-result.on { background: var(--hover); }
 .fv-r-name { color: var(--fg); white-space: nowrap; }
-.fv-r-dir { color: var(--fg-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.fv-note { padding: 18px; color: var(--fg-3); font-size: 12px; text-align: center; }
+.fv-r-dir { color: var(--fg-3); font-size: var(--ui-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fv-note { padding: 18px; color: var(--fg-3); font-size: var(--ui-sm); text-align: center; }
 .fv-image { flex: 1; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 8px; background-image: linear-gradient(45deg, var(--hover) 25%, transparent 25%), linear-gradient(-45deg, var(--hover) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--hover) 75%), linear-gradient(-45deg, transparent 75%, var(--hover) 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
 .fv-image img { max-width: 100%; max-height: 80%; object-fit: contain; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
 .fv-editor { flex: 1; min-height: 0; min-width: 0; position: relative; overflow: hidden; }

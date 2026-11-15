@@ -333,7 +333,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                         }
                     }
                     if repos.is_empty() {
-                        div { style: "padding: 8px 12px; color: var(--fg-3); font-size: 12px; line-height: 18px;",
+                        div { style: "padding: 8px 12px; color: var(--fg-3); font-size: var(--ui-sm); line-height: 18px;",
                             if query.is_empty() { "Add a folder, or import your agent sessions from Settings → Sessions." } else { "No matching agents" }
                         }
                     }

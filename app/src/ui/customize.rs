@@ -20,19 +20,19 @@ const CSS: &str = r#"
 .cz-search { display: flex; gap: 10px; align-items: center; }
 .cz-search .box { flex: 1; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--card); color: var(--fg-3); }
 .cz-search .box:focus-within { border-color: var(--border-2); }
-.cz-search input { flex: 1; border: none; outline: none; background: transparent; font-size: 13px; color: var(--fg); min-width: 0; }
-.cz-dark { height: 36px; padding: 0 16px; border-radius: var(--r-sm); background: var(--fg); color: var(--pane, var(--bg)); font-size: 13px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cz-search input { flex: 1; border: none; outline: none; background: transparent; font-size: var(--ui-md); color: var(--fg); min-width: 0; }
+.cz-dark { height: 36px; padding: 0 16px; border-radius: var(--r-sm); background: var(--fg); color: var(--pane, var(--bg)); font-size: var(--ui-md); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .cz-dark:hover { opacity: .9; }
 .cz-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.cz-pill { height: 32px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--card); font-size: 13px; color: var(--fg); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.cz-pill { height: 32px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--card); font-size: var(--ui-md); color: var(--fg); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .cz-pill:hover { border-color: var(--border-2); }
 .cz-pill.on { background: var(--selected); border-color: var(--border-2); }
-.cz-pill .n { color: var(--fg-3); font-size: 12px; }
+.cz-pill .n { color: var(--fg-3); font-size: var(--ui-sm); }
 .cz-sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
 .cz-scope { position: relative; }
 .cz-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; min-width: 220px; max-height: 360px; overflow-y: auto; background: var(--card-2, var(--card)); border-radius: var(--r-md); box-shadow: var(--shadow-pop, 0 8px 24px rgba(0,0,0,.15)); padding: 4px; }
-.cz-group-title { font-size: 14px; font-weight: 600; margin: 10px 2px 2px; display: flex; align-items: baseline; gap: 6px; }
-.cz-group-title .n { font-weight: 400; color: var(--fg-3); font-size: 13px; }
+.cz-group-title { font-size: var(--ui-md); font-weight: 600; margin: 10px 2px 2px; display: flex; align-items: baseline; gap: 6px; }
+.cz-group-title .n { font-weight: 400; color: var(--fg-3); font-size: var(--ui-md); }
 .cz-card { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card); overflow: hidden; }
 .cz-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; min-height: 58px; }
 .cz-row + .cz-row { border-top: 1px solid var(--border); }
@@ -44,18 +44,18 @@ const CSS: &str = r#"
 .cz-ic .st.err { background: var(--red); }
 .cz-ic .st.off, .cz-ic .st.unk { background: var(--fg-4); }
 .cz-body { flex: 1; min-width: 0; }
-.cz-l1 { display: flex; align-items: center; gap: 6px; font-size: 13.5px; min-width: 0; }
+.cz-l1 { display: flex; align-items: center; gap: 6px; font-size: var(--ui-md); min-width: 0; }
 .cz-l1 .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cz-badge { height: 20px; padding: 0 7px; border-radius: var(--r-sm); background: var(--chip, var(--hover)); color: var(--fg-2); font-size: 11.5px; display: inline-flex; align-items: center; flex-shrink: 0; }
-.cz-l2 { font-size: 12px; color: var(--fg-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cz-badge { height: 20px; padding: 0 7px; border-radius: var(--r-sm); background: var(--chip, var(--hover)); color: var(--fg-2); font-size: var(--ui-xs); display: inline-flex; align-items: center; flex-shrink: 0; }
+.cz-l2 { font-size: var(--ui-sm); color: var(--fg-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cz-l2.err { color: var(--red); }
 .cz-l2.auth { color: var(--amber); }
 .cz-agents { display: flex; gap: 4px; flex-shrink: 0; }
-.cz-act { font-size: 13px; color: var(--blue); padding: 4px 6px; border-radius: var(--r-md); flex-shrink: 0; }
+.cz-act { font-size: var(--ui-md); color: var(--blue); padding: 4px 6px; border-radius: var(--r-md); flex-shrink: 0; }
 .cz-act:hover { background: var(--hover); }
-.cz-more { font-size: 12.5px; color: var(--fg-3); display: inline-flex; align-items: center; gap: 4px; padding: 6px 2px; }
+.cz-more { font-size: var(--ui-sm); color: var(--fg-3); display: inline-flex; align-items: center; gap: 4px; padding: 6px 2px; }
 .cz-more:hover { color: var(--fg); }
-.cz-empty { padding: 40px 0; text-align: center; color: var(--fg-3); font-size: 13px; line-height: 20px; }
+.cz-empty { padding: 40px 0; text-align: center; color: var(--fg-3); font-size: var(--ui-md); line-height: 20px; }
 "#;
 
 fn kind_icon(k: ItemKind) -> I {

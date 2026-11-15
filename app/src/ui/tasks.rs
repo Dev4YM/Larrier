@@ -19,7 +19,7 @@ use crate::state::{use_app, App, RightTab, View};
 
 pub(crate) const CSS: &str = r#"
 .tk-sub { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 30px; padding: 0 8px; margin: 2px 0 6px;
-  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); font-size: 12px; color: var(--fg-2); text-align: left; cursor: pointer; }
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); font-size: var(--ui-sm); color: var(--fg-2); text-align: left; cursor: pointer; }
 .tk-sub:hover { background: var(--hover); color: var(--fg); }
 .tk-sub .tk-name { color: var(--fg); font-weight: 500; white-space: nowrap; flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .tk-sub .tk-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -31,7 +31,7 @@ pub(crate) const CSS: &str = r#"
 .tk-st.err { color: var(--red); }
 .tk-st.muted { color: var(--fg-3); }
 .tk-ic { display: inline-flex; color: var(--fg-3); flex-shrink: 0; }
-.tk-badge { font-size: 10px; line-height: 16px; padding: 0 5px; border-radius: var(--r-sm); background: var(--chip); color: var(--fg-2); flex-shrink: 0; }
+.tk-badge { font-size: var(--ui-2xs); line-height: 16px; padding: 0 5px; border-radius: var(--r-sm); background: var(--chip); color: var(--fg-2); flex-shrink: 0; }
 @media (max-width: 560px) {
   .tk-sub .tk-desc, .tk-sub .tk-badge { display: none; }
   .tk-sub .tk-name { flex: 1; max-width: none; }
@@ -41,25 +41,25 @@ pub(crate) const CSS: &str = r#"
 .tk-tx-top { flex-shrink: 0; padding: 10px 0 14px; border-bottom: 1px solid var(--border); }
 .tk-tx-wrap { max-width: var(--tw, 860px); margin: 0 auto; padding: 0 28px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .tk-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; margin-left: -8px; border-radius: var(--r-md);
-  color: var(--fg-3); font-size: 12.5px; max-width: 100%; min-width: 0; }
+  color: var(--fg-3); font-size: var(--ui-sm); max-width: 100%; min-width: 0; }
 .tk-back:hover { background: var(--hover); color: var(--fg); }
 .tk-back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tk-tx-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 15px; line-height: 22px; }
+.tk-tx-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ui-lg); line-height: 22px; }
 .tk-tx-title .tk-ic { color: var(--fg-2); }
 .tk-tx-title .tk-name { font-weight: 600; color: var(--fg); white-space: nowrap; }
 .tk-tx-title .tk-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); min-width: 0; }
 .tk-facts { display: flex; flex-wrap: wrap; gap: 6px; }
 .tk-fact { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--r-md); border: 1px solid var(--border);
-  background: var(--card); font-size: 12px; white-space: nowrap; max-width: 100%; min-width: 0; }
+  background: var(--card); font-size: var(--ui-sm); white-space: nowrap; max-width: 100%; min-width: 0; }
 .tk-fact .tk-ic { color: var(--fg-3); }
 .tk-fact .k { color: var(--fg-3); }
 .tk-fact .v { color: var(--fg); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
 .tk-tx-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .tk-tx-body .transcript-inner { padding-top: 18px; }
 .tk-user { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; margin: 0 0 14px;
-  font-size: 13px; line-height: 19px; white-space: pre-wrap; word-wrap: break-word; max-height: 240px; overflow: auto; }
-.tk-user .tk-role { display: block; font-size: 11.5px; color: var(--fg-3); margin-bottom: 4px; }
-.tk-empty { padding: 24px 4px; color: var(--fg-3); font-size: 12px; }
+  font-size: var(--ui-md); line-height: 19px; white-space: pre-wrap; word-wrap: break-word; max-height: 240px; overflow: auto; }
+.tk-user .tk-role { display: block; font-size: var(--ui-xs); color: var(--fg-3); margin-bottom: 4px; }
+.tk-empty { padding: 24px 4px; color: var(--fg-3); font-size: var(--ui-sm); }
 @media (max-width: 560px) {
   .tk-tx-wrap { padding: 0 14px; }
 }
@@ -74,36 +74,36 @@ pub(crate) const CSS: &str = r#"
   animation: tk-card-in var(--t-2) var(--ease); }
 @keyframes tk-card-in { from { opacity: 0; } }
 .app.no-motion .tk-card { animation: none; }
-.tk-card-head { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 8px; font-size: 12px; color: var(--fg-3); }
+.tk-card-head { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 8px; font-size: var(--ui-sm); color: var(--fg-3); }
 .tk-card-head .tk-ic { color: var(--fg-3); }
 .tk-card-head .ttl { color: var(--fg); font-weight: 500; }
 .tk-card-head .grow { flex: 1; }
 .tk-card-head .icon-btn { width: 22px; height: 22px; }
-.tk-stop-all { height: 20px; padding: 0 5px; border-radius: var(--r-sm); color: var(--fg-2); font-size: 12px; }
+.tk-stop-all { height: 20px; padding: 0 5px; border-radius: var(--r-sm); color: var(--fg-2); font-size: var(--ui-sm); }
 .tk-stop { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-sm); color: var(--fg-3); }
 .tk-stop:hover { background: var(--hover); color: var(--red); }
 .tk-stop-all:hover { background: var(--hover); color: var(--red); }
 .tk-card-list { max-height: min(220px, 36vh); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .tk-item { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--r-md);
-  font-size: 12px; line-height: 16px; color: var(--fg); cursor: pointer; min-width: 0; transition: background var(--t-1); }
+  font-size: var(--ui-sm); line-height: 16px; color: var(--fg); cursor: pointer; min-width: 0; transition: background var(--t-1); }
 .tk-item:hover { background: var(--hover); }
 .tk-item > .lead { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex: none; color: var(--fg-3); }
 .tk-item .ttl { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; max-width: 48%; }
 .tk-item .act { flex: 1; min-width: 0; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tk-item .when { color: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; min-width: 28px; text-align: right; }
+.tk-item .when { color: var(--fg-3); font-size: var(--ui-xs); font-variant-numeric: tabular-nums; flex: none; min-width: 28px; text-align: right; }
 .tk-item .go { display: inline-flex; flex: none; color: var(--fg-3); opacity: 0; transition: opacity var(--t-1); }
 .tk-item:hover .go { opacity: 1; }
-.tk-card.terms .tk-item .ttl { flex: 1; max-width: none; font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
+.tk-card.terms .tk-item .ttl { flex: 1; max-width: none; font-family: var(--mono); font-size: var(--ui-xs); font-weight: 400; }
 
 .tk-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 16px; display: flex; flex-direction: column; }
 .tk-panel-hint { max-width: 260px; color: var(--fg-3); }
 .tk-group { display: flex; flex-direction: column; }
 .tk-group-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; margin-top: 6px; border-radius: var(--r-md);
-  width: 100%; text-align: left; font-size: 12px; color: var(--fg-3); }
+  width: 100%; text-align: left; font-size: var(--ui-sm); color: var(--fg-3); }
 .tk-group-head:hover { background: var(--hover); color: var(--fg-2); }
 .tk-group-head .chev { display: inline-flex; transition: transform var(--t-2) ease; }
 .tk-group.closed .tk-group-head .chev { transform: rotate(-90deg); }
-.tk-group-head .n { font-variant-numeric: tabular-nums; padding: 0 6px; line-height: 17px; border-radius: var(--r-lg); background: var(--chip); color: var(--fg-2); font-size: 11px; }
+.tk-group-head .n { font-variant-numeric: tabular-nums; padding: 0 6px; line-height: 17px; border-radius: var(--r-lg); background: var(--chip); color: var(--fg-2); font-size: var(--ui-xs); }
 .tk-group-body { display: grid; grid-template-rows: 1fr; transition: opacity var(--t-2); }
 .tk-group.closed .tk-group-body { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
 .tk-group-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
@@ -114,13 +114,13 @@ pub(crate) const CSS: &str = r#"
 .tk-row > .tk-lead { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--fg-3); }
 .tk-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .tk-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; height: 19px; }
-.tk-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.tk-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-md); }
 .tk-row.term .tk-row-title { font-family: var(--mono); font-size: 12.5px; }
 .tk-row.done .tk-row-title { color: var(--fg-2); }
-.tk-row-when { color: var(--fg-3); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
+.tk-row-when { color: var(--fg-3); font-size: var(--ui-xs); white-space: nowrap; font-variant-numeric: tabular-nums; flex: none; }
 .tk-row:has(.tk-row-meta) { height: 66px; }
-.tk-row-meta { height: 15px; font-size: 11px; line-height: 15px; color: var(--fg-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tk-row-sub { height: 17px; font-size: 12px; line-height: 17px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk-row-meta { height: 15px; font-size: var(--ui-xs); line-height: 15px; color: var(--fg-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk-row-sub { height: 17px; font-size: var(--ui-sm); line-height: 17px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tk-row.term .tk-row-sub.out { font-family: var(--mono); font-size: 11.5px; }
 "#;
 

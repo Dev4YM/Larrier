@@ -1258,7 +1258,7 @@ pub fn Composer(
                         title: if plan_id.is_none() { "This agent has no plan mode" } else { "" },
                         onclick: move |_| set_mode(if in_plan { None } else { plan_id.map(String::from) }, None),
                         "Plan New Idea"
-                        span { class: "faint", style: "font-size: 11px;", "⇧Tab" }
+                        span { class: "faint", style: "font-size: var(--ui-xs);", "⇧Tab" }
                     }
                     div { class: "menu-anchor",
                         button {
@@ -1321,7 +1321,7 @@ pub fn Composer(
                 }
             }
             if home {
-                div { style: "position: fixed; bottom: 22px; left: var(--sidebar-w, 300px); right: 0; text-align: center; color: var(--fg-3); font-size: 12px; pointer-events: none;",
+                div { style: "position: fixed; bottom: 22px; left: var(--sidebar-w, 300px); right: 0; text-align: center; color: var(--fg-3); font-size: var(--ui-sm); pointer-events: none;",
                     "{TIPS[tip_idx]}"
                 }
             }

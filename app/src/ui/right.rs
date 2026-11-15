@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use larrier_agents::git::{self, FileStatus, PullRequest, RepoStatus};
 use larrier_core::{lsf::short_path, Environment, FileDiff};
 
-use super::DragRegion;
+use super::{DragRegion, Dropdown, MenuItem};
 use crate::icons::{Icon, I};
 use crate::state::{use_app, RightTab};
 
@@ -183,6 +183,30 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
     let mut view_agent = crate::keep::use_kept(&id, "changes.agent", || false);
     let mut commit_msg = crate::keep::use_kept(&id, "changes.commit", String::new);
     let mut busy = use_signal(|| false);
+    let mut show_menu = use_signal(|| false);
+    // Live: the folder's git state is looked at every two seconds while the
+    // tab is open, and read again when it changed (files, staging, branch).
+    let cwd_w = cwd.clone();
+    use_future(move || {
+        let cwd = cwd_w.clone();
+        async move {
+            let Some(c) = cwd else { return };
+            let look = move || {
+                let c2 = c.clone();
+                async move { tokio::task::spawn_blocking(move || git::fingerprint(std::path::Path::new(&c2))).await.ok().flatten() }
+            };
+            // As it is when the tab opens (what's shown was read then too).
+            let mut last = look().await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let now = look().await;
+                if now.is_some() && now != last {
+                    nonce += 1;
+                    last = now;
+                }
+            }
+        }
+    });
     // Only what this tab shows, memoized: streaming text never re-renders it.
     let id_m = id.clone();
     let meta = use_memo(move || {
@@ -278,16 +302,38 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
         });
     };
 
+    let is_repo = gs.as_ref().is_some_and(|g| g.is_repo);
     rsx! {
         div { class: "changes-head",
             div { class: "changes-tabs",
-                button { class: if !show_agent { "on" } else { "" }, onclick: move |_| view_agent.set(false), "Local Changes" }
-                button { class: if show_agent { "on" } else { "" }, onclick: move |_| view_agent.set(true), "Agent Edits" }
+                // What it shows: the folder's changes or the agent's edits.
+                div { class: "menu-anchor",
+                    button { class: if show_menu() { "changes-pick open" } else { "changes-pick" }, onclick: move |_| show_menu.set(true),
+                        span { if show_agent { "Agent Edits" } else { "Local Changes" } }
+                        Icon { i: I::ChevronDown, size: 12 }
+                    }
+                    Dropdown { open: show_menu, up: false,
+                        MenuItem { label: "Local Changes".to_string(), sub: is_repo.then(|| format!("{}", files.len())), checked: !show_agent, disabled: !is_repo,
+                            onclick: move |_| { show_menu.set(false); view_agent.set(false); } }
+                        MenuItem { label: "Agent Edits".to_string(), sub: Some(format!("{}", agent_diffs.len())), checked: show_agent,
+                            onclick: move |_| { show_menu.set(false); view_agent.set(true); } }
+                    }
+                }
                 if let Some(p) = &pr {
                     span { class: "on", "PR #{p.number}" }
                 }
                 div { class: "grow" }
-                button { class: "icon-btn sm", title: "Refresh", onclick: move |_| nonce += 1, Icon { i: I::Refresh, size: 13 } }
+                if pr.is_none() && !branch.is_empty() {
+                    span { class: "branch-line", title: if ahead > 0 { format!("{branch} · {ahead} ahead") } else { branch.clone() },
+                        Icon { i: I::GitBranch, size: 12 }
+                        span { class: "ellipsis", "{branch}" }
+                        if let Some((_, Some(b))) = &worktree {
+                            Icon { i: I::ArrowRight, size: 12 }
+                            span { class: "ellipsis", "{b}" }
+                        }
+                        if ahead > 0 { span { class: "faint", "↑{ahead}" } }
+                    }
+                }
             }
             if let Some(p) = pr.clone() {
                 div { class: "pr-title",
@@ -300,18 +346,6 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
                         {if p.is_draft { "Draft".to_string() } else { titlecase(&p.state) }}
                     }
                     span { class: "branch-line", "{p.head}" Icon { i: I::ArrowRight, size: 12 } "{p.base}" }
-                }
-            } else if !branch.is_empty() {
-                div { class: "branch-line",
-                    Icon { i: I::GitBranch, size: 12 }
-                    "{branch}"
-                    if let Some((_, Some(b))) = &worktree {
-                        Icon { i: I::ArrowRight, size: 12 }
-                        "{b}"
-                    }
-                    if ahead > 0 {
-                        span { class: "faint", "· {ahead} ahead" }
-                    }
                 }
             }
         }

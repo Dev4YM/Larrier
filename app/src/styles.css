@@ -447,7 +447,12 @@ svg { flex-shrink: 0; display: block; }
 .rp-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--fg-3); font-size: var(--ui-sm); padding: 24px; text-align: center; }
 
 .changes-head { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
-.changes-tabs { display: flex; gap: 14px; font-size: var(--ui-md); color: var(--fg-3); align-items: center; }
+.changes-tabs { display: flex; gap: var(--sp-4); font-size: var(--ui-md); color: var(--fg-3); align-items: center; min-width: 0; }
+/* What the panel shows (Local Changes or Agent Edits), as one select. */
+.changes-pick { display: inline-flex; align-items: center; gap: 6px; height: var(--h-ctl-sm); padding: 0 var(--sp-3) 0 var(--sp-4); margin-left: calc(-1 * var(--sp-4)); border-radius: var(--r-md); color: var(--fg); font-size: var(--ui-md); font-weight: 500; }
+.changes-pick:hover, .changes-pick.open { background: var(--hover); }
+.changes-tabs .branch-line { min-width: 0; gap: 5px; }
+.changes-tabs .branch-line .ellipsis { min-width: 0; max-width: 160px; }
 .changes-tabs button:hover { color: var(--fg-2); }
 .changes-tabs .on { color: var(--fg); }
 .pr-title { font-size: var(--ui-md); font-weight: 500; display: flex; align-items: center; gap: 6px; }

@@ -30,6 +30,24 @@ fn run(mut c: Command) -> Result<String> {
     }
 }
 
+/// What changes when the folder's git state does: its branch, which
+/// files changed and how, and when each was last written. Cheap enough to
+/// check every few seconds; `None` outside a repository.
+pub fn fingerprint(path: &Path) -> Option<String> {
+    let mut c = git(path);
+    c.args(["status", "--porcelain=v1", "-b", "-uall"]);
+    let out = run(c).ok()?;
+    let mut fp = out.clone();
+    for line in out.lines().filter(|l| !l.starts_with("##")) {
+        let name = line.get(3..).unwrap_or("").rsplit(" -> ").next().unwrap_or("").trim_matches('"');
+        if let Ok(m) = std::fs::metadata(path.join(name)).and_then(|m| m.modified()) {
+            let ms = m.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+            fp.push_str(&format!("{name}:{ms}\n"));
+        }
+    }
+    Some(fp)
+}
+
 pub fn is_repo(path: &Path) -> bool {
     let mut c = git(path);
     c.args(["rev-parse", "--is-inside-work-tree"]);

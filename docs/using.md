@@ -14,15 +14,20 @@ bar and the traffic lights sit over Larrier's top bar.
 - New Agent, Automations and Customize at the top.
 - Pinned chats, then every project with its chats nested under it (pinned
   projects first). Chats without a folder live in **Home**. Hover a chat to
-  pin it; a project's **…** has New chat, Pin project, Edit project and
-  Open folder.
+  pin it; a project's **…** (or a right-click on it) has New chat, Pin
+  project, Edit project and Open folder. Home's has New chat, Pin Home and
+  Edit Home: it can be named, given a look, agents and where its new chats
+  run like any project, and it stays where chats without a folder go.
 - **Projects** are yours to make (the folder icon beside Projects, or New
-  project in the composer's project menu): a name, an icon and a color, a
-  main folder and more folders if you like (Claude Code and Codex can work
-  in those too), the agents it works with (the first starts its new chats)
-  and whether its new chats run in the folder or a new worktree. A folder
-  your chats ran in shows as a project on its own; edit it to give it all
-  of this.
+  project in the composer's project menu). The dialog starts with the
+  project's picture: click it to pick one of every bundled icon (over
+  2,000, searchable), an emoji, or your own image (a transparent one shows
+  the color behind it), and a color from the swatches or any color. Under
+  it go the name, a main folder and more folders if you like (Claude Code
+  and Codex can work in those too), the agents it works with (the first
+  starts its new chats) and whether its new chats run in the folder or a
+  new worktree. A folder your chats ran in shows as a project on its own;
+  edit it to give it all of this.
 - The filter menu groups by status, project or agent, sorts by activity,
   creation or name, and can show archived chats. Search opens from the
   magnifier icon.
@@ -60,11 +65,11 @@ onto the chat area:
   you changed stays open.
 - Reading, searching and thinking steps fold into "Explored …"; commands,
   edits (with inline diffs), plans and to-dos get their own cards.
-- A turn's steps show as they come; once it ends they sit under "Worked
-  for 16s" with 👍 👎, copy, fork and the time. A turn you watched stays
-  open when it ends; older ones are folded to their answer (and any
-  error, where it came). Opening or folding one is remembered, and so are
-  the cards you opened (commands, steps, explored files).
+- A turn's steps show as they come; when it ends they slide shut under
+  "Worked for 16s", with the answer (and any error) below and 👍 👎, copy,
+  fork and the time. Click it to open the steps again. Opening or folding
+  one is remembered, and so are the cards you opened (commands, steps,
+  explored files).
 - A prompt timeline runs down the left edge: hover it to preview a prompt,
   click to jump there. It shows when there's room beside the text, and
   steps away when the text comes close.
@@ -123,9 +128,12 @@ onto the chat area:
 keeps its own panel. A chat that has none yet starts with it closed, on
 the tabs you had; nothing opens it but you, or an agent using the browser.
 
-- **Changes:** Local Changes (git) and Agent Edits, file by file, with
-  discard, commit, commit & push and Create PR (through `gh`). A
-  worktree's branch can be merged back from here.
+- **Changes:** Local Changes (git) or Agent Edits, picked from the menu at
+  its top (each with its file count), file by file, with discard, commit,
+  commit & push and Create PR (through `gh`). The branch sits at the
+  right of the header. It keeps up by itself: files changed, staged or
+  switched show within two seconds, with nothing to refresh. A worktree's
+  branch can be merged back from here.
 - **Browser:** a real browser in the panel. On Windows its pages run on
   Chromium, the open-source engine Chrome is built on, which Larrier runs
   itself (as Electron apps do): Larrier is the browser, not a Chrome

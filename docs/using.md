@@ -15,7 +15,7 @@ bar and the traffic lights sit over Larrier's top bar.
 - Pinned chats, then every project with its chats nested under it. Chats
   without a folder live in **Home**.
 - The filter menu groups by status, project or agent, sorts by activity,
-  creation or name, and can show archived chats. Search grows out of the
+  creation or name, and can show archived chats. Search opens from the
   magnifier icon.
 - A status dot on every chat: running, needs input, ready for review,
   unread.
@@ -174,8 +174,10 @@ each agent's own configuration and tagged with the agents that use it.
   during a turn does (steer or queue), window restore.
 - **Appearance:** themes, accent and per-token colors for light and dark,
   fonts, **Text Size** (Small to Larger: every kind of text and its spacing
-  move together), zoom, density, button corners, sidebar side and
-  **Reduce Motion**.
+  move together), zoom, density, **Button Corners** (Balanced is a
+  moderate scale; Solid squares it off, Rounded brings back pills and
+  circles), sidebar side and **Reduce Motion** (motion is already short;
+  this turns it off).
 - **Plan & Usage:** plan limits with reset times; tokens, cost, sessions
   and cache hits against the previous period; breakdowns by agent, model
   and project; an activity heatmap.

@@ -785,15 +785,15 @@ const CSS: &str = r#"
 .fv-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--fg-3); font-size: 12px; }
 .fv-tabs { display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 8px; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; flex-shrink: 0; scrollbar-width: none; }
 .fv-tabs::-webkit-scrollbar { display: none; }
-.fv-tab { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; border-radius: 7px; font-size: 13px; color: var(--fg-2); cursor: pointer; flex-shrink: 0; max-width: 220px; user-select: none; }
+.fv-tab { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; border-radius: var(--r-md); font-size: 13px; color: var(--fg-2); cursor: pointer; flex-shrink: 0; max-width: 220px; user-select: none; }
 .fv-tab:hover { background: var(--hover); color: var(--fg); }
 .fv-tab.on { background: var(--selected); color: var(--fg); }
 .fv-tab.preview .fv-tab-name { font-style: italic; }
 .fv-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fv-x { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); opacity: 0; }
+.fv-x { width: 18px; height: 18px; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); opacity: 0; }
 .fv-tab:hover .fv-x, .fv-tab.on .fv-x { opacity: 1; }
 .fv-x:hover { background: var(--hover); color: var(--fg); }
-.fv-btn { width: 26px; height: 26px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); flex-shrink: 0; }
+.fv-btn { width: 26px; height: 26px; border-radius: var(--r-md); display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); flex-shrink: 0; }
 .fv-btn:hover { background: var(--hover); color: var(--fg); }
 .fv-btn.on { color: var(--fg); }
 .fv-btn:disabled { opacity: .35; cursor: default; background: none; }
@@ -816,11 +816,11 @@ const CSS: &str = r#"
 .fv-quick { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card-2); display: flex; flex-direction: column; gap: 6px; max-height: 60%; }
 .fv-quick.centered { border: none; background: none; flex: 1; max-height: none; align-items: stretch; padding: 12vh 24px 24px; }
 .fv-quick-title { font-size: 15px; font-weight: 500; color: var(--fg); margin-bottom: 4px; text-align: center; }
-.fv-quick-input { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--fg-3); }
+.fv-quick-input { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); color: var(--fg-3); }
 .fv-quick-input:focus-within { border-color: var(--fg-4); }
 .fv-quick-input input { flex: 1; border: none; outline: none; background: transparent; font-size: 13px; color: var(--fg); min-width: 0; }
 .fv-results { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; min-height: 0; }
-.fv-result { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: 6px; font-size: 13px; cursor: pointer; min-width: 0; }
+.fv-result { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--r-md); font-size: 13px; cursor: pointer; min-width: 0; }
 .fv-result.on { background: var(--hover); }
 .fv-r-name { color: var(--fg); white-space: nowrap; }
 .fv-r-dir { color: var(--fg-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -829,7 +829,7 @@ const CSS: &str = r#"
 .fv-image img { max-width: 100%; max-height: 80%; object-fit: contain; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
 .fv-editor { flex: 1; min-height: 0; min-width: 0; position: relative; overflow: hidden; }
 .fv-editor .monaco-editor { --vscode-font-family: var(--font, system-ui); }
-.fv-editor .monaco-editor .suggest-widget, .fv-editor .monaco-editor .monaco-hover, .monaco-editor .suggest-widget, .monaco-editor .monaco-hover { border-radius: 8px; overflow: hidden; }
+.fv-editor .monaco-editor .suggest-widget, .fv-editor .monaco-editor .monaco-hover, .monaco-editor .suggest-widget, .monaco-editor .monaco-hover { border-radius: var(--r-md); overflow: hidden; }
 .fv-tab.dirty .fv-x { opacity: 1; }
 .fv-tab.dirty .fv-x svg { display: none; }
 .fv-tab.dirty .fv-x::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--fg-2); }

@@ -19,7 +19,7 @@ use crate::state::{use_app, App, RightTab, View};
 
 pub(crate) const CSS: &str = r#"
 .tk-sub { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 30px; padding: 0 8px; margin: 2px 0 6px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--card); font-size: 12px; color: var(--fg-2); text-align: left; cursor: pointer; }
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); font-size: 12px; color: var(--fg-2); text-align: left; cursor: pointer; }
 .tk-sub:hover { background: var(--hover); color: var(--fg); }
 .tk-sub .tk-name { color: var(--fg); font-weight: 500; white-space: nowrap; flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
 .tk-sub .tk-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -31,7 +31,7 @@ pub(crate) const CSS: &str = r#"
 .tk-st.err { color: var(--red); }
 .tk-st.muted { color: var(--fg-3); }
 .tk-ic { display: inline-flex; color: var(--fg-3); flex-shrink: 0; }
-.tk-badge { font-size: 10px; line-height: 16px; padding: 0 5px; border-radius: 4px; background: var(--chip); color: var(--fg-2); flex-shrink: 0; }
+.tk-badge { font-size: 10px; line-height: 16px; padding: 0 5px; border-radius: var(--r-sm); background: var(--chip); color: var(--fg-2); flex-shrink: 0; }
 @media (max-width: 560px) {
   .tk-sub .tk-desc, .tk-sub .tk-badge { display: none; }
   .tk-sub .tk-name { flex: 1; max-width: none; }
@@ -40,7 +40,7 @@ pub(crate) const CSS: &str = r#"
 .tk-tx { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; height: 100%; }
 .tk-tx-top { flex-shrink: 0; padding: 10px 0 14px; border-bottom: 1px solid var(--border); }
 .tk-tx-wrap { max-width: var(--tw, 860px); margin: 0 auto; padding: 0 28px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.tk-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; margin-left: -8px; border-radius: 7px;
+.tk-back { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; margin-left: -8px; border-radius: var(--r-md);
   color: var(--fg-3); font-size: 12.5px; max-width: 100%; min-width: 0; }
 .tk-back:hover { background: var(--hover); color: var(--fg); }
 .tk-back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -49,14 +49,14 @@ pub(crate) const CSS: &str = r#"
 .tk-tx-title .tk-name { font-weight: 600; color: var(--fg); white-space: nowrap; }
 .tk-tx-title .tk-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-2); min-width: 0; }
 .tk-facts { display: flex; flex-wrap: wrap; gap: 6px; }
-.tk-fact { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border);
+.tk-fact { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--r-md); border: 1px solid var(--border);
   background: var(--card); font-size: 12px; white-space: nowrap; max-width: 100%; min-width: 0; }
 .tk-fact .tk-ic { color: var(--fg-3); }
 .tk-fact .k { color: var(--fg-3); }
 .tk-fact .v { color: var(--fg); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
 .tk-tx-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .tk-tx-body .transcript-inner { padding-top: 18px; }
-.tk-user { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 0 0 14px;
+.tk-user { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px; margin: 0 0 14px;
   font-size: 13px; line-height: 19px; white-space: pre-wrap; word-wrap: break-word; max-height: 240px; overflow: auto; }
 .tk-user .tk-role { display: block; font-size: 11.5px; color: var(--fg-3); margin-bottom: 4px; }
 .tk-empty { padding: 24px 4px; color: var(--fg-3); font-size: 12px; }
@@ -70,7 +70,7 @@ pub(crate) const CSS: &str = r#"
 .tk-chip.on { background: var(--hover); color: var(--fg); }
 .tk-chip .n { font-variant-numeric: tabular-nums; }
 .tk-card { order: -1; flex: 0 0 100%; min-width: 0; margin-bottom: 2px; background: var(--card); border: 1px solid var(--border);
-  border-radius: 10px; box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .14); padding: 2px 4px 4px; transform-origin: 50% 100%;
+  border-radius: var(--r-lg); box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .14); padding: 2px 4px 4px; transform-origin: 50% 100%;
   animation: tk-card-in var(--t-2) var(--ease); }
 @keyframes tk-card-in { from { opacity: 0; } }
 .app.no-motion .tk-card { animation: none; }
@@ -79,12 +79,12 @@ pub(crate) const CSS: &str = r#"
 .tk-card-head .ttl { color: var(--fg); font-weight: 500; }
 .tk-card-head .grow { flex: 1; }
 .tk-card-head .icon-btn { width: 22px; height: 22px; }
-.tk-stop-all { height: 20px; padding: 0 5px; border-radius: 5px; color: var(--fg-2); font-size: 12px; }
-.tk-stop { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; color: var(--fg-3); }
+.tk-stop-all { height: 20px; padding: 0 5px; border-radius: var(--r-sm); color: var(--fg-2); font-size: 12px; }
+.tk-stop { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-sm); color: var(--fg-3); }
 .tk-stop:hover { background: var(--hover); color: var(--red); }
 .tk-stop-all:hover { background: var(--hover); color: var(--red); }
 .tk-card-list { max-height: min(220px, 36vh); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
-.tk-item { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px;
+.tk-item { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--r-md);
   font-size: 12px; line-height: 16px; color: var(--fg); cursor: pointer; min-width: 0; transition: background var(--t-1); }
 .tk-item:hover { background: var(--hover); }
 .tk-item > .lead { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex: none; color: var(--fg-3); }
@@ -98,17 +98,17 @@ pub(crate) const CSS: &str = r#"
 .tk-panel { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 16px; display: flex; flex-direction: column; }
 .tk-panel-hint { max-width: 260px; color: var(--fg-3); }
 .tk-group { display: flex; flex-direction: column; }
-.tk-group-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; margin-top: 6px; border-radius: 7px;
+.tk-group-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; margin-top: 6px; border-radius: var(--r-md);
   width: 100%; text-align: left; font-size: 12px; color: var(--fg-3); }
 .tk-group-head:hover { background: var(--hover); color: var(--fg-2); }
 .tk-group-head .chev { display: inline-flex; transition: transform var(--t-2) ease; }
 .tk-group.closed .tk-group-head .chev { transform: rotate(-90deg); }
-.tk-group-head .n { font-variant-numeric: tabular-nums; padding: 0 6px; line-height: 17px; border-radius: 9px; background: var(--chip); color: var(--fg-2); font-size: 11px; }
+.tk-group-head .n { font-variant-numeric: tabular-nums; padding: 0 6px; line-height: 17px; border-radius: var(--r-lg); background: var(--chip); color: var(--fg-2); font-size: 11px; }
 .tk-group-body { display: grid; grid-template-rows: 1fr; transition: opacity var(--t-2); }
 .tk-group.closed .tk-group-body { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
 .tk-group-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
 .app.no-motion .tk-group-body, .app.no-motion .tk-group-head .chev { transition: none; }
-.tk-row { flex: none; box-sizing: border-box; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 9px;
+.tk-row { flex: none; box-sizing: border-box; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: var(--r-lg);
   color: var(--fg); min-width: 0; cursor: pointer; transition: background var(--t-1); }
 .tk-row:hover { background: var(--hover); }
 .tk-row > .tk-lead { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--fg-3); }

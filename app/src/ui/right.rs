@@ -143,7 +143,7 @@ pub fn RightPane(id: String) -> Element {
                                         let (i, label, _) = tab_meta(t);
                                         rsx! {
                                             button { key: "{label}", class: "tile",
-                                                style: "height: 120px; border: 1px solid var(--border); border-radius: 12px; background: var(--card-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-2); font-size: 13px;",
+                                                style: "height: 120px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--card-2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--fg-2); font-size: 13px;",
                                                 onclick: move |_| app.ui.write().open_panel(t, false),
                                                 Icon { i, size: 18, stroke: 1.5 }
                                                 "{label}"

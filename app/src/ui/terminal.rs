@@ -474,7 +474,7 @@ const CSS: &str = r#"
 .term-x .xterm-viewport::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
 .term-list { width: 200px; flex-shrink: 0; border-left: 1px solid var(--border); padding: 8px 6px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .term-list .term-h { font-size: 12px; color: var(--fg-3); padding: 2px 8px 6px; }
-.term-item { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border-radius: 6px; font-size: 13px; color: var(--fg-2); cursor: pointer; width: 100%; text-align: left; }
+.term-item { height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border-radius: var(--r-md); font-size: 13px; color: var(--fg-2); cursor: pointer; width: 100%; text-align: left; }
 .term-item:hover { background: var(--hover); color: var(--fg); }
 .term-item.on { background: var(--selected); color: var(--fg); }
 .term-item.dead { opacity: .6; }
@@ -486,7 +486,7 @@ const CSS: &str = r#"
 .term-item .ink-loader { margin: 0 3px 0 2px; }
 .term-item.agent .term-name { font-family: var(--mono); font-size: 12px; }
 .aterm { position: absolute; inset: 0; display: flex; flex-direction: column; }
-.aterm-banner { display: flex; align-items: center; gap: 8px; margin: 8px 10px 0; padding: 6px 10px; border-radius: 8px; background: var(--chip);
+.aterm-banner { display: flex; align-items: center; gap: 8px; margin: 8px 10px 0; padding: 6px 10px; border-radius: var(--r-md); background: var(--chip);
   color: var(--fg-2); font-size: 12px; flex-shrink: 0; min-width: 0; }
 .aterm-banner > span:not(.tk-ic) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aterm-banner .tk-ic { display: inline-flex; color: var(--fg-3); }

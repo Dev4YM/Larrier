@@ -548,16 +548,16 @@ const CSS: &str = r#"
 .pf-web:hover { color: var(--fg); text-decoration: underline; }
 .pf-head { display: flex; align-items: center; gap: 10px; margin: 26px 0 10px; }
 .pf-head h3 { margin: 0; font-size: 14px; }
-.pf-head .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--chip); }
-.pf-head .seg button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--fg-2); }
+.pf-head .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-md); background: var(--chip); }
+.pf-head .seg button { height: 24px; padding: 0 10px; border-radius: var(--r-md); font-size: 12px; color: var(--fg-2); }
 .pf-head .seg button.on { background: var(--card); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
 .pf-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
-.pf-kpi { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); }
+.pf-kpi { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--card); }
 .pf-kpi .k { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--fg-3); }
 .pf-kpi .v { font-size: 16px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
 .pf-cal-card { padding: 14px 16px 12px; }
 .pf-years { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
-.pf-years button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--fg-3); }
+.pf-years button { height: 24px; padding: 0 10px; border-radius: var(--r-md); font-size: 12px; color: var(--fg-3); }
 .pf-years button:hover { color: var(--fg); background: var(--hover); }
 .pf-years button.on { color: var(--fg); background: var(--selected); }
 .pf-cal { display: grid; grid-template-columns: 28px minmax(0, 1fr); grid-template-rows: auto auto; gap: 4px 6px; }
@@ -572,7 +572,7 @@ const CSS: &str = r#"
 .pf-cell.l3 { background: color-mix(in srgb, var(--green) 74%, var(--chip)); }
 .pf-cell.l4 { background: var(--green); }
 .pf-grid .pf-cell:not(.out):hover { outline: 1.5px solid var(--fg-2); outline-offset: 1px; }
-.pf-tip { position: absolute; z-index: 5; transform: translate(-50%, calc(-100% - 8px)); width: max-content; max-width: 260px; padding: 9px 11px; border-radius: 10px; background: var(--card-2); border: 1px solid var(--border);
+.pf-tip { position: absolute; z-index: 5; transform: translate(-50%, calc(-100% - 8px)); width: max-content; max-width: 260px; padding: 9px 11px; border-radius: var(--r-lg); background: var(--card-2); border: 1px solid var(--border);
   box-shadow: 0 8px 24px rgba(0, 0, 0, .14); pointer-events: none; font-size: 12px; color: var(--fg-2); display: flex; flex-direction: column; gap: 3px; }
 .pf-tip.flip { transform: translate(calc(-100% + 8px), calc(-100% - 8px)); }
 .pf-tip .t { font-weight: 600; color: var(--fg); }
@@ -590,8 +590,8 @@ const CSS: &str = r#"
 .pf-bar { display: grid; grid-template-columns: auto minmax(70px, 120px) 1fr auto; align-items: center; gap: 8px; font-size: 12.5px; }
 .pf-bar:not(:has(.lg)) { grid-template-columns: minmax(90px, 150px) 1fr auto; }
 .pf-bar .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
-.pf-bar .track { height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
-.pf-bar .fill { height: 100%; border-radius: 3px; background: var(--green); }
+.pf-bar .track { height: 6px; border-radius: var(--r-xs); background: var(--chip); overflow: hidden; }
+.pf-bar .fill { height: 100%; border-radius: var(--r-xs); background: var(--green); }
 .pf-bar .v { color: var(--fg-3); font-variant-numeric: tabular-nums; font-size: 12px; }
 .pf-empty { display: flex; align-items: center; gap: 8px; padding: 10px 0; color: var(--fg-3); font-size: 12px; }
 @media (max-width: 760px) { .pf-fields, .pf-split { grid-template-columns: 1fr; } .pf-card { flex-direction: column; align-items: center; } .pf-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

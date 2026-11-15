@@ -80,9 +80,12 @@ onto the chat area:
 - A chat running in the agent's own app (a terminal, an IDE) shows the
   stop button as it would while running, but disabled: reply and stop it
   there, or here once it finishes.
-- The picker lists your enabled agents on the left and their models on the
-  right; typing searches every model. A model's **Edit** shows its options
-  (context size, reasoning effort, speed) and the account the chat runs as.
+- The model picker has a search box, a rail of icons (★ Favorites, then
+  each of your enabled harnesses) and the chosen one's models; typing
+  searches every model. Star a model to keep it under Favorites. A model's
+  **Edit** shows its options (context size, reasoning effort, speed); the
+  accounts the chat can run as sit above the models, and the gear at the
+  bottom of the rail opens that harness's models in Settings.
 - `@` mentions files, folders, other chats, agents and the git diff. `/`
   runs Larrier's commands and the agent's own commands and skills.
 - Paste or drop images and files. Ctrl+Shift+V pastes long text as text.

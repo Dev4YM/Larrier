@@ -1923,6 +1923,9 @@ pub fn Select(
     onchange: EventHandler<String>,
     #[props(default)] placeholder: Option<String>,
     #[props(default = false)] wide: bool,
+    /// Shown before the choice (an agent's logo).
+    #[props(default)]
+    lead: Option<Element>,
 ) -> Element {
     let mut open = use_signal(|| false);
     let mut filter = use_signal(String::new);
@@ -1939,6 +1942,7 @@ pub fn Select(
         div { class: if wide { "menu-anchor select wide" } else { "menu-anchor select" },
             button { class: if open() { "select-btn open" } else { "select-btn" }, "aria-haspopup": "listbox",
                 onclick: move |_| { filter.set(String::new()); open.set(true); },
+                if let Some(l) = lead { span { class: "select-lead", {l} } }
                 span { class: "ellipsis", "{label}" }
                 span { class: "chev", Icon { i: I::ChevronDown, size: 12 } }
             }

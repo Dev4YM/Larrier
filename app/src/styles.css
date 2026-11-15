@@ -796,6 +796,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .select-btn { height: 28px; min-width: 140px; max-width: 320px; padding: 0 8px 0 10px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); display: inline-flex; align-items: center; gap: 8px; font-size: var(--ui-sm); color: var(--fg); }
 .select-btn:hover, .select-btn.open { border-color: var(--border-2); }
 .select-btn .ellipsis { flex: 1; text-align: left; }
+.select-btn .select-lead { display: inline-flex; flex-shrink: 0; margin-left: -2px; }
 .select-btn .chev { color: var(--fg-3); display: flex; }
 .menu { overscroll-behavior: contain; }
 

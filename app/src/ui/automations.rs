@@ -67,15 +67,20 @@ const CSS: &str = r#"
 .au-card .flow { margin-top: auto; padding-top: 12px; display: flex; align-items: center; gap: 7px; font-size: var(--ui-sm); color: var(--fg-2); }
 .au-use { position: absolute; top: 14px; right: 14px; height: 30px; padding: 0 13px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--card-2); font-size: var(--ui-md); }
 .au-use:hover { background: var(--hover); }
-.au-modal { width: min(640px, 94vw); }
-.au-form { display: grid; grid-template-columns: 110px 1fr; gap: 12px 14px; align-items: center; padding: 6px 18px 16px; font-size: var(--ui-md); }
-.au-form .k { color: var(--fg-2); font-size: var(--ui-sm); }
-.au-form .top { align-self: start; padding-top: 6px; }
-.au-form textarea { min-height: 140px; resize: vertical; border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 10px; background: var(--input); outline: none; font: inherit; font-size: var(--ui-md); line-height: 19px; color: var(--fg); }
-.au-days { display: flex; gap: 4px; }
-.au-day { width: 30px; height: 26px; border-radius: var(--r-md); border: 1px solid var(--border); font-size: var(--ui-sm); color: var(--fg-2); }
-.au-day.on { background: var(--fg); color: var(--pane, #fff); border-color: var(--fg); }
-.au-hint { grid-column: 2; font-size: var(--ui-sm); color: var(--fg-3); margin-top: -6px; }
+.au-modal { width: min(560px, 94vw); }
+.au-form { padding: var(--sp-2) var(--sp-6) var(--sp-6); font-size: var(--ui-sm); }
+.au-form .seg { display: flex; width: 100%; }
+.au-form .seg button { flex: 1; min-width: 0; padding: 0 var(--sp-2); justify-content: center; text-align: center; }
+.au-form .au-full { grid-column: 1 / -1; }
+.au-form .au-sep { grid-column: 1 / -1; height: 1px; background: var(--border); margin: var(--sp-1) 0; }
+.au-iso { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; color: var(--fg-2); }
+.au-when { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
+.au-when .au-time { width: 96px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.au-when .au-days { flex: 1; }
+.au-hint { grid-column: 2; margin-top: calc(-1 * var(--sp-2)); font-size: var(--ui-xs); color: var(--fg-3); }
+.au-label { display: block; margin-bottom: var(--sp-3); color: var(--fg-3); font-size: var(--ui-xs); }
+.au-form textarea { display: block; width: 100%; min-height: 128px; resize: vertical; border: 1px solid var(--border); border-radius: var(--r-md); padding: var(--sp-4) var(--sp-5); background: var(--input); outline: none; font: inherit; font-size: var(--ui-sm); line-height: 18px; color: var(--fg); }
+.au-form textarea:focus { border-color: var(--border-2); }
 .au-err { color: var(--red); font-size: var(--ui-sm); margin-right: auto; }
 "#;
 
@@ -470,7 +475,28 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
     let workspaces = app.config.read().workspaces.clone();
     let customs = app.config.read().custom_agents.clone();
     let cur = a.read().clone();
-    let models: Vec<String> = cur.agent.spec().models.iter().map(|s| s.to_string()).collect();
+    // The agent's models, its default first (and a model set by hand that
+    // isn't in the list, so it still shows).
+    let mut models: Vec<(String, String)> = vec![(String::new(), "Agent default".to_string())];
+    models.extend(crate::agent_models::choices(&app, &cur.agent).into_iter().map(|c| (c.id, c.name)));
+    if let Some(m) = cur.model.clone().filter(|m| !models.iter().any(|(id, _)| id == m)) {
+        models.push((m.clone(), m));
+    }
+    // When it runs, in words ("Weekdays at 09:00").
+    let when = {
+        let d = days.read();
+        let at = time();
+        let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        if d.is_empty() || d.len() == 7 {
+            format!("Every day at {at}")
+        } else if *d == [0, 1, 2, 3, 4] {
+            format!("Weekdays at {at}")
+        } else if *d == [5, 6] {
+            format!("Weekends at {at}")
+        } else {
+            format!("{} at {at}", d.iter().filter_map(|i| names.get(*i as usize)).copied().collect::<Vec<_>>().join(", "))
+        }
+    };
 
     let save = move |run: bool| {
         let mut v = a.read().clone();
@@ -489,7 +515,7 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
             Kind::Interval => Trigger::Interval { minutes: minutes().max(5) },
             Kind::Git => {
                 if v.workspace.is_none() {
-                    return error.set("On-commit automations need a workspace".into());
+                    return error.set("On-commit automations need a project".into());
                 }
                 let b = branch().trim().to_string();
                 Trigger::OnGitChange { branch: (!b.is_empty()).then_some(b) }
@@ -530,52 +556,50 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
         div { class: "overlay", onclick: move |_| onclose.call(()),
             div { class: "modal au-modal", onclick: move |e| e.stop_propagation(),
                 div { class: "modal-head", if is_new { "New automation" } else { "Edit automation" } }
-                div { class: "au-form",
+                div { class: "kv au-form",
                     span { class: "k", "Name" }
                     input { class: "input full", autofocus: true, placeholder: "Nightly bug hunt", value: "{cur.name}",
                         oninput: move |e| a.write().name = e.value() }
 
                     span { class: "k", "Agent" }
-                    div { class: "row",
-                        AgentGlyph { kind: cur.agent.clone() }
-                        super::Select {
-                            value: cur.agent.id().to_string(),
-                            wide: true,
-                            options: larrier_core::agent::runnable()
-                                .map(|s| (s.kind.id().to_string(), s.name.to_string()))
-                                .chain(customs.iter().map(|c| (AgentKind::Custom(c.id.clone()).id().to_string(), c.name.clone())))
-                                .collect::<Vec<_>>(),
-                            onchange: move |v: String| { let mut w = a.write(); w.agent = AgentKind::from_id(&v); w.model = None; },
-                        }
+                    super::Select {
+                        value: cur.agent.id().to_string(),
+                        wide: true,
+                        lead: rsx! { AgentGlyph { kind: cur.agent.clone() } },
+                        options: larrier_core::agent::runnable()
+                            .map(|s| (s.kind.id().to_string(), s.name.to_string()))
+                            .chain(customs.iter().map(|c| (AgentKind::Custom(c.id.clone()).id().to_string(), c.name.clone())))
+                            .collect::<Vec<_>>(),
+                        onchange: move |v: String| { let mut w = a.write(); w.agent = AgentKind::from_id(&v); w.model = None; },
                     }
 
                     span { class: "k", "Model" }
-                    div {
-                        input { class: "input full", list: "au-models", placeholder: "Agent default",
-                            value: "{cur.model.clone().unwrap_or_default()}",
-                            oninput: move |e| { let v = e.value(); a.write().model = (!v.trim().is_empty()).then_some(v); } }
-                        datalist { id: "au-models",
-                            for m in models { option { key: "{m}", value: "{m}" } }
-                        }
+                    super::Select {
+                        value: cur.model.clone().unwrap_or_default(),
+                        wide: true,
+                        options: models,
+                        onchange: move |v: String| a.write().model = (!v.is_empty()).then_some(v),
                     }
 
-                    span { class: "k", "Workspace" }
+                    span { class: "k", "Project" }
                     super::Select {
                         value: cur.workspace.clone().unwrap_or_default(),
                         wide: true,
-                        options: std::iter::once((String::new(), "No folder (chat only)".to_string()))
-                            .chain(workspaces.iter().map(|w| (w.path.clone(), format!("{} — {}", w.name, w.path))))
+                        options: std::iter::once((String::new(), "Home (no project folder)".to_string()))
+                            .chain(workspaces.iter().map(|w| (w.path.clone(), w.name.clone())))
                             .collect::<Vec<_>>(),
                         onchange: move |v: String| a.write().workspace = (!v.is_empty()).then_some(v),
                     }
 
                     if cur.workspace.is_some() {
-                        span { class: "k", "Isolation" }
-                        div { class: "row",
+                        span { class: "k", "Worktree" }
+                        label { class: "au-iso",
                             Toggle { on: cur.worktree, onchange: move |v: bool| a.write().worktree = v }
-                            span { class: "faint", "Run each time in a fresh git worktree" }
+                            span { "A fresh git worktree for each run" }
                         }
                     }
+
+                    div { class: "au-sep" }
 
                     span { class: "k", "Trigger" }
                     div { class: "seg",
@@ -587,13 +611,13 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                     match kind() {
                         Kind::Daily => rsx! {
                             span { class: "k", "At" }
-                            div { class: "row", style: "gap: 10px; flex-wrap: wrap;",
-                                input { class: "input", r#type: "time", value: "{time}", oninput: move |e| time.set(e.value()) }
-                                div { class: "au-days",
-                                    for (i, l) in ["M", "T", "W", "T", "F", "S", "S"].iter().enumerate() {
+                            div { class: "au-when",
+                                input { class: "input au-time", r#type: "time", value: "{time}", oninput: move |e| time.set(e.value()) }
+                                div { class: "seg au-days",
+                                    for (i, l) in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].iter().enumerate() {
                                         button {
                                             key: "{i}",
-                                            class: if days.read().contains(&(i as u8)) { "au-day on" } else { "au-day" },
+                                            class: if days.read().contains(&(i as u8)) { "on" } else { "" },
                                             onclick: move |_| {
                                                 let mut d = days.write();
                                                 if let Some(p) = d.iter().position(|x| *x == i as u8) { d.remove(p); } else { d.push(i as u8); d.sort_unstable(); }
@@ -603,13 +627,14 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                                     }
                                 }
                             }
-                            span { class: "au-hint", if days.read().is_empty() { "Every day" } else { "Only on the selected days" } }
+                            span { class: "au-hint", "{when}" }
                         },
                         Kind::Interval => rsx! {
                             span { class: "k", "Every" }
                             super::Select {
                                 value: minutes().to_string(),
-                                options: [(15u32, "15 minutes"), (30, "30 minutes"), (60, "hour"), (120, "2 hours"), (240, "4 hours"), (720, "12 hours"), (1440, "24 hours")]
+                                wide: true,
+                                options: [(15u32, "15 minutes"), (30, "30 minutes"), (60, "Hour"), (120, "2 hours"), (240, "4 hours"), (720, "12 hours"), (1440, "24 hours")]
                                     .iter()
                                     .map(|(m, l)| (m.to_string(), l.to_string()))
                                     .collect::<Vec<_>>(),
@@ -619,17 +644,20 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                         Kind::Git => rsx! {
                             span { class: "k", "Branch" }
                             input { class: "input full", placeholder: "Any branch", value: "{branch}", oninput: move |e| branch.set(e.value()) }
-                            span { class: "au-hint", "Runs when the workspace's HEAD moves to a new commit (checked every 30 seconds)." }
+                            span { class: "au-hint", "When the project gets a new commit (checked every 30 seconds)" }
                         },
                         Kind::Manual => rsx! {
-                            span { class: "k" }
-                            span { class: "faint", "Runs only when you press Run now." }
+                            span { class: "au-hint", style: "margin-top: 0;", "Only when you press Run now" }
                         },
                     }
 
-                    span { class: "k top", "Instructions" }
-                    textarea { dir: "auto", placeholder: "What should the agent do each time it runs?", value: "{cur.prompt}",
-                        oninput: move |e| a.write().prompt = e.value() }
+                    div { class: "au-sep" }
+
+                    div { class: "au-full",
+                        span { class: "au-label", "Instructions" }
+                        textarea { dir: "auto", placeholder: "What should the agent do each time it runs?", value: "{cur.prompt}",
+                            oninput: move |e| a.write().prompt = e.value() }
+                    }
                 }
                 div { class: "modal-foot",
                     if !error.read().is_empty() { span { class: "au-err", "{error}" } }

@@ -27,6 +27,10 @@ struct Repo {
     latest: chrono::DateTime<chrono::Utc>,
     agent: Option<AgentKind>,
     home: bool,
+    /// A project's look and place (see `larrier_core::Workspace`).
+    icon: Option<String>,
+    color: Option<String>,
+    pinned: bool,
 }
 
 fn sort_items(items: &mut [SessionSummary], sort: SidebarSort) {
@@ -66,6 +70,9 @@ fn build_agent_groups(list: &[SessionSummary], sort: SidebarSort) -> Vec<Repo> {
             latest: s.activity(),
             agent: Some(s.agent.clone()),
             home: false,
+            icon: None,
+            color: None,
+            pinned: false,
         });
         e.latest = e.latest.max(s.activity());
         e.items.push(s.clone());
@@ -86,7 +93,18 @@ fn repo_key(s: &SessionSummary) -> String {
 fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], sort: SidebarSort, order: &[String]) -> (Vec<SessionSummary>, Vec<Repo>) {
     let mut pinned = Vec::new();
     let mut map: BTreeMap<String, Repo> = BTreeMap::new();
-    let mut home = Repo { key: HOME_KEY.into(), name: "Home".into(), path: None, items: Vec::new(), latest: chrono::DateTime::<chrono::Utc>::MIN_UTC, agent: None, home: true };
+    let mut home = Repo {
+        key: HOME_KEY.into(),
+        name: "Home".into(),
+        path: None,
+        items: Vec::new(),
+        latest: chrono::DateTime::<chrono::Utc>::MIN_UTC,
+        agent: None,
+        home: true,
+        icon: None,
+        color: None,
+        pinned: false,
+    };
     for s in list.iter() {
         if s.pinned {
             pinned.push(s.clone());
@@ -98,14 +116,23 @@ fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace
             continue;
         }
         let w = s.workspace.as_ref().unwrap();
-        let e = map.entry(key.clone()).or_insert_with(|| Repo {
-            key: key.clone(),
-            name: if w.name.is_empty() { w.path.clone() } else { w.name.clone() },
-            path: Some(w.path.clone()),
-            items: Vec::new(),
-            latest: s.activity(),
-            agent: None,
-            home: false,
+        // A chat started in one of a project's folders is that project's.
+        let project = larrier_core::config::project_in(workspaces, &w.path);
+        let key = project.map(|p| project_key(Some(&p.path))).unwrap_or(key);
+        let e = map.entry(key.clone()).or_insert_with(|| match project {
+            Some(p) => Repo { key: key.clone(), name: p.name.clone(), path: Some(p.path.clone()), items: Vec::new(), latest: s.activity(), agent: None, home: false, icon: p.icon.clone(), color: p.color.clone(), pinned: p.pinned },
+            None => Repo {
+                key: key.clone(),
+                name: if w.name.is_empty() { w.path.clone() } else { w.name.clone() },
+                path: Some(w.path.clone()),
+                items: Vec::new(),
+                latest: s.activity(),
+                agent: None,
+                home: false,
+                icon: None,
+                color: None,
+                pinned: false,
+            },
         });
         e.latest = e.latest.max(s.activity());
         e.items.push(s.clone());
@@ -114,7 +141,18 @@ fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace
     for w in workspaces {
         let key = project_key(Some(&w.path));
         if key != HOME_KEY {
-            map.entry(key.clone()).or_insert_with(|| Repo { key, name: w.name.clone(), path: Some(w.path.clone()), items: Vec::new(), latest: w.added_at, agent: None, home: false });
+            map.entry(key.clone()).or_insert_with(|| Repo {
+                key,
+                name: w.name.clone(),
+                path: Some(w.path.clone()),
+                items: Vec::new(),
+                latest: w.added_at,
+                agent: None,
+                home: false,
+                icon: w.icon.clone(),
+                color: w.color.clone(),
+                pinned: w.pinned,
+            });
         }
     }
     let mut projects: Vec<Repo> = map.into_values().collect();
@@ -128,13 +166,16 @@ fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace
     (pinned, projects)
 }
 
-/// The user's order (dragged in the sidebar); projects not in it yet come
-/// first, newest first, and Home last.
+/// Pinned projects first; then the user's order (dragged in the sidebar),
+/// projects not in it yet first, newest first, and Home last.
 fn order_projects(projects: &mut [Repo], order: &[String]) {
-    projects.sort_by_key(|r| match order.iter().position(|k| *k == r.key) {
-        Some(i) => (1, i, Reverse(r.latest)),
-        None if r.home => (2, 0, Reverse(r.latest)),
-        None => (0, 0, Reverse(r.latest)),
+    projects.sort_by_key(|r| {
+        let place = match order.iter().position(|k| *k == r.key) {
+            Some(i) => (1, i, Reverse(r.latest)),
+            None if r.home => (2, 0, Reverse(r.latest)),
+            None => (0, 0, Reverse(r.latest)),
+        };
+        (!r.pinned, place)
     });
 }
 
@@ -328,7 +369,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                                 MenuItem { label: "Mark all as read".to_string(), icon: Some(I::CheckCheck), onclick: move |_| app.mark_all_read() }
                             }
                         }
-                        button { class: "icon-btn", title: "Add a project", onclick: move |_| app.pick_workspace(false),
+                        button { class: "icon-btn", title: "New project", onclick: move |_| app.edit_project(None),
                             Icon { i: I::FolderPlus, size: 15, stroke: 1.5 }
                         }
                     }
@@ -350,6 +391,9 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                             agent: r.agent.clone(),
                             mixed,
                             draggable,
+                            icon: r.icon.clone(),
+                            color: r.color.clone(),
+                            pinned: r.pinned,
                         }
                     }
                 }
@@ -434,8 +478,33 @@ struct SideCtx {
 }
 
 #[component]
-fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<SessionSummary>, default_open: bool, ctx: SideCtx, home: bool, agent: Option<AgentKind>, mixed: bool, draggable: bool) -> Element {
-    let mut app = use_app();
+fn RepoGroup(
+    rkey: String,
+    name: String,
+    path: Option<String>,
+    items: Vec<SessionSummary>,
+    default_open: bool,
+    ctx: SideCtx,
+    home: bool,
+    agent: Option<AgentKind>,
+    mixed: bool,
+    draggable: bool,
+    #[props(default)] icon: Option<String>,
+    #[props(default)] color: Option<String>,
+    #[props(default)] pinned: bool,
+) -> Element {
+    let app = use_app();
+    let mut menu = use_signal(|| false);
+    // Right-clicked: its menu at the pointer.
+    let mut ctx_at = use_signal(|| None::<(f64, f64)>);
+    let ctx_id = use_hook(|| format!("pjctx-{}", crate::state::rand_id()));
+    let ctx_id2 = ctx_id.clone();
+    let at = ctx_at();
+    use_effect(use_reactive!(|at| {
+        if let Some((x, y)) = at {
+            document::eval(&super::place_at_js(&ctx_id2, x, y, true));
+        }
+    }));
     let rk = rkey.clone();
     let user_choice = use_ui(move |u| if u.repo_open.contains(&rk) { Some(true) } else if u.repo_closed.contains(&rk) { Some(false) } else { None })();
     let open = user_choice.unwrap_or(default_open);
@@ -445,32 +514,58 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
     let drag = if draggable { rkey.clone() } else { String::new() };
     rsx! {
         div { class: if open && !items.is_empty() { "repo-group open" } else { "repo-group" }, "data-project": "{drag}",
-            div { class: if open { "repo-row open" } else { "repo-row" }, role: "button", title: "{title}", "data-drag-project": "{drag}",
+            div { class: if open { "repo-row open" } else { "repo-row" }, role: "button", title: "{title}", "data-drag-project": "{drag}", "data-ctx": "project",
                 onclick: move |_| app.set_group_open(&k, !open),
+                oncontextmenu: move |e| {
+                    e.prevent_default();
+                    if agent.is_none() {
+                        let c = e.client_coordinates();
+                        ctx_at.set(Some((c.x, c.y)));
+                    }
+                },
                 // The folder icon turns into the collapse chevron on hover.
                 span { class: "ic",
                     span { class: "ic-rest",
                         if let Some(k) = agent.clone() { AgentGlyph { kind: k } }
                         else if home { Icon { i: I::Home, size: 16, stroke: 1.5 } }
-                        else if open { Icon { i: I::FolderOpen, size: 16, stroke: 1.5 } }
-                        else { Icon { i: I::Folder, size: 16, stroke: 1.5 } }
+                        else { super::projects::ProjectMark { icon: icon.clone(), color: color.clone(), open } }
                     }
                     span { class: "ic-chev", Icon { i: I::ChevronRight, size: 15, stroke: 1.6 } }
                 }
                 span { class: "nm", dir: "auto", "{name}" }
+                if pinned { span { class: "pin-mark", title: "Pinned", Icon { i: I::Pin, size: 12, stroke: 1.6 } } }
                 if count > 0 { span { class: "cnt", "{count}" } }
                 if agent.is_none() {
-                    button { class: "icon-btn sm add", title: if path.is_some() { "New agent in {name}" } else { "New agent in Home" },
-                        onclick: {
-                            let p = path.clone();
-                            move |e: MouseEvent| {
-                                e.stop_propagation();
-                                app.draft.write().workspace = p.clone();
-                                app.new_agent();
+                    div { class: "acts",
+                        if let Some(p) = path.clone() {
+                            div { class: "menu-anchor",
+                                button { class: "icon-btn sm", title: "Project options",
+                                    onclick: move |e: MouseEvent| { e.stop_propagation(); menu.set(true); },
+                                    Icon { i: I::More, size: 15 }
+                                }
+                                super::Dropdown { open: menu, up: false, right: true,
+                                    ProjectActions { path: Some(p.clone()), pinned, onclose: move |_| menu.set(false) }
+                                }
                             }
-                        },
-                        Icon { i: I::Plus, size: 15, stroke: 1.6 }
+                        }
+                        button { class: "icon-btn sm", title: if path.is_some() { "New agent in {name}" } else { "New agent in Home" },
+                            onclick: {
+                                let p = path.clone();
+                                move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    app.pick_project(p.clone());
+                                    app.new_agent();
+                                }
+                            },
+                            Icon { i: I::Plus, size: 15, stroke: 1.6 }
+                        }
                     }
+                }
+            }
+            if let Some((x, y)) = at {
+                div { class: "menu-backdrop", onclick: move |_| ctx_at.set(None), oncontextmenu: move |e| { e.prevent_default(); ctx_at.set(None); } }
+                div { id: "{ctx_id}", class: "menu ctx-menu", style: "left: {x}px; top: {y}px; visibility: hidden;", onclick: move |e| e.stop_propagation(),
+                    ProjectActions { path: path.clone(), pinned, onclose: move |_| ctx_at.set(None) }
                 }
             }
             super::Collapse { open,
@@ -486,10 +581,46 @@ fn RepoGroup(rkey: String, name: String, path: Option<String>, items: Vec<Sessio
     }
 }
 
+/// What can be done with a project (Home when `path` is `None`): from its
+/// "…" button and from a right-click on it.
+#[component]
+fn ProjectActions(path: Option<String>, pinned: bool, onclose: EventHandler<()>) -> Element {
+    let app = use_app();
+    let stored = path.as_deref().is_some_and(|p| app.config.read().workspace_by_path(p).is_some());
+    let p = path.clone().unwrap_or_default();
+    let (p1, p2, p3, p4, p5, p6) = (p.clone(), p.clone(), p.clone(), p.clone(), p.clone(), p.clone());
+    rsx! {
+        MenuItem { label: "New chat".to_string(), icon: Some(I::SquarePen),
+            onclick: { let path = path.clone(); move |_| { onclose.call(()); app.pick_project(path.clone()); app.new_agent(); } } }
+        if path.is_some() {
+            MenuItem { label: if pinned { "Unpin project".to_string() } else { "Pin project".to_string() }, icon: Some(if pinned { I::PinOff } else { I::Pin }),
+                onclick: move |_| { onclose.call(()); app.toggle_project_pin(&p1); } }
+            MenuItem { label: "Edit project…".to_string(), icon: Some(I::Pencil), onclick: move |_| { onclose.call(()); app.edit_project(Some(&p2)); } }
+            div { class: "menu-sep" }
+            MenuItem { label: "Open folder".to_string(), icon: Some(I::FolderOpen), onclick: move |_| { onclose.call(()); let _ = ::open::that(&p3); } }
+            MenuItem { label: "Open in Terminal".to_string(), icon: Some(I::Terminal), onclick: move |_| { onclose.call(()); let _ = crate::state::open_terminal(&p4, if cfg!(windows) { "cd ." } else { "true" }); } }
+            MenuItem { label: "Copy path".to_string(), icon: Some(I::Copy), onclick: move |_| { onclose.call(()); app.copy_text(&p5); } }
+            if stored {
+                div { class: "menu-sep" }
+                MenuItem { label: "Remove project".to_string(), icon: Some(I::Trash), danger: true, title: Some("Its chats stay, listed by their folder".to_string()),
+                    onclick: move |_| {
+                        onclose.call(());
+                        let p = p6.clone();
+                        app.update_config(move |c| {
+                            let n = larrier_core::config::normalize_path(&p);
+                            c.workspaces.retain(|w| larrier_core::config::normalize_path(&w.path) != n);
+                        });
+                        app.toast("Project removed; its chats stay");
+                    } }
+            }
+        }
+    }
+}
+
 /// One agent's chats inside a project (Mixed grouping).
 #[component]
 fn AgentSub(pkey: String, agent: AgentKind, items: Vec<SessionSummary>, ctx: SideCtx) -> Element {
-    let mut app = use_app();
+    let app = use_app();
     let key = format!("{pkey}|{}", agent.id());
     let k2 = key.clone();
     let group = key.clone();
@@ -636,7 +767,11 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             span { class: "t", dir: "auto", "{s.title}" }
             span { class: "tm", "{time}" }
             div { class: "more",
-                button { class: "icon-btn sm", style: "background: var(--selected);",
+                button { class: "icon-btn sm", title: if s.pinned { "Unpin" } else { "Pin" },
+                    onclick: { let id = s.id.clone(); move |e: MouseEvent| { e.stop_propagation(); app.toggle_pin(&id); } },
+                    Icon { i: if s.pinned { I::PinOff } else { I::Pin }, size: 13 }
+                }
+                button { class: "icon-btn sm",
                     onclick: move |e| {
                         e.stop_propagation();
                         let c = e.client_coordinates();

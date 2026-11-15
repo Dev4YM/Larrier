@@ -17,6 +17,7 @@ pub mod menubar;
 mod agent_models;
 mod models;
 mod overlays;
+pub mod projects;
 mod profile;
 mod request;
 mod right;

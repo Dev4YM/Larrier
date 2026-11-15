@@ -2028,3 +2028,60 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .branch-pick .env-chip:disabled { cursor: default; }
 .branch-pick .env-chip:disabled:hover { background: none; color: var(--fg-2); }
 .menu.branch-menu { min-width: 260px; max-width: 360px; }
+
+/* A project's mark: its icon in its color (ProjectMark). */
+.pj-mark { display: inline-flex; color: var(--fg-2); flex-shrink: 0; }
+
+/* Project rows in the sidebar: a pin when pinned; on hover its menu and a
+   new chat. A chat row's hover keeps Pin beside its menu. */
+.repo-row .pin-mark { display: inline-flex; color: var(--fg-3); flex-shrink: 0; }
+
+/* In the row's flow (not over it), so the name stops before them; no
+   transform, which would trap their menu. */
+.repo-row .acts { display: none; align-items: center; gap: 2px; margin-right: -4px; }
+.repo-row:hover .acts, .repo-row:has(.acts .menu) .acts { display: flex; }
+.repo-row:hover .pin-mark, .repo-row:has(.acts .menu) .pin-mark, .repo-row:hover .cnt, .repo-row:has(.acts .menu) .cnt { display: none; }
+.repo-row .acts .icon-btn { color: var(--fg-2); }
+.repo-row .acts .icon-btn:hover { color: var(--fg); background: var(--chip); }
+/* A chat row's Pin and "…" take its time's place, in the row's flow, so
+   the title stops before them. */
+.chat-row .more { position: static; transform: none; gap: 2px; margin-right: -4px; }
+.chat-row:hover .tm { display: none; }
+
+/* The project dialog: name, look (icon and color), folders, agents and
+   where new chats run, on the app's label column. */
+.modal.pj-modal { width: min(560px, 94vw); }
+.pj-form { padding: var(--sp-2) var(--sp-6) var(--sp-6); font-size: var(--ui-sm); }
+.pj-form .k.top { align-self: start; padding-top: 6px; }
+.pj-look { display: flex; align-items: center; gap: var(--sp-5); min-width: 0; }
+.pj-icon-btn { width: var(--h-ctl); height: var(--h-ctl); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); display: inline-flex; align-items: center; justify-content: center; }
+.pj-icon-btn:hover { border-color: var(--border-2); }
+.menu.pj-icons { min-width: 0; }
+.pj-icon-grid { display: grid; grid-template-columns: repeat(6, 32px); gap: 2px; padding: 2px; }
+.pj-icon { width: 32px; height: 32px; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; color: var(--fg-2); }
+.pj-icon:hover { background: var(--hover); color: var(--fg); }
+.pj-icon.on { background: var(--selected); color: var(--fg); }
+.pj-swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.pj-swatch { --sw: transparent; width: 20px; height: 20px; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent); }
+.pj-swatch.none { background: var(--input); position: relative; overflow: hidden; }
+.pj-swatch.none::after { content: ""; position: absolute; left: 50%; top: 2px; bottom: 2px; width: 1.5px; background: var(--fg-3); transform: translateX(-50%) rotate(45deg); }
+.pj-swatch.on { box-shadow: 0 0 0 2px var(--card-2), 0 0 0 3.5px var(--sw, var(--fg-3)); }
+.pj-swatch.none.on { box-shadow: 0 0 0 2px var(--card-2), 0 0 0 3.5px var(--fg-3); }
+.pj-folders, .pj-agents-wrap { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.pj-folder { display: flex; align-items: center; gap: var(--sp-4); height: var(--h-ctl); padding: 0 var(--sp-2) 0 var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--input); color: var(--fg-2); min-width: 0; }
+.pj-folder .ellipsis { flex: 1; min-width: 0; color: var(--fg); }
+.pj-tag { font-size: var(--ui-2xs); color: var(--fg-3); padding: 0 6px; height: 18px; display: inline-flex; align-items: center; border-radius: var(--r-sm); background: var(--hover); }
+.pj-add { align-self: flex-start; }
+.pj-hint { font-size: var(--ui-xs); color: var(--fg-3); line-height: 16px; }
+.pj-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.pj-agent { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px 0 8px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); color: var(--fg-2); }
+.pj-agent:hover { border-color: var(--border-2); color: var(--fg); }
+.pj-agent.on { border-color: var(--fg-3); background: var(--selected); color: var(--fg); }
+.pj-default { font-size: var(--ui-2xs); color: var(--fg-3); }
+.pj-form .seg.pj-seg { display: flex; width: 100%; }
+.pj-form .seg.pj-seg button { flex: 1; min-width: 0; justify-content: center; text-align: center; }
+.pj-remove { margin-right: auto; }
+.pj-err { color: var(--red); font-size: var(--ui-sm); margin-right: auto; }
+.pj-row .pj-mark { color: var(--fg-2); }
+.pj-row .icon-btn.on { color: var(--fg); }
+

@@ -215,6 +215,12 @@ impl Config {
         self.workspaces.iter().find(|w| normalize_path(&w.path) == norm)
     }
 
+    /// The project a folder belongs to: the one whose folder holds it most
+    /// closely (a project inside another wins for its own folders).
+    pub fn project_for(&self, path: &str) -> Option<&Workspace> {
+        project_in(&self.workspaces, path)
+    }
+
     pub fn add_workspace(&mut self, path: &str) -> Workspace {
         if let Some(w) = self.workspace_by_path(path) {
             return w.clone();
@@ -227,6 +233,12 @@ impl Config {
     pub fn custom_agent(&self, id: &str) -> Option<&CustomAgent> {
         self.custom_agents.iter().find(|c| c.id == id)
     }
+}
+
+/// The project among `projects` that a folder belongs to (see
+/// [`Config::project_for`]).
+pub fn project_in<'a>(projects: &'a [Workspace], path: &str) -> Option<&'a Workspace> {
+    projects.iter().filter_map(|w| w.holds(path).map(|n| (n, w))).max_by_key(|(n, _)| *n).map(|(_, w)| w)
 }
 
 pub fn normalize_path(p: &str) -> String {
@@ -1117,10 +1129,29 @@ pub fn default_providers() -> Vec<Provider> {
 pub struct Workspace {
     pub id: String,
     pub name: String,
+    /// Its main folder: where its chats start.
     pub path: String,
     pub added_at: DateTime<Utc>,
+    /// Listed first in the sidebar.
     #[serde(default)]
     pub pinned: bool,
+    /// More folders its agents may read and change (Claude Code's and
+    /// Codex's `--add-dir`); chats started in one belong to the project.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders: Vec<String>,
+    /// A Lucide icon's name (a folder when unset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Its color, as `#rrggbb`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// The agents it works with; the first starts its new chats. Empty: any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<AgentKind>,
+    /// Its new chats run in a worktree of their own (`true`) or in the
+    /// folder itself; unset follows Settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<bool>,
 }
 
 impl Workspace {
@@ -1129,7 +1160,34 @@ impl Workspace {
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| path.to_string());
-        Workspace { id: new_id(), name, path: path.to_string(), added_at: Utc::now(), pinned: false }
+        Workspace {
+            id: new_id(),
+            name,
+            path: path.to_string(),
+            added_at: Utc::now(),
+            pinned: false,
+            folders: Vec::new(),
+            icon: None,
+            color: None,
+            agents: Vec::new(),
+            worktree: None,
+        }
+    }
+
+    /// Its folders, the main one first.
+    pub fn all_folders(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.path).chain(self.folders.iter())
+    }
+
+    /// How closely `path` belongs to it: the length of the folder of its
+    /// that holds `path` (the folder itself or one inside it).
+    fn holds(&self, path: &str) -> Option<usize> {
+        let p = normalize_path(path);
+        self.all_folders()
+            .map(|f| normalize_path(f))
+            .filter(|f| p == *f || (p.starts_with(f.as_str()) && p[f.len()..].starts_with('/')))
+            .map(|f| f.len())
+            .max()
     }
 }
 
@@ -1151,6 +1209,21 @@ pub struct CustomAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_belongs_to_the_project_that_holds_it_most_closely() {
+        let mut c = Config::default();
+        let mut app = Workspace::new("D:/work/app");
+        app.folders.push("D:/work/shared".into());
+        let inner = Workspace::new("D:/work/app/tools");
+        c.workspaces = vec![app.clone(), inner.clone()];
+        assert_eq!(c.project_for("D:/work/app").map(|w| &w.id), Some(&app.id));
+        assert_eq!(c.project_for("D:/work/app/src").map(|w| &w.id), Some(&app.id));
+        assert_eq!(c.project_for("D:/work/shared").map(|w| &w.id), Some(&app.id));
+        assert_eq!(c.project_for("D:/work/app/tools/x").map(|w| &w.id), Some(&inner.id));
+        assert!(c.project_for("D:/work/apples").is_none());
+        assert!(c.project_for("D:/work").is_none());
+    }
 
     /// OpenCode and Hermes move to ACP once; a Native picked later stays.
     #[test]

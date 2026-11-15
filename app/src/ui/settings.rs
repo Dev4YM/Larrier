@@ -1022,25 +1022,33 @@ fn Sessions() -> Element {
 
 #[component]
 fn Workspaces() -> Element {
-    let app = use_app();
-    let list = app.config.read().workspaces.clone();
+    let mut app = use_app();
+    let mut list = app.config.read().workspaces.clone();
+    list.sort_by_key(|w| (!w.pinned, w.name.to_lowercase()));
     rsx! {
         h1 { "Projects" }
-        div { class: "sub", "Folders your agents work in. Chats without one are in Home." }
+        div { class: "sub", "Each has a name, an icon and a color, its folders and the agents it works with. Chats started in its folders are its chats; chats without one are in Home." }
         div { class: "set-card",
             for w in list {
-                div { key: "{w.id}", class: "set-row",
-                    Icon { i: I::Folder, size: 15 }
-                    div { class: "lbl", div { class: "t", "{w.name}" } div { class: "d", "{w.path}" } }
-                    button { class: "icon-btn", title: "Remove",
-                        onclick: { let id = w.id.clone(); move |_| app.update_config(|c| c.workspaces.retain(|x| x.id != id)) },
-                        Icon { i: I::Trash, size: 13 }
+                div { key: "{w.id}", class: "set-row pj-row",
+                    super::projects::ProjectMark { icon: w.icon.clone(), color: w.color.clone(), size: 16 }
+                    div { class: "lbl",
+                        div { class: "t", "{w.name}" }
+                        div { class: "d",
+                            "{larrier_core::lsf::short_path(&w.path)}"
+                            if !w.folders.is_empty() { " · {w.folders.len() + 1} folders" }
+                        }
                     }
+                    button { class: if w.pinned { "icon-btn on" } else { "icon-btn" }, title: if w.pinned { "Unpin" } else { "Pin to the top of the sidebar" },
+                        onclick: { let p = w.path.clone(); move |_| app.toggle_project_pin(&p) },
+                        Icon { i: if w.pinned { I::PinOff } else { I::Pin }, size: 13 }
+                    }
+                    button { class: "ghost-btn", onclick: { let id = w.id.clone(); move |_| app.ui.write().modal = Some(crate::state::Modal::Project(Some(id.clone()), None)) }, "Edit" }
                 }
             }
             div { class: "set-row",
-                div { class: "lbl", div { class: "t", "Add a folder" } }
-                button { class: "primary-btn", onclick: move |_| app.pick_workspace(false), Icon { i: I::FolderOpen, size: 13 } "Open folder…" }
+                div { class: "lbl", div { class: "t", "New project" } div { class: "d", "Pick its folder, then name it and give it a look." } }
+                button { class: "primary-btn", onclick: move |_| app.edit_project(None), Icon { i: I::FolderPlus, size: 13 } "New project" }
             }
         }
     }

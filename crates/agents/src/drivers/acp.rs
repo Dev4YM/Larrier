@@ -1018,6 +1018,7 @@ mod tests {
             notice: None,
             run_as: None,
             browser: None,
+            extra_dirs: Vec::new(),
         }
     }
 

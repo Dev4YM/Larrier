@@ -24,6 +24,10 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
         }
         None => {
             cmd.arg("-C").arg(&req.cwd);
+            // The project's other folders (a resumed run keeps what it had).
+            for d in &req.extra_dirs {
+                cmd.args(["--add-dir", d]);
+            }
         }
     }
     // Sandbox / approval / plan from the chosen modes, as config overrides

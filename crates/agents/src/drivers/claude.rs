@@ -47,6 +47,9 @@ async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedRecei
         cmd.args(["--agent", a]);
     }
     browser_args(&mut cmd, &req);
+    for d in &req.extra_dirs {
+        cmd.args(["--add-dir", d]);
+    }
     cmd.args(&req.modes.args);
     cmd.env_remove("CLAUDECODE");
     cmd.env("CLAUDE_CODE_FORWARD_SUBAGENT_TEXT", "1");
@@ -97,6 +100,9 @@ async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedRece
             cmd.args(["--agent", a]);
         }
         browser_args(&mut cmd, &req);
+        for d in &req.extra_dirs {
+            cmd.args(["--add-dir", d]);
+        }
         // --permission-mode from the chosen mode (Auto unless picked otherwise).
         cmd.args(&req.modes.args);
         // Claude Code refuses to start nested inside another Claude Code session.

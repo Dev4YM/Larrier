@@ -142,6 +142,8 @@ pub enum Modal {
     EditAccount(String),
     AddCustomAgent,
     AddWorkspace,
+    /// A project: a new one (its folder, when known), or one to edit (its id).
+    Project(Option<String>, Option<String>),
     /// A release's notes; `true` when Larrier was just updated to it.
     WhatsNew(String, bool),
 }
@@ -1828,11 +1830,77 @@ impl App {
     }
 
     pub fn toggle_pin(self, id: &str) {
-        self.update_session(id, |s| s.pinned = !s.pinned);
+        let pinned = !self.sessions.peek().iter().find(|s| s.id == id).is_some_and(|s| s.pinned);
+        self.set_flags(id, move |s| s.pinned = pinned, move |s| s.pinned = pinned);
     }
 
     pub fn set_unread(self, id: &str, unread: bool) {
-        self.update_session(id, |s| s.unread = unread);
+        self.set_flags(id, move |s| s.unread = unread, move |s| s.unread = unread);
+    }
+
+    /// Change a chat's own flags (pinned, unread, archived). A chat that
+    /// isn't open is changed on disk in the background, its sidebar row at
+    /// once: loading a very large chat on the UI thread would freeze the
+    /// window.
+    fn set_flags(mut self, id: &str, f: impl FnOnce(&mut Session) + Send + 'static, row: impl FnOnce(&mut SessionSummary)) {
+        if self.is_loaded(id) {
+            return self.update_session(id, f);
+        }
+        if let Some(s) = self.sessions.write().iter_mut().find(|s| s.id == id) {
+            row(s);
+        }
+        let id = id.to_string();
+        spawn_forever(async move {
+            let _ = tokio::task::spawn_blocking(move || {
+                let mut s = store().load(&id)?;
+                f(&mut s);
+                store().save(&s)
+            })
+            .await;
+        });
+    }
+
+    /// Start new chats in project `path` (Home when `None`), with the
+    /// project's own defaults: its first agent, where its chats run.
+    pub fn pick_project(mut self, path: Option<String>) {
+        let project = path.as_deref().and_then(|p| self.config.peek().project_for(p).cloned());
+        let mut d = self.draft.write();
+        d.set_workspace(path);
+        if let Some(w) = project {
+            if let Some(first) = w.agents.first().filter(|_| !w.agents.contains(&d.agent)) {
+                d.agent = first.clone();
+                d.model = None;
+                d.mode = None;
+                d.permission = None;
+                d.account_id = None;
+            }
+            if let Some(wt) = w.worktree {
+                d.worktree = wt;
+            }
+        }
+    }
+
+    /// Pin or unpin the project at `path` (a folder chats ran in becomes a
+    /// project of its own to be pinned).
+    pub fn toggle_project_pin(self, path: &str) {
+        let path = path.to_string();
+        self.update_config(move |c| {
+            let id = c.workspace_by_path(&path).map(|w| w.id.clone()).unwrap_or_else(|| c.add_workspace(&path).id);
+            if let Some(w) = c.workspaces.iter_mut().find(|w| w.id == id) {
+                w.pinned = !w.pinned;
+            }
+        });
+    }
+
+    /// Edit the project at `path` (a folder that isn't one yet opens as a
+    /// new project for it), or create one (`None`).
+    pub fn edit_project(mut self, path: Option<&str>) {
+        let id = path.and_then(|p| self.config.peek().workspace_by_path(p).map(|w| w.id.clone()));
+        let modal = match id {
+            Some(id) => Modal::Project(Some(id), None),
+            None => Modal::Project(None, path.map(String::from)),
+        };
+        self.ui.write().modal = Some(modal);
     }
 
     /// Look for a newer release. `quiet` (the automatic look) keeps failures
@@ -1968,11 +2036,8 @@ impl App {
     }
 
     pub fn toggle_archive(self, id: &str) {
-        let mut archived = false;
-        self.update_session(id, |s| {
-            s.archived = !s.archived;
-            archived = s.archived;
-        });
+        let archived = !self.sessions.peek().iter().find(|s| s.id == id).is_some_and(|s| s.archived);
+        self.set_flags(id, move |s| s.archived = archived, move |s| s.archived = archived);
         if archived {
             let cur = self.current_id().as_deref() == Some(id);
             self.forget_tabs(id);

@@ -375,10 +375,11 @@ pub fn ModalHost() -> Element {
     let mut app = use_app();
     let modal = app.ui.read().modal.clone();
     let Some(modal) = modal else { return rsx! {} };
+    let wide = matches!(modal, Modal::Project(..));
     let close = move |_| app.ui.write().modal = None;
     rsx! {
         div { class: "overlay", onclick: close,
-            div { class: "modal", onclick: move |e| e.stop_propagation(),
+            div { class: if wide { "modal pj-modal" } else { "modal" }, onclick: move |e| e.stop_propagation(),
                 match modal {
                     Modal::Rename(id) => rsx! { RenameModal { id } },
                     Modal::ConfirmDelete(id) => rsx! { DeleteModal { id } },
@@ -393,6 +394,7 @@ pub fn ModalHost() -> Element {
                         }
                     },
                     Modal::AddWorkspace => rsx! { div {} },
+                    Modal::Project(id, path) => rsx! { super::projects::ProjectModal { id, path } },
                     Modal::WhatsNew(version, updated) => rsx! { WhatsNewModal { version, updated } },
                 }
             }

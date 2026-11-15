@@ -52,6 +52,8 @@ pub struct TurnRequest {
     pub run_as: Option<String>,
     /// Larrier's browser, for agents that take MCP servers per run.
     pub browser: Option<crate::browser::Server>,
+    /// The project's other folders, which the agent may work in too.
+    pub extra_dirs: Vec<String>,
 }
 
 impl TurnRequest {
@@ -575,6 +577,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         launch.env.extend(ml.env);
     }
 
+    let cwd_for_dirs = cwd.clone();
     Ok(TurnRequest {
         agent: agent.clone(),
         protocol,
@@ -599,7 +602,21 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
             .map(|s| s.for_chat(&session.id))
             .filter(|_| cfg.settings.browser_tools && crate::browser::SUPPORTED)
             .filter(|_| matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex) || protocol == Protocol::Acp),
+        extra_dirs: project_dirs(cfg, session, &cwd_for_dirs),
     })
+}
+
+/// The other folders of the chat's project: not the folder it runs in, nor
+/// (for a chat in a worktree) the project's checkout it was made from.
+fn project_dirs(cfg: &Config, session: &Session, cwd: &Path) -> Vec<String> {
+    let Some(main) = session.workspace.as_ref().map(|w| w.path.clone()) else { return Vec::new() };
+    let Some(project) = cfg.project_for(&main) else { return Vec::new() };
+    let same = |a: &str, b: &str| larrier_core::config::normalize_path(a) == larrier_core::config::normalize_path(b);
+    project
+        .all_folders()
+        .filter(|f| !same(f, &main) && !same(f, &cwd.to_string_lossy()) && Path::new(f.as_str()).is_dir())
+        .cloned()
+        .collect()
 }
 
 /// The folder to resume a Cursor chat from. The CLI finds a chat only from

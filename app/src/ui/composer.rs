@@ -974,7 +974,13 @@ pub fn Composer(
                 div { class: "row", style: "gap: 2px; margin: 0 0 8px 4px;",
                     div { class: "menu-anchor",
                         button { class: "env-chip", onclick: move |_| { pj_query.set(String::new()); ws_menu.set(true); },
-                            Icon { i: if ws_now.is_some() { I::Folder } else { I::Home }, size: 14, stroke: 1.5 }
+                            if let Some(w) = ws_now.as_deref().and_then(|p| app.config.read().project_for(p).cloned()) {
+                                super::projects::ProjectMark { icon: w.icon.clone(), color: w.color.clone(), size: 14 }
+                            } else if ws_now.is_some() {
+                                Icon { i: I::Folder, size: 14, stroke: 1.5 }
+                            } else {
+                                Icon { i: I::Home, size: 14, stroke: 1.5 }
+                            }
                             span { "{ws_label}" }
                             Icon { i: I::ChevronDown, size: 12 }
                         }
@@ -994,7 +1000,7 @@ pub fn Composer(
                                                 e.prevent_default();
                                                 if let Some(p) = &first {
                                                     ws_menu.set(false);
-                                                    app.draft.write().set_workspace(Some(p.clone()));
+                                                    app.pick_project(Some(p.clone()));
                                                 }
                                             }
                                         }
@@ -1006,13 +1012,13 @@ pub fn Composer(
                                     key: "{w.id}",
                                     label: w.name.clone(),
                                     title: Some(short_path(&w.path)),
-                                    icon: Some(I::Folder),
+                                    lead: rsx! { super::projects::ProjectMark { icon: w.icon.clone(), color: w.color.clone(), size: 14 } },
                                     checked: ws_now.as_deref() == Some(w.path.as_str()),
                                     onclick: {
                                         let p = w.path.clone();
                                         move |_| {
                                             ws_menu.set(false);
-                                            app.draft.write().set_workspace(Some(p.clone()));
+                                            app.pick_project(Some(p.clone()));
                                         }
                                     },
                                 }
@@ -1024,9 +1030,9 @@ pub fn Composer(
                                 div { class: "menu-sep" }
                             }
                             MenuItem { label: "Home".to_string(), icon: Some(I::Home), checked: ws_now.is_none(), title: Some("Chats without a project folder".to_string()),
-                                onclick: move |_| { ws_menu.set(false); app.draft.write().set_workspace(None); } }
+                                onclick: move |_| { ws_menu.set(false); app.pick_project(None); } }
                             MenuItem { label: "New project".to_string(), icon: Some(I::Plus), title: Some("Pick a folder to work in".to_string()),
-                                onclick: move |_| { ws_menu.set(false); app.pick_workspace(true); } }
+                                onclick: move |_| { ws_menu.set(false); app.edit_project(None); } }
                             MenuItem { label: "Manage projects".to_string(), icon: Some(I::Settings),
                                 onclick: move |_| { ws_menu.set(false); app.open_settings(SettingsTab::Workspaces); } }
                         }
@@ -1429,7 +1435,7 @@ pub fn Composer(
 
 /// Agents that can be picked: enabled and installed (API agents need a
 /// provider), plus the one in use.
-fn pickable_agents(app: &App, current: &AgentKind) -> Vec<(AgentKind, String, String)> {
+pub(super) fn pickable_agents(app: &App, current: &AgentKind) -> Vec<(AgentKind, String, String)> {
     let cfg = app.config.read();
     let detected = app.detected.read();
     let mut out: Vec<(AgentKind, String, String)> = Vec::new();

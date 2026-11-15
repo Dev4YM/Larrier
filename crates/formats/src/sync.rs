@@ -134,6 +134,11 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
                 let source_changed = r.source_mtime != info.mtime_ms || r.source_len != info.size;
                 if !source_changed && r.importer >= IMPORTER_VERSION {
                     report.skipped += 1;
+                } else if source_changed && r.importer >= IMPORTER_VERSION && grew_by_bookkeeping_only(&info, r.source_len) {
+                    // Only the agent's own bookkeeping was added: the chat is
+                    // the same. Remembered at its new size, not read again.
+                    store.set_import_record(&key, ImportRecord { source_mtime: info.mtime_ms, source_len: info.size, ..r });
+                    report.skipped += 1;
                 } else {
                     todo.push((info, Plan::Update(r.session_id, source_changed), key));
                 }
@@ -207,6 +212,15 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
     }
     store.flush_imports();
     report
+}
+
+/// The native file only gained lines its importer doesn't read since it was
+/// last imported at `from` bytes (see `claude::grew_by_bookkeeping_only`).
+fn grew_by_bookkeeping_only(info: &NativeSessionInfo, from: u64) -> bool {
+    match info.agent {
+        AgentKind::ClaudeCode => crate::claude::grew_by_bookkeeping_only(&info.path, from),
+        _ => false,
+    }
 }
 
 /// The session was imported from this native session and still continues

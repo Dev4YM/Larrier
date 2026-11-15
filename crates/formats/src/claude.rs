@@ -72,6 +72,37 @@ pub fn discover() -> Vec<NativeSessionInfo> {
 
 /// Session info for one transcript file; `None` for anything that isn't a
 /// top-level session transcript.
+/// Lines Claude Code writes for its own bookkeeping, which the import
+/// doesn't read: costs, its prompt queue, file history, connection state.
+/// (`last-prompt` isn't one: it marks the conversation's current branch.)
+const BOOKKEEPING: &[&str] = &["queue-operation", "file-history-snapshot", "file-history-delta", "cost-state", "bridge-session", "isolation-latch", "atis-latch", "agent-setting"];
+
+/// What session file `path` gained since byte `from` is only bookkeeping,
+/// so importing it again would change nothing. Reads just the new bytes.
+/// False when it can't tell cheaply: the file was rewritten (the new part
+/// doesn't start after a whole line), a line is still being written, a
+/// line isn't JSON, or more was added than is worth reading here.
+pub fn grew_by_bookkeeping_only(path: &Path, from: u64) -> bool {
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX: u64 = 4 << 20;
+    let Ok(mut f) = std::fs::File::open(path) else { return false };
+    let Ok(len) = f.metadata().map(|m| m.len()) else { return false };
+    if from == 0 || len <= from || len - from > MAX {
+        return false;
+    }
+    let mut buf = Vec::with_capacity((len - from + 1) as usize);
+    if f.seek(SeekFrom::Start(from - 1)).is_err() || f.take(len - from + 1).read_to_end(&mut buf).is_err() {
+        return false;
+    }
+    if buf.first() != Some(&b'\n') || buf.last() != Some(&b'\n') {
+        return false;
+    }
+    buf[1..]
+        .split(|b| *b == b'\n')
+        .filter(|l| !l.iter().all(u8::is_ascii_whitespace))
+        .all(|l| serde_json::from_slice::<Value>(l).ok().and_then(|v| v.get("type").and_then(Value::as_str).map(|t| BOOKKEEPING.contains(&t))).unwrap_or(false))
+}
+
 pub fn file_info(p: &Path) -> Option<NativeSessionInfo> {
     let name = p.file_name()?.to_string_lossy().to_string();
     if !name.ends_with(".jsonl") || name.starts_with("agent-") {

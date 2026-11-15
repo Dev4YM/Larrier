@@ -27,6 +27,15 @@ const FILE_MAX_WAIT: Duration = Duration::from_secs(2);
 /// Database stores change with every UI interaction; rescan them less often.
 const DB_QUIET: Duration = Duration::from_millis(1500);
 const DB_MAX_WAIT: Duration = Duration::from_secs(6);
+/// A session file this big takes seconds to import again: it's imported at
+/// most once per `big_file_gap` while its agent keeps writing to it.
+const BIG_FILE: u64 = 32 << 20;
+
+/// How long a big session file waits between imports: about a second per
+/// 10 MB, from 3 to 30 seconds. `None` for files that import quickly.
+fn big_file_gap(len: u64) -> Option<Duration> {
+    (len > BIG_FILE).then(|| Duration::from_millis((len / 10_000).clamp(3_000, 30_000)))
+}
 
 /// One place to watch for an agent.
 #[derive(Clone, Debug, PartialEq)]
@@ -288,6 +297,10 @@ pub fn spawn(
     std::thread::Builder::new().name("larrier-live-sync".into()).spawn(move || {
         let mut files = Debouncer::new(FILE_QUIET, FILE_MAX_WAIT);
         let mut dbs = Debouncer::new(DB_QUIET, DB_MAX_WAIT);
+        // Big files: when each was last imported, and the ones waiting for
+        // their next turn (with when it comes).
+        let mut last_run: HashMap<PathBuf, Instant> = HashMap::new();
+        let mut later: HashMap<PathBuf, Instant> = HashMap::new();
         let route = |p: PathBuf, files: &mut Debouncer, dbs: &mut Debouncer, now: Instant| {
             if let Some(spec) = specs.iter().find(|s| s.matches(&p)) {
                 if let Some(key) = spec.key_for(&p) {
@@ -310,11 +323,31 @@ pub fn spawn(
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
-            if files.is_empty() && dbs.is_empty() {
+            if files.is_empty() && dbs.is_empty() && later.is_empty() {
                 continue;
             }
             let now = Instant::now();
             let mut ready = files.take_ready(now);
+            let due: Vec<PathBuf> = later.iter().filter(|(_, at)| **at <= now).map(|(p, _)| p.clone()).collect();
+            for p in due {
+                later.remove(&p);
+                if !ready.contains(&p) {
+                    ready.push(p);
+                }
+            }
+            ready.retain(|p| {
+                let Some(gap) = std::fs::metadata(p).ok().and_then(|m| big_file_gap(m.len())) else { return true };
+                match last_run.get(p) {
+                    Some(at) if now.duration_since(*at) < gap => {
+                        later.entry(p.clone()).or_insert(*at + gap);
+                        false
+                    }
+                    _ => {
+                        last_run.insert(p.clone(), now);
+                        true
+                    }
+                }
+            });
             ready.extend(dbs.take_ready(now));
             if ready.is_empty() {
                 continue;
@@ -333,6 +366,36 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn big_files_wait_longer_between_imports() {
+        assert_eq!(big_file_gap(5 << 20), None);
+        assert_eq!(big_file_gap(40 << 20), Some(Duration::from_millis(4_194)));
+        assert_eq!(big_file_gap(236_000_000), Some(Duration::from_millis(23_600)));
+        assert_eq!(big_file_gap(2_000_000_000), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn bookkeeping_lines_alone_dont_need_an_import() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("s.jsonl");
+        let first = "{\"type\":\"user\",\"uuid\":\"a\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n";
+        std::fs::write(&f, first).unwrap();
+        let at = first.len() as u64;
+        let add = |s: &str| {
+            use std::io::Write;
+            std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(s.as_bytes()).unwrap();
+        };
+        add("{\"type\":\"cost-state\",\"totalCostUSD\":1}\n{\"type\":\"queue-operation\",\"operation\":\"enqueue\"}\n");
+        assert!(claude::grew_by_bookkeeping_only(&f, at));
+        // A line still being written: can't tell.
+        add("{\"type\":\"cost-st");
+        assert!(!claude::grew_by_bookkeeping_only(&f, at));
+        add("ate\"}\n{\"type\":\"assistant\",\"uuid\":\"b\"}\n");
+        assert!(!claude::grew_by_bookkeeping_only(&f, at));
+        // Not after a whole line (the file was rewritten).
+        assert!(!claude::grew_by_bookkeeping_only(&f, at - 3));
+    }
     use larrier_core::{Message, Session};
 
     fn claude_spec(root: &Path) -> WatchSpec {

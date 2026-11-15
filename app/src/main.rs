@@ -7,6 +7,7 @@ mod automations;
 mod browser_cef;
 mod browser_control;
 mod browser_host;
+mod fonts;
 mod highlight;
 mod icons;
 mod install;
@@ -186,7 +187,8 @@ fn main() {
         .with_background_color(bg)
         .with_data_directory(root.join("webview"))
         .with_custom_head(format!(
-            "<meta name=\"color-scheme\" content=\"light dark\"><link rel=\"icon\" href=\"data:,\"><title>Larrier</title><style>{CSS}</style>"
+            "<meta name=\"color-scheme\" content=\"light dark\"><link rel=\"icon\" href=\"data:,\"><title>Larrier</title><style>{}</style><style>{CSS}</style>",
+            fonts::faces_css()
         ))
         .with_windows_browser_args(match std::env::var("LARRIER_DEVTOOLS_PORT") {
             // Lets automated UI tests drive the webview over the DevTools protocol.

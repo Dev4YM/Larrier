@@ -27,7 +27,6 @@ const ACCENTS: &[(&str, &str)] = &[
 ];
 
 const UI_FONTS: &[&str] = &[
-    "Inter",
     "Segoe UI Variable Text",
     "Segoe UI",
     "SF Pro Text",
@@ -905,7 +904,8 @@ fn FontPicker(mono: bool, installed: HashMap<String, bool>) -> Element {
         if mono { s.mono_font.clone() } else { s.ui_font.clone() }
     }
     .filter(|f| !f.trim().is_empty());
-    let default_label = if mono { "System monospace" } else { "System default" };
+    // The interface's own font is Inter, built in.
+    let default_label = if mono { "System monospace" } else { "Inter (built in)" };
     let label = cur.clone().unwrap_or_else(|| default_label.to_string());
     let btn_font = match &cur {
         Some(f) => font_family(f, mono),
@@ -927,7 +927,7 @@ fn FontPicker(mono: bool, installed: HashMap<String, bool>) -> Element {
             }
             Dropdown { open, up: false, right: true, class: "ap-font-menu",
                 button { class: "menu-item", onclick: move |_| set(None),
-                    span { class: "ellipsis", style: if mono { "font-family: ui-monospace, monospace;" } else { "font-family: system-ui, sans-serif;" }, "{default_label}" }
+                    span { class: "ellipsis", style: if mono { "font-family: ui-monospace, monospace;" } else { "font-family: Inter, sans-serif;" }, "{default_label}" }
                     if cur.is_none() { span { class: "check", Icon { i: I::Check, size: 13 } } }
                 }
                 div { class: "menu-sep" }

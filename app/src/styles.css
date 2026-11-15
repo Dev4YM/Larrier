@@ -87,8 +87,9 @@
 /* Type: one scale for the interface. Count badges --ui-2xs, meta and labels
    --ui-xs, the base (rows, menus, buttons, inputs) --ui-sm, titles inside
    cards and dialogs --ui-md, page titles --ui-lg, large figures --ui-xl.
-   What the user reads in a chat follows Text Size instead (--fs…). */
-:root { --ui-2xs: 10px; --ui-xs: 11px; --ui-sm: 12px; --ui-md: 13px; --ui-lg: 15px; --ui-xl: 18px; }
+   What the user reads in a chat follows Text Size instead (--fs…). Set in
+   the built-in Inter (fonts.rs), whose optical sizes keep small text crisp. */
+:root { --ui-2xs: 11px; --ui-xs: 12px; --ui-sm: 13px; --ui-md: 14px; --ui-lg: 16px; --ui-xl: 19px; }
 /* Space: one 4px-based scale, and one height for controls (inputs,
    selects, buttons) with a smaller one for buttons inside rows. */
 :root { --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px; --sp-5: 12px; --sp-6: 16px; --sp-7: 20px; --sp-8: 24px; --sp-9: 32px; --h-ctl: 28px; --h-ctl-sm: 24px; }
@@ -99,12 +100,13 @@
 html, body, #main { margin: 0; padding: 0; height: 100%; overflow: hidden; }
 
 .app {
-  --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Inter, sans-serif;
+  --font: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --fs: 13px;
   font-family: var(--font);
+  font-optical-sizing: auto;
   font-size: var(--ui-sm);
-  line-height: 16px;
+  line-height: 18px;
   color: var(--fg);
   background: var(--win);
   height: 100vh;
@@ -391,7 +393,7 @@ svg { flex-shrink: 0; display: block; }
 .menu-search { display: flex; align-items: center; gap: 6px; padding: 4px 8px 6px; border-bottom: 1px solid var(--border); margin: -2px -4px 4px; color: var(--fg-3); }
 .menu-search input { border: none; outline: none; background: transparent; flex: 1; font-size: var(--ui-sm); user-select: text; color: var(--fg); }
 .menu-label { padding: 6px 8px 4px; font-size: var(--ui-xs); color: var(--fg-3); }
-.menu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 26px; border-radius: var(--r-sm); text-align: left; color: var(--fg); }
+.menu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 0 8px; height: 28px; border-radius: var(--r-sm); text-align: left; color: var(--fg); }
 .menu-item:hover, .menu-item.hl { background: var(--hover); }
 .menu-item.danger { color: var(--red); }
 .menu-item .sub { margin-left: auto; color: var(--fg-3); font-size: var(--ui-xs); padding-left: 12px; white-space: nowrap; }

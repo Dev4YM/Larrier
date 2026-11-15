@@ -5,6 +5,36 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.44 — 2026-11-15
+
+### New
+
+- One place for every harness and the accounts it runs as
+- Grok Build, xAI's coding agent
+- A page per harness in tabs, and how each one runs
+- A compact model picker with favorites
+- Submenus open beside their menu
+- Cleaner project and environment menus
+- Chat settings, a branch picker and worktrees by use
+
+### Look and feel
+
+- Quick, plain motion that never stretches the layout
+- One moderate corner scale instead of pills and circles
+- Small, quick labels in the theme's own colors
+- One type scale for the whole interface
+- One spacing scale and one control height
+- Fast and smooth instead of instant
+- Claude Code shows Claude's own mark
+- A cleaner automation dialog
+- Inter built in, one size up
+- Plain + and settings buttons
+
+### Fixed
+
+- Menus no longer block the window
+- Ask Claude Code what a context holds only when it's opened
+- Dropdowns open below, one submenu at a time
 ## 0.1.43 — 2026-11-04
 
 ### New

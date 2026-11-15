@@ -48,8 +48,8 @@ them into one window:
 | **Live agents** | Approvals, questions and plans answered just above the input; steering, queued follow-ups and clean stops. |
 | **Side panel** | Git changes with commit / push / PR, a real browser agents can drive, terminals and a code editor, per chat. |
 | **Parallel work** | Run one prompt on several agents (Multitask), side-by-side chats, optional per-agent git worktrees. |
-| **Accounts** | Several logins, API keys (in the OS keychain) or environment presets per agent; pick one per chat. |
-| **Models** | Each agent's own model list, reasoning effort and context options, plus your own endpoints. |
+| **Harnesses & accounts** | Every agent and Larrier Chat with its accounts in one place: sign-ins, API keys and endpoints (keys in the OS keychain), checked when you ask; pick one per chat. |
+| **Models** | Each agent's own model list, reasoning effort and context options, plus models on your own API accounts. |
 | **Plan & usage** | Plan limits with reset times, tokens, cost and cache hits by agent, model and project. |
 | **Agent versions** | Spot outdated agents and install or update them the way their makers say to. |
 | **Automations** | Scheduled, interval and on-commit agent runs on your machine. |
@@ -70,7 +70,7 @@ them into one window:
 | Droid | Yes | Yes | Context handoff |
 | Goose, Amp, Copilot CLI, Qwen Code, Kimi, Aider | Yes | — | Context handoff |
 | Any [Agent Client Protocol](https://agentclientprotocol.com) agent | Yes | — | Context handoff |
-| API chat: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, any OpenAI-compatible endpoint | Yes | — | Full history |
+| Larrier Chat: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, any OpenAI-compatible endpoint | Yes | — | Full history |
 | ChatGPT and claude.ai exports | — | Yes | — |
 
 "Context handoff" means Larrier passes the conversation so far to the agent
@@ -102,7 +102,7 @@ Every copy keeps itself up to date from GitHub releases. Details for each
 system are in [docs/install.md](docs/install.md).
 
 Larrier finds the agents you already have. Agents you don't have yet can be
-installed from **Settings → Agents**.
+installed from **Settings → Harnesses**.
 
 ## Build from source
 

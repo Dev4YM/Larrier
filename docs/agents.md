@@ -1,7 +1,8 @@
 # Agents
 
-Larrier runs each agent's own program (or, for API chat, the model
-provider's API) and translates what it streams into one transcript. Your
+Larrier calls everything that runs a chat a **harness**: each agent's own
+program, and Larrier Chat, which talks to model APIs itself. It runs the
+harness and translates what it streams into one transcript. Your
 agents keep their own logins, settings and session stores; Larrier reads
 those and, when you continue a chat with an agent, writes only what that
 agent needs to resume.
@@ -25,9 +26,9 @@ agent needs to resume.
 | Kimi | `kimi` | ACP (`kimi acp`) | Yes |
 | Aider | `aider` | plain text | — |
 | Custom | any command | ACP or one of the stream protocols above | Depends |
-| Chat | — | HTTP: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, OpenAI-compatible | — |
+| Larrier Chat | — | HTTP: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, OpenAI-compatible | — |
 
-Agents with an ACP mode can be switched to it in **Settings → Agents →
+Agents with an ACP mode can be switched to it in **Settings → Harnesses →
 ‹agent› → Running**. Where an agent can't ask while Larrier runs it, Larrier
 says what it refused and lets you change the permission mode.
 
@@ -40,17 +41,28 @@ what you picked.
 
 ## Accounts
 
-An agent can have several identities, chosen per chat from the model
-picker:
+Every credential is an account of one harness, managed on that harness's
+page in **Settings → Harnesses**. The default account runs new chats; a
+chat can switch in the model picker. An account is one of:
 
-- **Separate logins:** an isolated config folder per login
+- **Current sign-in:** whatever the agent is signed into on this computer
+  (its subscription or login).
+- **Separate sign-in:** an isolated config folder of its own
   (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …). Sign in once from Larrier; it runs
   the agent's own login in a terminal.
-- **Existing folders:** add a folder an agent already signs in from.
-- **API keys:** kept in the OS keychain, exported to the agent as its
-  environment variable.
-- **Environment presets:** any set of variables, values may reference
-  keychain secrets.
+- **Existing folder:** a folder an agent already signs in from.
+- **API:** a provider's API (Anthropic, OpenAI, OpenRouter, Ollama, any
+  OpenAI-compatible endpoint, a gateway) with its key in the OS keychain.
+  Larrier points Claude Code, Codex, OpenCode, Droid and Hermes at it for
+  the runs that use it, without changing their own settings; other agents
+  get the key in the variable they read (`OPENAI_API_KEY`, …). Larrier
+  Chat's accounts are all API accounts, each with the models it offers.
+
+Each account shows whether it is signed in or has its key saved, and how
+many chats use it. **Check** asks an API for its models with the key, so a
+wrong key or address shows up before a chat; nothing is sent until you
+press it. A chat on an account whose key is missing says so instead of
+starting.
 
 **Plan & Usage** shows each account's plan limits and reset times where the
 agent records them (Claude Code, Codex, Cursor, Gemini CLI).
@@ -62,11 +74,12 @@ menu, Codex's model list, Cursor's enabled models, OpenCode and Hermes
 providers, …), so the picker shows exactly what the agent offers. A model's
 **Edit** sets its options where the agent has them: reasoning effort,
 context size (for example Cursor's 256K / 500K variants), speed. You can add
-your own models and OpenAI- or Anthropic-compatible endpoints per agent.
+your own models, on the agent's own service or served by one of its API
+accounts.
 
 ## Installing and updating agents
 
-**Settings → Agents** shows each agent's installed version and the latest
+**Settings → Harnesses** shows each agent's installed version and the latest
 one its makers have published, read only from where they publish it:
 
 | Source | Agents |
@@ -94,5 +107,6 @@ from its own site.
 
 ## Custom agents
 
-Add any command under **Settings → Agents → Custom**: its program and
-arguments, environment, and protocol (ACP or one of the stream protocols).
+Add any command under **Settings → Harnesses → Custom agents**: its
+program and arguments, and its protocol (ACP or one of the stream
+protocols).

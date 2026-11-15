@@ -50,7 +50,8 @@ Larrier itself connects to:
   anonymously (no GitHub account or token).
 - **Where agents publish releases** (npm, PyPI, GitHub, the agents' install
   scripts): looking up agents' latest versions.
-- **Model providers you configure** for API chat.
+- **The APIs of your API accounts:** Larrier Chat's messages, and a
+  **Check** of an account's key when you press it.
 - **Anthropic's usage endpoint** for Claude Code plan limits, as above.
 - **The pages you open** in the Browser tab (an address bar search goes to
   Google).

@@ -109,7 +109,7 @@ Continuing a session with a different agent:
    a compact transcript, which is sent once inside a
    `<conversation_history>` block ahead of the next prompt. Later turns
    resume natively through the agent's own session id.
-3. **API chat.** Larrier's built-in Chat agent replays the whole LSF history
+3. **API chat.** Larrier Chat replays the whole LSF history
    to the model provider.
 
 Each agent's native session keeps growing on its own. LSF stays the single

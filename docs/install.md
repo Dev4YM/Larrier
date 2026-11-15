@@ -171,7 +171,7 @@ Set `LARRIER_HOME` to use another folder. What's in it is described in
 ## Agents
 
 Larrier finds the agent programs you already have (on `PATH` and in their
-usual install folders, on every system). In **Settings → Agents** you can
+usual install folders, on every system). In **Settings → Harnesses** you can
 point an agent at a specific program, turn agents off, and install or
 update them with their makers' installer for your system; see
 [agents.md](agents.md#installing-and-updating-agents).

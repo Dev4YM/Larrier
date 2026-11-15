@@ -181,11 +181,12 @@ each agent's own configuration and tagged with the agents that use it.
 - **Plan & Usage:** plan limits with reset times; tokens, cost, sessions
   and cache hits against the previous period; breakdowns by agent, model
   and project; an activity heatmap.
-- **Agents:** turn agents on or off, their programs, versions and updates,
-  accounts, running options and permissions.
-- **Accounts**, **Models & API Keys**, **Source Control**, **Sessions**
-  (import and live sync), **Workspaces**, **Shortcuts** and **About**
-  (version, update channel, release notes).
+- **Harnesses:** Larrier Chat and every agent, each on a page of its own:
+  its accounts (sign-ins, API keys and endpoints, checked when you ask),
+  its models and defaults, how it runs, its version and updates. Turn
+  agents on or off from the list.
+- **Source Control**, **Sessions** (import and live sync), **Workspaces**,
+  **Shortcuts** and **About** (version, update channel, release notes).
 
 ## Larrier reopens as you left it
 

@@ -35,7 +35,8 @@ pub fn logo(id: &str) -> Option<&'static str> {
 
 fn agent_logo_id(kind: &AgentKind) -> Option<&'static str> {
     Some(match kind {
-        AgentKind::ClaudeCode => "claude-code",
+        // Claude's own mark, as claude.com shows it.
+        AgentKind::ClaudeCode => "claude",
         // Codex is part of the ChatGPT app now: the OpenAI mark, drawn in the
         // text color (no badge behind it).
         AgentKind::Codex => "openai",

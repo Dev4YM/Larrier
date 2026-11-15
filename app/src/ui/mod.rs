@@ -1818,7 +1818,7 @@ pub fn Dropdown(
 
 /// JS that positions a menu next to its anchor inside the window and wires
 /// its keyboard handling.
-pub fn place_js(id: &str, prefer_up: bool, align_right: bool) -> String {
+pub fn place_js(id: &str, _prefer_up: bool, align_right: bool) -> String {
     format!(
         r#"requestAnimationFrame(() => {{
   const m = document.getElementById('{id}'); if (!m) return;
@@ -1834,7 +1834,9 @@ pub fn place_js(id: &str, prefer_up: bool, align_right: bool) -> String {
   const mw = Math.min(m.offsetWidth, vw - pad * 2), mh = Math.min(m.scrollHeight, cap);
   const below = vh - a.bottom - pad - gap, above = a.top - pad - gap;
   const need = Math.min(mh, 260);
-  let up = {prefer_up} ? (above >= need || above > below) : (below < need && above > below);
+  // Below the button, as a dropdown does; above only when it doesn't fit
+  // below and there's more room above.
+  let up = below < need && above > below;
   const room = Math.max(120, up ? above : below);
   const h = Math.min(mh, room);
   const top = up ? Math.max(pad, a.top - gap - h) : Math.min(a.bottom + gap, vh - pad - h);
@@ -1890,6 +1892,31 @@ const MENU_KEYS_JS: &str = r#"const items = () => [...m.querySelectorAll('button
   if (s) s.focus({ preventScroll: true });
   else if (focusFirst) { const f = (checked && checked.closest('.menu-item')) || items()[0]; if (f) f.focus({ preventScroll: true }); }
   if (m.__keys) return; m.__keys = true;
+  // Hovering a row with a submenu opens it, and closes any other open one.
+  // While the pointer is still heading into an open submenu (crossing this
+  // row on the way), it waits a moment instead.
+  m.addEventListener('pointerover', (e) => {
+    const t = e.target instanceof Element ? e.target.closest('.has-sub') : null;
+    if (!t || t.closest('.menu') !== m || t.classList.contains('open') || t.classList.contains('disabled')) return;
+    const subs = () => [...m.querySelectorAll(':scope > .sub-menu')];
+    const open = () => {
+      if (!t.isConnected || t.classList.contains('open')) return;
+      for (const s of subs()) if (s.id + '-t' !== t.id) { const c = s.querySelector(':scope > .sub-close'); if (c) c.click(); }
+      t.click();
+    };
+    clearTimeout(t.__open);
+    // Heading into an open submenu: inside the triangle from where the
+    // pointer left its row to the submenu's near edge (place_sub_js).
+    const inTri = (p, x, y) => {
+      const s = (a, b, c) => (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]);
+      const q = [x, y], d1 = s(q, p[0], p[1]), d2 = s(q, p[1], p[2]), d3 = s(q, p[2], p[0]);
+      return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+    };
+    const heading = (s) => (s.__toward && performance.now() < s.__toward.until && inTri(s.__toward.tri, e.clientX, e.clientY)) || (s.__hold && performance.now() - s.__hold < 120);
+    if (subs().some(heading)) {
+      t.__open = setTimeout(() => { if (t.matches(':hover')) open(); }, 160);
+    } else open();
+  });
   let typed = '', typedT = null;
   m.addEventListener('keydown', (e) => {
     // A submenu inside this menu handles its own keys.
@@ -2016,9 +2043,9 @@ pub fn MenuItem(
 
 /// A menu row that opens a menu of its own beside the one it's in: on hover,
 /// a click, → or Enter. The menu it came from keeps its size and place; ← or
-/// Escape go back to the row. Leaving the row or the submenu closes it a
-/// moment later, unless the pointer gets to the other one first, so it can
-/// cross the rows between them.
+/// Escape go back to the row. The pointer on another row of that menu closes
+/// it at once, unless it's heading into the submenu (see `place_sub_js`).
+/// Leaving for anywhere else keeps it open.
 #[component]
 pub fn SubMenu(
     label: String,
@@ -2033,7 +2060,6 @@ pub fn SubMenu(
     children: Element,
 ) -> Element {
     let mut open = use_signal(|| false);
-    let mut gen = use_signal(|| 0u32);
     let mut keyed = use_signal(|| false);
     let id = use_hook(|| format!("sub-{}", crate::state::rand_id()));
     let is_open = open();
@@ -2044,26 +2070,15 @@ pub fn SubMenu(
         }
     }));
     let mut show = move |kb: bool| {
-        *gen.write() += 1;
         keyed.set(kb);
         open.set(true);
-    };
-    let mut later = move || {
-        *gen.write() += 1;
-        let g = *gen.peek();
-        spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(260)).await;
-            if *gen.peek() == g {
-                open.set(false);
-            }
-        });
     };
     let id3 = id.clone();
     let cls = format!("menu-item has-sub{}{}{}", if is_open { " open" } else { "" }, if disabled { " disabled" } else { "" }, if checked { " checked" } else { "" });
     rsx! {
         button { id: "{id}-t", class: "{cls}", "aria-haspopup": "menu", "aria-expanded": "{is_open}",
-            onmouseenter: move |_| if !disabled { show(false) },
-            onmouseleave: move |_| later(),
+            // Hovering opens it too: the menu's script clicks it (MENU_KEYS_JS),
+            // after the pointer stops heading into another submenu.
             onclick: move |e| { e.stop_propagation(); if !disabled { show(false) } },
             onkeydown: move |e: KeyboardEvent| {
                 if !disabled && matches!(e.key(), Key::ArrowRight | Key::Enter) {
@@ -2088,10 +2103,8 @@ pub fn SubMenu(
             // Fixed from the start: it never takes room in the menu it came
             // from, even before it's placed.
             div { id: "{id}", class: "menu sub-menu", role: "menu", style: "position: fixed; left: 0; top: 0; visibility: hidden;",
-                onmouseenter: move |_| *gen.write() += 1,
-                onmouseleave: move |_| later(),
                 onclick: move |e| e.stop_propagation(),
-                // Closed from the keyboard script (← and Escape).
+                // Closed from its script: the pointer elsewhere in the menu, ← and Escape.
                 span { class: "sub-close", hidden: true, onclick: move |e| { e.stop_propagation(); open.set(false); } }
                 {children}
             }
@@ -2151,6 +2164,43 @@ pub fn place_sub_js(id: &str, focus: bool) -> String {
   // What it lists may arrive after it opens (rows loading): it's placed
   // again so it stays inside the window.
   if (!m.__placed) {{ m.__placed = true; new MutationObserver(() => requestAnimationFrame(place)).observe(m, {{ childList: true, subtree: true }}); }}
+  // The pointer on another part of the menu it came from closes it at once,
+  // unless it's on its way here: it left the row towards this submenu and
+  // is still inside the triangle between where it left and this submenu's
+  // near edge (for a moment). Anywhere else (outside the menus) keeps it.
+  const close = () => {{ const c = m.querySelector(':scope > .sub-close'); if (c) c.click(); }};
+  const inside = (r, x, y) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  const inTri = (a, b, c, x, y) => {{
+    const s = (p, q, r) => (p[0] - r[0]) * (q[1] - r[1]) - (q[0] - r[0]) * (p[1] - r[1]);
+    const d1 = s([x, y], a, b), d2 = s([x, y], b, c), d3 = s([x, y], c, a);
+    return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+  }};
+  if (!t.__grace) {{
+    t.__grace = true;
+    t.addEventListener('pointerleave', (e) => {{
+      const s = document.getElementById(t.id.slice(0, -2)); if (!s) return;
+      const sr = s.getBoundingClientRect(), right = sr.left >= t.getBoundingClientRect().left;
+      const nx = right ? sr.left : sr.right, ax = e.clientX + (right ? -6 : 6);
+      s.__toward = {{ tri: [[ax, e.clientY], [nx, sr.top - 4], [nx, sr.bottom + 4]], until: performance.now() + 350 }};
+    }});
+  }}
+  if (!m.__watch) {{
+    const onMove = (e) => {{
+      if (!m.isConnected) {{ document.removeEventListener('pointermove', onMove, true); return; }}
+      const x = e.clientX, y = e.clientY;
+      if (inside(m.getBoundingClientRect(), x, y)) {{ m.__toward = null; return; }}
+      // On its row (or the edge the pointer left it by): nothing to do.
+      if (inside(t.getBoundingClientRect(), x, y)) return;
+      const g = m.__toward;
+      if (g && performance.now() < g.until && inTri(g.tri[0], g.tri[1], g.tri[2], x, y)) {{ m.__hold = performance.now(); return; }}
+      const over = e.target instanceof Element ? e.target : null;
+      // Inside a submenu of its own: still in it.
+      if (over && m.contains(over)) return;
+      if (over && p && p.contains(over)) {{ document.removeEventListener('pointermove', onMove, true); close(); }}
+    }};
+    m.__watch = onMove;
+    document.addEventListener('pointermove', onMove, true);
+  }}
   m.style.visibility = 'visible'; m.classList.add('in');
   {keys}
 }});"#,

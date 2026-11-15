@@ -1674,7 +1674,7 @@ fn ModelPicker(
                 div { class: "mp-rail",
                     button { class: if fav && q.is_empty() { "mp-agent mp-tab on" } else { "mp-agent mp-tab" }, title: "Favorites",
                         onclick: move |_| { browse.set(None); query.set(String::new()); },
-                        Icon { i: I::Star, size: 14, stroke: 1.5 }
+                        Icon { i: I::Star, size: 17, stroke: 1.5 }
                     }
                     div { class: "mp-rail-sep" }
                     for (k, name, sub) in agents.clone() {
@@ -1687,7 +1687,7 @@ fn ModelPicker(
                             rsx! {
                                 button { key: "{k.id()}", class: if on { "mp-agent mp-tab on" } else { "mp-agent mp-tab" }, title: "{tip}",
                                     onclick: move |_| { browse.set(Some(k1.clone())); query.set(String::new()); },
-                                    if let Some(svg) = logo { Logo { svg, size: 14 } } else { Icon { i: I::Bot, size: 14 } }
+                                    if let Some(svg) = logo { Logo { svg, size: 18 } } else { Icon { i: I::Bot, size: 17 } }
                                     if using { span { class: "mp-using" } }
                                 }
                             }
@@ -1703,7 +1703,7 @@ fn ModelPicker(
                                 app.open_models(Some(k.clone()));
                             }
                         },
-                        Icon { i: I::Settings, size: 14, stroke: 1.5 }
+                        Icon { i: I::Settings, size: 17, stroke: 1.5 }
                     }
                 }
                 div { class: "mp-list",
@@ -1952,7 +1952,7 @@ fn PickRowItem(
     }
     rsx! {
         button { class: "{cls}", title: "{row.tip}", onclick: move |_| onpick.call(()),
-            span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } else { Icon { i: I::Sparkle, size: 12, stroke: 1.5 } } }
+            span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 16 } } else { Icon { i: I::Sparkle, size: 15, stroke: 1.5 } } }
             span { class: "mp-name",
                 span { class: "mp-label", "{row.label}" }
                 if !row.note.is_empty() { span { class: "mp-note", "{row.note}" } }
@@ -1973,7 +1973,7 @@ fn PickRowItem(
             if row.id.is_some() {
                 span { class: if starred { "mp-star on" } else { "mp-star" }, role: "button", title: if starred { "Remove from favorites" } else { "Add to favorites" },
                     onclick: move |e: MouseEvent| { e.stop_propagation(); onstar.call(()); },
-                    Icon { i: I::Star, size: 12, stroke: 1.5 }
+                    Icon { i: I::Star, size: 14, stroke: 1.5 }
                 }
             }
             span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }

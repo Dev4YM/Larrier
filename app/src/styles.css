@@ -973,15 +973,15 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 
 /* Agent + model picker: a search box, a rail of icons (the favorites, then
    each harness) and the chosen tab's models in groups. */
-.menu.model-picker { --menu-max: 360px; width: 360px; height: 340px; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
-.mp-search { display: flex; align-items: center; gap: var(--sp-3); height: 34px; padding: 0 var(--sp-4); border-bottom: 1px solid var(--border); color: var(--fg-3); flex-shrink: 0; }
-.mp-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: var(--ui-sm); color: var(--fg); user-select: text; }
+.menu.model-picker { --menu-max: 420px; width: 440px; height: 420px; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.mp-search { display: flex; align-items: center; gap: var(--sp-4); height: 42px; padding: 0 var(--sp-5); border-bottom: 1px solid var(--border); color: var(--fg-3); flex-shrink: 0; }
+.mp-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: var(--ui-md); color: var(--fg); user-select: text; }
 .mp-search input::placeholder { color: var(--fg-3); }
-.mp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 38px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.mp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 48px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .mp-rail { display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); padding: var(--sp-2) 0; border-right: 1px solid var(--border); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
 .mp-rail::-webkit-scrollbar { display: none; }
 .mp-rail .grow { flex: 1; min-height: var(--sp-2); }
-.mp-tab { position: relative; width: 28px; height: 28px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-md); color: var(--fg-3); }
+.mp-tab { position: relative; width: 36px; height: 36px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-md); color: var(--fg-3); }
 .mp-tab:hover { background: var(--hover); color: var(--fg); }
 .mp-tab.on { background: var(--selected); color: var(--fg); }
 .mp-rail-sep { width: 16px; height: 1px; flex-shrink: 0; margin: var(--sp-2) 0; background: var(--border); }
@@ -993,7 +993,7 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 .mp-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 8px 6px; position: sticky; top: -4px; background: var(--card-2); z-index: 1; }
 .mp-head .nm { font-size: var(--ui-sm); font-weight: 600; color: var(--fg); }
 .mp-head .sub { font-size: var(--ui-xs); color: var(--fg-3); }
-.mp-row { height: 28px !important; font-size: var(--ui-sm); }
+.mp-row { height: 34px !important; font-size: var(--ui-md); }
 .mp-row .lg { color: var(--fg-3); }
 .mp-row.checked .mp-label { font-weight: 500; }
 /* A model's star: shown on hover, and always once it's a favorite. */
@@ -1003,7 +1003,7 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 .mp-star.on { color: var(--amber); }
 .mp-star.on svg { fill: currentColor; }
 @media (max-width: 400px) {
-  .menu.model-picker { width: calc(100vw - 16px); height: min(340px, 80vh); }
+  .menu.model-picker { width: calc(100vw - 16px); height: min(420px, 80vh); }
 }
 
 /* Composer: one grid, two layouts. Tall puts the text on top at full width

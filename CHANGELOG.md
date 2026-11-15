@@ -5,6 +5,35 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.45 — 2026-11-15
+
+### New
+
+- Projects you make, with a look, folders and agents
+- A new project dialog with a big picture, every icon, emoji, your own image and any color
+- Pin and edit Home like any other project
+- One menu for Local Changes or Agent Edits, the branch in the header, and live updates
+- A finished turn's Worked steps fold away smoothly
+
+### Look and feel
+
+- Short counts and one edge in the plan and context panels
+- The top stays put, and one badge for you and settings
+- Your profile's menu opens centered over its badge
+- Menus fade in and out, quickly, instead of sliding
+- A roomier model picker
+- New icons for Commit and Commit & Push
+
+### Fixed
+
+- A placeholder that doesn't fit gets the two-line box
+- The taskbar keeps Larrier's icon while it's busy
+- Very large chats from other apps no longer keep Larrier busy
+- A menu in a row no longer clicks the row
+- Typing, the right-click menu and Find work in the file editor
+- A preview tab's italic title is no longer cut off
+- A changed line's color reaches its end when scrolled sideways
+- A menu that opens upward keeps its bottom padding
 ## 0.1.44 — 2026-11-15
 
 ### New

@@ -502,9 +502,50 @@ pub fn Composer(
     let can_send = !elsewhere && (!text.read().trim().is_empty() || !atts.is_empty());
     let detected = app.detected.read().clone();
     let multi_now = multi.read().clone();
+    // An empty box shows its placeholder in full: when that needs more than
+    // the one-line box (a long notice, a narrow window) the box is two-line.
+    // Measured again whenever the composer's width changes.
+    let mut ph_tall = use_signal(|| false);
+    let mut ph_task = use_signal(|| None::<dioxus::core::Task>);
+    let ph = placeholder.clone();
+    use_effect(use_reactive!(|ph| {
+        let _ = &ph;
+        let js = format!(
+            r#"const el = document.getElementById('{input_id}'); if (!el) return;
+            const c = window.__lmc || (window.__lmc = document.createElement('canvas').getContext('2d'));
+            let last = null;
+            const check = () => {{
+              if (!el.isConnected) return;
+              const box = el.closest('.composer');
+              if (box && !box.classList.contains('tall')) el.dataset.cw = el.clientWidth;
+              const w = parseFloat(el.dataset.cw || el.clientWidth);
+              const cs = getComputedStyle(el);
+              c.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+              const over = w > 0 && c.measureText(el.placeholder || '').width > w - 14;
+              if (over !== last) {{ last = over; dioxus.send(over); }}
+            }};
+            check();
+            if (el.__phObs) el.__phObs.disconnect();
+            el.__phObs = new ResizeObserver(() => requestAnimationFrame(check));
+            el.__phObs.observe(el.closest('.composer-wrap') || el);
+            await new Promise(() => {{}});"#
+        );
+        if let Some(t) = ph_task.write().take() {
+            t.cancel();
+        }
+        let task = spawn(async move {
+            let mut e = document::eval(&js);
+            while let Ok(over) = e.recv::<bool>().await {
+                if *ph_tall.peek() != over {
+                    ph_tall.set(over);
+                }
+            }
+        });
+        ph_task.set(Some(task));
+    }));
     // The box grows while what's in it needs more than a line; once it's
     // sent (queued, steered, cleared) it's one line again.
-    let tall = home || (overflow() && !text.read().is_empty()) || text.read().contains('\n') || !atts.is_empty();
+    let tall = home || (overflow() && !text.read().is_empty()) || (ph_tall() && text.read().is_empty()) || text.read().contains('\n') || !atts.is_empty();
     use_effect(move || {
         if text.read().is_empty() && *overflow.peek() {
             overflow.set(false);

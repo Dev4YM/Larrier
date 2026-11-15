@@ -28,8 +28,10 @@ bar and the traffic lights sit over Larrier's top bar.
   magnifier icon.
 - A status dot on every chat: running, needs input, ready for review,
   unread.
-- Your profile at the bottom, with Settings beside it. A dot on the
-  Settings button means an agent has an update.
+- You at the bottom: one badge that opens Profile, Settings, Plan & Usage,
+  Appearance, Harnesses, What's new and About. A dot on it means an agent
+  has an update. New Agent, Automations and Customize stay at the top
+  while the chats scroll.
 
 **Tabs.** A chat's subagents open as tabs next to it.
 

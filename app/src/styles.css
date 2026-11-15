@@ -901,7 +901,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .ctab.on { background: var(--chip); color: var(--fg); }
 .ctab.static { padding-right: 10px; }
 .ctab .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
-.ctab.preview .t { font-style: italic; }
+.ctab.preview .t { font-style: italic; padding-right: 0.2em; }
 .ctab.unread .t { font-weight: 500; color: var(--fg); }
 .ctab.unread::before { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 4px; margin-top: -2px; border-radius: 50%; background: var(--blue); }
 .ctab .x { width: 18px; height: 18px; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; color: var(--fg-3); flex-shrink: 0; visibility: hidden; }
@@ -1201,7 +1201,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .rp-tabs::-webkit-scrollbar { display: none; }
 .rp-tab { cursor: pointer; flex-shrink: 0; user-select: none; padding: 0 4px 0 10px; }
 .rp-tab .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rp-tab.preview .t { font-style: italic; }
+/* Italic letters lean past their box: room so the last isn't clipped. */
+.rp-tab.preview .t { font-style: italic; padding-right: 0.2em; }
 .rp-tab .x { opacity: 0; }
 .rp-tab:hover .x, .rp-tab.active .x { opacity: 1; }
 

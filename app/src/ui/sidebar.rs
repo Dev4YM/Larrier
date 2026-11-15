@@ -211,6 +211,9 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
     };
     let mut filter_menu = use_signal(|| false);
     let mut scroll_gen = use_signal(|| 0u64);
+    // Scrolled down: the pinned nav at the top shows its edge.
+    let mut scrolled = use_signal(|| false);
+    let mut me_menu = use_signal(|| false);
     // A harness turned off in Settings takes its chats out of the list too.
     let off: Vec<larrier_core::AgentKind> = app.config.read().agents.iter().filter(|a| !a.enabled).map(|a| a.kind.clone()).collect();
     let all: Vec<SessionSummary> = all.into_iter().filter(|s| (show_archived || !s.archived) && !off.contains(&s.agent)).collect();
@@ -317,6 +320,9 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                 onscroll: move |e| {
                     scroll_gen += 1;
                     let (gen, y) = (*scroll_gen.peek(), e.data().scroll_top());
+                    if *scrolled.peek() != (y > 0.0) {
+                        scrolled.set(y > 0.0);
+                    }
                     spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                         if *scroll_gen.peek() == gen {
@@ -324,7 +330,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                         }
                     });
                 },
-                div { class: "side-nav",
+                div { class: if scrolled() { "side-nav stuck" } else { "side-nav" },
                     button { class: if view == View::Home { "nav-row on" } else { "nav-row" }, onclick: move |_| app.new_agent(),
                         span { class: "ic", Icon { i: I::SquarePen, size: 16, stroke: 1.5 } }
                         "New Agent"
@@ -399,9 +405,38 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                 }
             }
             div { class: "side-profile",
-                button { class: "side-me", title: "Your profile", onclick: move |_| app.open_settings(SettingsTab::Profile),
-                    super::profile::Avatar { size: 30 }
-                    span { class: "nm", "{name}" }
+                // You: one badge, its menu has your profile, the settings
+                // pages you go to most and help.
+                {
+                    let outdated = crate::agent_versions::outdated(&app);
+                    let go = move |tab: SettingsTab| {
+                        let mut m = me_menu;
+                        m.set(false);
+                        app.open_settings(tab);
+                    };
+                    rsx! {
+                        div { class: "menu-anchor side-me-anchor",
+                            button { class: if me_menu() { "side-me open" } else { "side-me" }, title: if outdated > 0 { "You and Settings · agent updates available" } else { "You and Settings" },
+                                onclick: move |_| me_menu.set(true),
+                                span { class: "side-me-av",
+                                    super::profile::Avatar { size: 28 }
+                                    if outdated > 0 { span { class: "gear-dot" } }
+                                }
+                                span { class: "nm", "{name}" }
+                            }
+                            Dropdown { open: me_menu, up: true, class: "me-menu".to_string(),
+                                MenuItem { label: "Profile".to_string(), icon: Some(I::CircleUser), onclick: move |_| go(SettingsTab::Profile) }
+                                MenuItem { label: "Settings".to_string(), icon: Some(I::Settings), sub: Some(crate::platform::keys("Ctrl+,")), onclick: move |_| go(SettingsTab::General) }
+                                MenuItem { label: "Plan & Usage".to_string(), icon: Some(I::Gauge), onclick: move |_| go(SettingsTab::Usage) }
+                                MenuItem { label: "Appearance".to_string(), icon: Some(I::Sun), onclick: move |_| go(SettingsTab::Appearance) }
+                                MenuItem { label: "Harnesses".to_string(), icon: Some(I::Bot), sub: (outdated > 0).then(|| format!("{outdated} update{}", if outdated == 1 { "" } else { "s" })), onclick: move |_| go(SettingsTab::Agents) }
+                                div { class: "menu-sep" }
+                                MenuItem { label: "What's new".to_string(), icon: Some(I::Sparkle),
+                                    onclick: move |_| { me_menu.set(false); app.ui.write().modal = Some(crate::state::Modal::WhatsNew(crate::version::VERSION.to_string(), false)); } }
+                                MenuItem { label: "About Larrier".to_string(), icon: Some(I::Info), onclick: move |_| go(SettingsTab::About) }
+                            }
+                        }
+                    }
                 }
                 // Only when there is an update: download it (the label slides
                 // out on hover), its progress, then Restart.
@@ -427,17 +462,6 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                             }
                         },
                         _ => rsx! {},
-                    }
-                }
-                {
-                    // Agents with a newer version: a dot, and Settings opens on them.
-                    let outdated = crate::agent_versions::outdated(&app);
-                    rsx! {
-                        button { class: "icon-btn gear", title: if outdated > 0 { "Settings (Ctrl+,) · agent updates available" } else { "Settings (Ctrl+,)" },
-                            onclick: move |_| app.open_settings(if outdated > 0 { SettingsTab::Agents } else { SettingsTab::General }),
-                            Icon { i: I::Settings, size: 16, stroke: 1.5 }
-                            if outdated > 0 { span { class: "gear-dot" } }
-                        }
                     }
                 }
             }

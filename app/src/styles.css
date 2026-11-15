@@ -2085,3 +2085,17 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .pj-row .pj-mark { color: var(--fg-2); }
 .pj-row .icon-btn.on { color: var(--fg); }
 
+/* The top of the sidebar (New Agent, Automations, Customize) stays put
+   while the chats scroll under it; an edge shows once they do. */
+.side-scroll > .side-nav { position: sticky; top: 0; z-index: 3; background: var(--win); box-shadow: 0 1px 0 transparent; transition: box-shadow var(--t-2) var(--ease); }
+.side-scroll > .side-nav.stuck { box-shadow: 0 1px 0 var(--border); }
+
+/* You, at the foot of the sidebar: a line above, one badge that opens a
+   menu (your profile, settings, help). */
+.side-profile { border-top: 1px solid var(--border); padding: var(--sp-4) var(--sp-4) var(--sp-5); gap: var(--sp-3); }
+.side-me-anchor { flex: 1; min-width: 0; display: flex; }
+.side-me { flex: 1; min-width: 0; height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 var(--sp-4); margin: 0; border-radius: var(--r-md); text-align: left; }
+.side-me:hover, .side-me.open { background: var(--hover); }
+.side-me-av { position: relative; display: inline-flex; flex-shrink: 0; }
+.side-me-av .gear-dot { top: -1px; right: -1px; box-shadow: 0 0 0 2px var(--win); }
+.menu.me-menu { min-width: 240px; }

@@ -14,7 +14,7 @@ const CSS: &str = r#"
 .au-page { padding: 56px 32px 80px; display: flex; justify-content: center; }
 .au-inner { width: 100%; max-width: 1080px; display: flex; flex-direction: column; }
 .au-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 26px; }
-.au-head h1 { font-size: var(--ui-xl); font-weight: 500; margin: 0 0 6px; line-height: 1.3; letter-spacing: -0.2px; }
+.au-head h1 { font-size: var(--ui-lg); font-weight: 600; margin: 0 0 6px; line-height: 1.3; letter-spacing: -0.2px; }
 .au-head .sub { font-size: var(--ui-md); color: var(--fg-2); }
 .au-black { height: 34px; padding: 0 16px; border-radius: var(--r-sm); background: var(--fg); color: var(--pane, #fff); font-size: var(--ui-md); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .au-black:hover { opacity: .88; }

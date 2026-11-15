@@ -13,7 +13,7 @@ const CSS: &str = r#"
 .setup-head { display: flex; align-items: center; gap: 14px; }
 .setup-mark { width: 52px; height: 52px; flex: none; }
 .setup-mark svg { width: 100%; height: 100%; }
-.setup h1 { font-size: var(--ui-xl); line-height: 26px; font-weight: 600; margin: 0; }
+.setup h1 { font-size: var(--ui-lg); line-height: 20px; font-weight: 600; margin: 0; }
 .setup .sub { color: var(--fg-3); font-size: var(--ui-sm); }
 .setup-note { font-size: var(--ui-sm); line-height: 18px; color: var(--fg-2); background: var(--chip); border-radius: var(--r-md); padding: 8px 10px; }
 .setup-opts { display: flex; flex-direction: column; gap: 8px; }

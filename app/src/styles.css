@@ -88,6 +88,9 @@
    cards and dialogs --ui-md, page titles --ui-lg, large figures --ui-xl.
    What the user reads in a chat follows Text Size instead (--fs…). */
 :root { --ui-2xs: 10px; --ui-xs: 11px; --ui-sm: 12px; --ui-md: 13px; --ui-lg: 15px; --ui-xl: 18px; }
+/* Space: one 4px-based scale, and one height for controls (inputs,
+   selects, buttons) with a smaller one for buttons inside rows. */
+:root { --sp-1: 2px; --sp-2: 4px; --sp-3: 6px; --sp-4: 8px; --sp-5: 12px; --sp-6: 16px; --sp-7: 20px; --sp-8: 24px; --sp-9: 32px; --h-ctl: 28px; --h-ctl-sm: 24px; }
 .app.corners-solid { --r-xs: 1px; --r-sm: 2px; --r-md: 2px; --r-lg: 3px; }
 .app.corners-rounded { --r-xs: 6px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; }
 
@@ -417,9 +420,9 @@ svg { flex-shrink: 0; display: block; }
 
 /* ---------------------------------------------------------------- modal */
 .modal { width: min(520px, 92vw); background: var(--card-2); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); overflow: hidden; }
-.modal-head { padding: 14px 16px 6px; font-size: var(--ui-md); font-weight: 600; display: flex; align-items: center; }
-.modal-body { padding: 6px 16px 14px; font-size: var(--ui-sm); line-height: 18px; color: var(--fg-2); display: flex; flex-direction: column; gap: 10px; }
-.modal-foot { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+.modal-head { padding: var(--sp-6) var(--sp-6) var(--sp-4); font-size: var(--ui-md); font-weight: 600; display: flex; align-items: center; gap: var(--sp-4); }
+.modal-body { padding: var(--sp-4) var(--sp-6) var(--sp-6); font-size: var(--ui-sm); line-height: 18px; color: var(--fg-2); display: flex; flex-direction: column; gap: var(--sp-5); }
+.modal-foot { padding: var(--sp-5) var(--sp-6); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: var(--sp-4); }
 
 /* ---------------------------------------------------------------- right pane */
 .rp-head { height: 40px; display: flex; align-items: center; gap: 2px; padding: 0 8px; flex-shrink: 0; }
@@ -440,14 +443,14 @@ svg { flex-shrink: 0; display: block; }
 .branch-line { display: flex; align-items: center; gap: 8px; font-size: var(--ui-sm); color: var(--fg-2); }
 .files-summary { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: var(--ui-sm); color: var(--fg-2); }
 .primary-btn {
-  height: 26px; padding: 0 10px; border-radius: var(--r-md); background: var(--accent); color: var(--accent-fg); font-size: var(--ui-sm); font-weight: 500;
+  height: var(--h-ctl); padding: 0 var(--sp-5); border-radius: var(--r-md); background: var(--accent); color: var(--accent-fg); font-size: var(--ui-sm); font-weight: 500;
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
 }
 .primary-btn:hover { opacity: .88; }
 .primary-btn:disabled { opacity: .35; cursor: default; }
 .primary-btn.green { background: var(--green); color: #fff; }
 .primary-btn.amber { background: var(--amber); color: #fff; }
-.ghost-btn { height: 26px; padding: 0 10px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--card); font-size: var(--ui-sm); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ghost-btn { height: var(--h-ctl); padding: 0 var(--sp-5); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--card); font-size: var(--ui-sm); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ghost-btn:hover { border-color: var(--border-2); background: var(--card-2); }
 .ghost-btn:disabled { opacity: .45; cursor: default; }
 .ghost-btn.danger { color: var(--red); }
@@ -537,18 +540,18 @@ svg { flex-shrink: 0; display: block; }
 .settings-nav .nav-item:hover { background: var(--hover); color: var(--fg); }
 .settings-nav .nav-item.on { background: var(--selected); color: var(--fg); }
 .settings-body { flex: 1; overflow-y: auto; }
-.settings-inner { max-width: 720px; margin: 0 auto; padding: 32px 28px 60px; }
-.settings-inner h1 { font-size: var(--ui-xl); font-weight: 600; margin: 0 0 4px; line-height: 1.3; }
-.settings-inner .sub { color: var(--fg-2); font-size: var(--ui-sm); margin-bottom: 16px; }
-.set-group-title { font-size: var(--ui-sm); font-weight: 500; color: var(--fg); margin: 22px 2px 8px; display: flex; align-items: center; gap: 8px; }
+.settings-inner { max-width: 720px; margin: 0 auto; padding: var(--sp-9) var(--sp-8) 64px; }
+.settings-inner h1 { font-size: var(--ui-lg); font-weight: 600; margin: 0 0 var(--sp-2); line-height: 20px; }
+.settings-inner .sub { color: var(--fg-2); font-size: var(--ui-sm); line-height: 18px; margin-bottom: var(--sp-6); }
+.set-group-title { font-size: var(--ui-sm); font-weight: 500; color: var(--fg); margin: var(--sp-8) 0 var(--sp-4); display: flex; align-items: center; gap: var(--sp-4); }
 .set-card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); }
-.set-row { display: flex; align-items: center; gap: 14px; padding: 10px 12px; min-height: 48px; }
+.set-row { display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-4) var(--sp-5); min-height: 48px; }
 .set-row + .set-row, .set-card > div + div > .set-row:first-child { border-top: 1px solid var(--border); }
 .set-row .lbl { flex: 1; min-width: 0; }
 .set-row .lbl .t { font-size: var(--ui-sm); font-weight: 500; }
-.set-row .lbl .d { font-size: var(--ui-xs); color: var(--fg-2); margin-top: 2px; line-height: 15px; }
+.set-row .lbl .d { font-size: var(--ui-xs); color: var(--fg-2); margin-top: var(--sp-1); line-height: 16px; }
 .set-row.top { align-items: flex-start; }
-.input { height: 26px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); padding: 0 8px; font-size: var(--ui-sm); outline: none; min-width: 0; user-select: text; }
+.input { height: var(--h-ctl); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); padding: 0 var(--sp-4); font-size: var(--ui-sm); outline: none; min-width: 0; user-select: text; }
 .input:focus { border-color: var(--border-2); }
 .input.wide { width: 300px; }
 .input.full { width: 100%; }
@@ -565,7 +568,7 @@ select.input { cursor: pointer; padding-right: 4px; }
 .status-pill.missing { background: var(--hover); color: var(--fg-3); }
 .code-inline { font-family: var(--mono); font-size: var(--ui-xs); background: var(--code-bg); padding: 2px 6px; border-radius: var(--r-sm); user-select: text; word-break: break-all; }
 .agent-detail { padding: 2px 12px 12px 56px; display: flex; flex-direction: column; gap: 10px; font-size: var(--ui-sm); color: var(--fg-2); }
-.kv { display: grid; grid-template-columns: 120px 1fr; gap: 8px 10px; align-items: center; }
+.kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-4) var(--sp-5); align-items: center; }
 .kv .k { color: var(--fg-3); font-size: var(--ui-xs); }
 
 .toasts { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 200; display: flex; flex-direction: column; gap: 6px; align-items: center; }
@@ -935,7 +938,7 @@ html.dragging-chat, html.dragging-chat * { cursor: grabbing !important; user-sel
 /* In a form, a select fills its column like the inputs beside it. */
 .kv > .menu-anchor.select { display: flex; width: 100%; }
 .kv > .menu-anchor.select .select-btn { width: 100%; max-width: none; }
-.select-btn { height: 30px; border-radius: var(--r-md); background: var(--card-2); border-color: var(--border); box-shadow: 0 1px 1px rgba(0,0,0,.02); transition: border-color var(--t-1), box-shadow var(--t-1), background-color var(--t-1); }
+.select-btn { height: var(--h-ctl); border-radius: var(--r-md); background: var(--card-2); border-color: var(--border); box-shadow: 0 1px 1px rgba(0,0,0,.02); transition: border-color var(--t-1), box-shadow var(--t-1), background-color var(--t-1); }
 .select-btn:hover { border-color: var(--border-2); background: var(--card); }
 .select-btn:focus-visible, .select-btn.open { outline: none; border-color: color-mix(in srgb, var(--accent-c) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c) 14%, transparent); }
 .select-btn .chev { transition: transform var(--t-2) ease; }

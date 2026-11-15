@@ -465,9 +465,14 @@ pub fn Root() -> Element {
                 if (getComputedStyle(m).position !== 'fixed') return;
                 const cap = parseFloat(getComputedStyle(m).getPropertyValue('--menu-max')) || 440;
                 if (m.classList.contains('flip-up')) {
-                  // Grows upward from where it was anchored.
+                  // Grows upward from where it was anchored, and shrinks back
+                  // when its content does: measured at its own height.
                   const end = r.bottom;
-                  const h = Math.min(natural, cap, end - top);
+                  const was = m.style.top;
+                  m.style.top = 'auto';
+                  const own = m.scrollHeight;
+                  m.style.top = was;
+                  const h = Math.min(own, cap, end - top);
                   set(m, 'maxHeight', Math.max(96, end - top) + 'px');
                   set(m, 'top', Math.max(top, end - h) + 'px');
                 } else {
@@ -2080,13 +2085,35 @@ pub fn SubMenu(
             span { class: "sub-arrow", Icon { i: I::ChevronRight, size: 12 } }
         }
         if is_open {
-            div { id: "{id}", class: "menu sub-menu", role: "menu", style: "visibility: hidden;",
+            // Fixed from the start: it never takes room in the menu it came
+            // from, even before it's placed.
+            div { id: "{id}", class: "menu sub-menu", role: "menu", style: "position: fixed; left: 0; top: 0; visibility: hidden;",
                 onmouseenter: move |_| *gen.write() += 1,
                 onmouseleave: move |_| later(),
                 onclick: move |e| e.stop_propagation(),
                 // Closed from the keyboard script (← and Escape).
                 span { class: "sub-close", hidden: true, onclick: move |e| { e.stop_propagation(); open.set(false); } }
                 {children}
+            }
+        }
+    }
+}
+
+/// Rows still loading in a menu: a soft shimmer where they'll be, the width
+/// of each varying like real names do.
+#[component]
+pub fn MenuSkeleton(#[props(default = 2)] rows: usize, #[props(default = false)] two_line: bool) -> Element {
+    const WIDTHS: [u8; 4] = [62, 44, 54, 38];
+    rsx! {
+        div { class: "menu-skel", "aria-busy": "true", "aria-label": "Loading",
+            for i in 0..rows {
+                div { key: "{i}", class: if two_line { "skel-row two" } else { "skel-row" },
+                    span { class: "skel skel-dot" }
+                    span { class: "skel-lines",
+                        span { class: "skel skel-bar", style: "width: {WIDTHS[i % 4]}%;" }
+                        if two_line { span { class: "skel skel-bar sm", style: "width: {WIDTHS[(i + 1) % 4] / 2 + 20}%;" } }
+                    }
+                }
             }
         }
     }
@@ -2101,22 +2128,29 @@ pub fn place_sub_js(id: &str, focus: bool) -> String {
   const m = document.getElementById('{id}'), t = document.getElementById('{id}-t'); if (!m || !t) return;
   const focusFirst = {focus};
   const p = t.closest('.menu'); if (p) p.style.animation = 'none';
-  const vw = window.innerWidth, vh = window.innerHeight, pad = 8, gap = 2;
-  m.style.position = 'fixed'; m.style.left = '0px'; m.style.top = '0px'; m.style.right = 'auto'; m.style.bottom = 'auto';
-  m.style.maxHeight = (vh - pad * 2) + 'px'; m.style.maxWidth = (vw - pad * 2) + 'px';
-  // Where (0, 0) lands: a transformed or filtered ancestor moves it.
-  const o = m.getBoundingClientRect();
-  const r = t.getBoundingClientRect(), pr = (p || t).getBoundingClientRect();
-  const w = m.offsetWidth, h = Math.min(m.scrollHeight, vh - pad * 2);
-  const inset = parseFloat(getComputedStyle(m).paddingTop) || 0;
-  let left = pr.right + gap;
-  const flip = left + w > vw - pad;
-  if (flip) left = pr.left - gap - w;
-  left = Math.max(pad, Math.min(left, vw - w - pad));
-  const top = Math.max(pad, Math.min(r.top - inset, vh - h - pad));
-  m.style.left = (left - o.left) + 'px'; m.style.top = (top - o.top) + 'px';
-  m.style.overflowY = m.scrollHeight > h + 1 ? 'auto' : 'hidden';
-  m.classList.toggle('flip-left', flip);
+  const place = () => {{
+    if (!m.isConnected || !t.isConnected) return;
+    const vw = window.innerWidth, vh = window.innerHeight, pad = 8, gap = 2;
+    m.style.position = 'fixed'; m.style.left = '0px'; m.style.top = '0px'; m.style.right = 'auto'; m.style.bottom = 'auto';
+    m.style.maxHeight = (vh - pad * 2) + 'px'; m.style.maxWidth = (vw - pad * 2) + 'px';
+    // Where (0, 0) lands: a transformed or filtered ancestor moves it.
+    const o = m.getBoundingClientRect();
+    const r = t.getBoundingClientRect(), pr = (p || t).getBoundingClientRect();
+    const w = m.offsetWidth, h = Math.min(m.scrollHeight, vh - pad * 2);
+    const inset = parseFloat(getComputedStyle(m).paddingTop) || 0;
+    let left = pr.right + gap;
+    const flip = left + w > vw - pad;
+    if (flip) left = pr.left - gap - w;
+    left = Math.max(pad, Math.min(left, vw - w - pad));
+    const top = Math.max(pad, Math.min(r.top - inset, vh - h - pad));
+    m.style.left = (left - o.left) + 'px'; m.style.top = (top - o.top) + 'px';
+    m.style.overflowY = m.scrollHeight > h + 1 ? 'auto' : 'hidden';
+    m.classList.toggle('flip-left', flip);
+  }};
+  place();
+  // What it lists may arrive after it opens (rows loading): it's placed
+  // again so it stays inside the window.
+  if (!m.__placed) {{ m.__placed = true; new MutationObserver(() => requestAnimationFrame(place)).observe(m, {{ childList: true, subtree: true }}); }}
   m.style.visibility = 'visible'; m.classList.add('in');
   {keys}
 }});"#,

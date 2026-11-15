@@ -229,15 +229,30 @@ pub fn checkout_new_branch(path: &Path, branch: &str) -> Result<()> {
     run(c).map(|_| ())
 }
 
-/// Create an isolated worktree on a new branch for an agent.
-pub fn create_worktree(repo: &Path, dir: &Path, branch: &str) -> Result<PathBuf> {
+/// The repository's local branches, the most recently committed to first.
+pub fn branches(repo: &Path) -> Vec<String> {
+    let mut c = git(repo);
+    c.args(["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"]);
+    run(c).map(|out| out.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()).unwrap_or_default()
+}
+
+/// Switch the checkout at `path` to `branch`.
+pub fn switch(path: &Path, branch: &str) -> Result<()> {
+    let mut c = git(path);
+    c.args(["switch", branch]);
+    run(c).map(|_| ())
+}
+
+/// Create an isolated worktree on a new branch for an agent, starting from
+/// `base` (a branch), or from what's checked out.
+pub fn create_worktree(repo: &Path, dir: &Path, branch: &str, base: Option<&str>) -> Result<PathBuf> {
     if let Some(parent) = dir.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let mut c = git(repo);
     c.args(["worktree", "add", "-b", branch]);
     c.arg(dir);
-    c.arg("HEAD");
+    c.arg(base.unwrap_or("HEAD"));
     run(c)?;
     Ok(dir.to_path_buf())
 }
@@ -248,6 +263,8 @@ pub struct Worktree {
     pub path: String,
     /// Its branch; `None` when its HEAD is detached.
     pub branch: Option<String>,
+    /// The commit it's on, short.
+    pub head: Option<String>,
 }
 
 impl Worktree {
@@ -270,10 +287,13 @@ fn parse_worktrees(out: &str) -> Vec<Worktree> {
     for block in out.split("\n\n") {
         let mut path = None;
         let mut branch = None;
+        let mut head = None;
         let mut skip = false;
         for line in block.lines() {
             if let Some(p) = line.strip_prefix("worktree ") {
                 path = Some(p.trim().to_string());
+            } else if let Some(h) = line.strip_prefix("HEAD ") {
+                head = Some(h.trim().chars().take(7).collect());
             } else if let Some(b) = line.strip_prefix("branch ") {
                 branch = Some(b.trim().trim_start_matches("refs/heads/").to_string());
             } else if line == "bare" || line.starts_with("prunable") {
@@ -281,7 +301,7 @@ fn parse_worktrees(out: &str) -> Vec<Worktree> {
             }
         }
         if let Some(path) = path {
-            all.push((Worktree { path, branch }, skip));
+            all.push((Worktree { path, branch, head }, skip));
         }
     }
     // The first is the main checkout.
@@ -388,5 +408,6 @@ mod tests {
         assert_eq!(w[0].name(), "feature/login");
         assert_eq!(w[1].branch, None);
         assert_eq!(w[1].name(), "detached");
+        assert_eq!(w[0].head.as_deref(), Some("2222"));
     }
 }

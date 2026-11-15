@@ -953,9 +953,7 @@ pub fn Composer(
                                                 e.prevent_default();
                                                 if let Some(p) = &first {
                                                     ws_menu.set(false);
-                                                    let mut d = app.draft.write();
-                                                    d.workspace = Some(p.clone());
-                                                    d.existing_worktree = None;
+                                                    app.draft.write().set_workspace(Some(p.clone()));
                                                 }
                                             }
                                         }
@@ -973,9 +971,7 @@ pub fn Composer(
                                         let p = w.path.clone();
                                         move |_| {
                                             ws_menu.set(false);
-                                            let mut d = app.draft.write();
-                                            d.workspace = Some(p.clone());
-                                            d.existing_worktree = None;
+                                            app.draft.write().set_workspace(Some(p.clone()));
                                         }
                                     },
                                 }
@@ -987,7 +983,7 @@ pub fn Composer(
                                 div { class: "menu-sep" }
                             }
                             MenuItem { label: "Home".to_string(), icon: Some(I::Home), checked: ws_now.is_none(), title: Some("Chats without a project folder".to_string()),
-                                onclick: move |_| { ws_menu.set(false); let mut d = app.draft.write(); d.workspace = None; d.existing_worktree = None; } }
+                                onclick: move |_| { ws_menu.set(false); app.draft.write().set_workspace(None); } }
                             MenuItem { label: "New project".to_string(), icon: Some(I::Plus), title: Some("Pick a folder to work in".to_string()),
                                 onclick: move |_| { ws_menu.set(false); app.pick_workspace(true); } }
                             MenuItem { label: "Manage projects".to_string(), icon: Some(I::Settings),
@@ -995,9 +991,9 @@ pub fn Composer(
                         }
                     }
                     EnvPicker { open: env_menu, worktree, is_repo, session: false, label: env_text.clone(), folder: env_folder.clone(), existing: existing.clone() }
-                    for (gi, g) in groups.iter().enumerate() {
-                        ModeChip { key: "m{gi}", group: g.clone(), gi, plan: gi == 0 && Some(g.options[g.chosen].id) == plan_id, up: false,
-                            onpick: move |(g, v): (usize, Option<String>)| set_pick(g, v, None) }
+                    div { class: "grow" }
+                    if is_repo {
+                        BranchPicker { folder: ws_now.clone(), current: branch.read().clone().flatten(), new_tree: worktree && existing.is_none(), existing: existing.clone() }
                     }
                 }
             }
@@ -1149,7 +1145,8 @@ pub fn Composer(
                 // (and never loses focus) when the composer grows.
                 div { class: "composer-row cgrid",
                     div { class: "c-plus",
-                        PlusMenu { open: plus_menu, attachments, session_id: session_id.clone(), groups: groups.clone(), text, put_gen, input_id,
+                        PlusMenu { open: plus_menu, attachments, text, put_gen, input_id }
+                        ConfigMenu { session_id: session_id.clone(), agent: agent.clone(), groups: groups.clone(),
                             onpick: { let sid = session_id.clone(); move |(g, v): (usize, Option<String>)| set_pick(g, v, sid.clone()) } }
                         if q_edit.read().is_some() {
                             span { class: "edit-badge", title: "Editing a queued message",
@@ -1363,10 +1360,6 @@ pub fn Composer(
                         span { class: "env-chip", style: "cursor: default;", title: "Current branch", Icon { i: I::GitBranch, size: 13, stroke: 1.5 } "{b}" }
                     }
                     EnvPicker { open: env_menu, worktree, is_repo, session: true, label: env_text.clone(), folder: env_folder.clone(), existing: existing.clone() }
-                    for (gi, g) in groups.iter().enumerate() {
-                        ModeChip { key: "m{gi}", group: g.clone(), gi, plan: gi == 0 && Some(g.options[g.chosen].id) == plan_id, up: true,
-                            onpick: { let sid = session_id.clone(); move |(g, v): (usize, Option<String>)| set_pick(g, v, sid.clone()) } }
-                    }
                     div { class: "grow" }
                     super::meters::PlanRing {
                         agent: agent.clone(),
@@ -1942,24 +1935,15 @@ fn bump(mut g: Signal<u64>) {
     g += 1;
 }
 
-/// The "+" menu: attachments, mentions, mode, commands.
+/// The "+" menu: attach files and images, mention a file.
 #[component]
-fn PlusMenu(
-    open: Signal<bool>,
-    attachments: Signal<Vec<Part>>,
-    session_id: Option<String>,
-    groups: Vec<ModeGroupView>,
-    text: Signal<String>,
-    put_gen: Signal<u64>,
-    input_id: &'static str,
-    onpick: EventHandler<(usize, Option<String>)>,
-) -> Element {
+fn PlusMenu(open: Signal<bool>, attachments: Signal<Vec<Part>>, text: Signal<String>, put_gen: Signal<u64>, input_id: &'static str) -> Element {
     let app = use_app();
     let mut open = open;
     let mut text = text;
     rsx! {
         div { class: "menu-anchor",
-            button { class: if open() { "plus-btn open" } else { "plus-btn" }, title: "Add context, change mode", onclick: move |_| open.set(true),
+            button { class: if open() { "plus-btn open" } else { "plus-btn" }, title: "Add files or mention", onclick: move |_| open.set(true),
                 Icon { i: I::Plus, size: 16, stroke: 1.6 }
             }
             Dropdown { open, up: true,
@@ -1970,36 +1954,48 @@ fn PlusMenu(
                     text.set(if t.is_empty() || t.ends_with(' ') { format!("{t}@") } else { format!("{t} @") }); bump(put_gen);
                     document::eval(&format!("setTimeout(() => document.getElementById('{input_id}')?.focus(), 10)"));
                 } }
-                // The agent's own mode groups, numbered 1–9 across groups.
-                {
-                    let numbered: Vec<(usize, Option<String>)> = groups.iter().enumerate().flat_map(|(gi, g)| (0..g.options.len()).map(move |oi| (gi, pick_value(g, oi)))).collect();
-                    let mut n = 0usize;
-                    rsx! {
-                        div {
-                            onkeydown: move |e| {
-                                if let Key::Character(c) = e.key() {
-                                    if let Some(i) = c.parse::<usize>().ok().filter(|i| (1..=9).contains(i)) {
-                                        if let Some((g, v)) = numbered.get(i - 1).cloned() {
-                                            e.prevent_default();
-                                            open.set(false);
-                                            onpick.call((g, v));
-                                        }
-                                    }
-                                }
-                            },
-                            for (gi, g) in groups.iter().enumerate() {
-                                div { key: "g{gi}",
-                                    div { class: "menu-sep" }
-                                    div { class: "menu-label", "{g.label}" }
-                                    for (oi, o) in g.options.iter().enumerate() {
-                                        {
-                                            n += 1;
-                                            let num = n;
-                                            let v = pick_value(g, oi);
-                                            rsx! {
-                                                ModeRow { key: "{o.id}", id: o.id, label: o.label, description: o.description, is_default: oi == g.default, checked: oi == g.chosen,
-                                                    number: if num <= 9 { Some(num) } else { None },
-                                                    onclick: move |_| { open.set(false); onpick.call((gi, v.clone())); } }
+            }
+        }
+    }
+}
+
+/// The chat's settings (the sliders beside +): its mode and permissions,
+/// each a submenu, the agent's MCP servers and skills, and for a chat that
+/// has started, Pin, Fork, its own CLI and Export as.
+#[component]
+fn ConfigMenu(session_id: Option<String>, agent: AgentKind, groups: Vec<ModeGroupView>, onpick: EventHandler<(usize, Option<String>)>) -> Element {
+    let mut app = use_app();
+    let mut open = use_signal(|| false);
+    let pinned = session_id.as_ref().is_some_and(|id| app.sessions.read().iter().any(|s| &s.id == id && s.pinned));
+    let tip = groups.iter().map(|g| g.options.get(g.chosen).map(|o| o.label).unwrap_or("")).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" · ");
+    let mut customize = move |kind: larrier_agents::harness::ItemKind, k: AgentKind| {
+        app.ui.write().customize_focus = Some((Some(kind), Some(k)));
+        app.navigate(crate::state::View::Customize);
+    };
+    rsx! {
+        div { class: "menu-anchor",
+            button { class: if open() { "plus-btn cfg-btn open" } else { "plus-btn cfg-btn" }, title: if tip.is_empty() { "Chat settings".to_string() } else { format!("Chat settings · {tip}") },
+                onclick: move |_| open.set(true),
+                Icon { i: I::Sliders, size: 15, stroke: 1.6 }
+            }
+            Dropdown { open, up: true, class: "cfg-menu".to_string(),
+                for (gi, g) in groups.iter().cloned().enumerate() {
+                    {
+                        let chosen = g.options.get(g.chosen).cloned();
+                        let icon = if gi == 0 { chosen.as_ref().map(|o| mode_icon(o.id)).unwrap_or(I::Infinity) } else { I::Lock };
+                        rsx! {
+                            super::SubMenu { key: "g{gi}", label: g.label.to_string(), icon, value: chosen.map(|o| o.label.to_string()),
+                                for (oi, o) in g.options.iter().cloned().enumerate() {
+                                    {
+                                        let v = pick_value(&g, oi);
+                                        let on = oi == g.chosen;
+                                        let tip = if oi == g.default && !o.description.is_empty() { format!("{} (default)", o.description) } else { o.description.to_string() };
+                                        rsx! {
+                                            button { key: "{o.id}", class: if on { "menu-item checked" } else { "menu-item" }, title: "{tip}",
+                                                onclick: move |_| { open.set(false); onpick.call((gi, v.clone())); },
+                                                span { class: "muted", Icon { i: if gi == 0 { mode_icon(o.id) } else { permission_icon(o.id) }, size: 14 } }
+                                                span { class: "ellipsis", "{o.label}" }
+                                                if on { span { class: "check", Icon { i: I::Check, size: 13 } } }
                                             }
                                         }
                                     }
@@ -2008,14 +2004,27 @@ fn PlusMenu(
                         }
                     }
                 }
+                if !groups.is_empty() {
+                    div { class: "menu-sep" }
+                }
+                MenuItem { label: "MCP servers".to_string(), icon: Some(I::Server), title: Some(format!("{}'s MCP servers, in Customize", agent.display_name())),
+                    onclick: { let k = agent.clone(); move |_| { open.set(false); customize(larrier_agents::harness::ItemKind::Mcp, k.clone()); } } }
+                MenuItem { label: "Skills".to_string(), icon: Some(I::Wand), title: Some(format!("{}'s skills, in Customize", agent.display_name())),
+                    onclick: { let k = agent.clone(); move |_| { open.set(false); customize(larrier_agents::harness::ItemKind::Skill, k.clone()); } } }
                 if let Some(id) = session_id.clone() {
                     div { class: "menu-sep" }
                     {
-                        let (a, b, c) = (id.clone(), id.clone(), id.clone());
+                        let (a, b, c, d) = (id.clone(), id.clone(), id.clone(), id.clone());
                         rsx! {
-                            MenuItem { label: "Fork this agent".to_string(), icon: Some(I::Fork), onclick: move |_| { open.set(false); app.fork(&a, None); } }
-                            MenuItem { label: "Open in the agent's CLI".to_string(), icon: Some(I::Terminal), onclick: move |_| { open.set(false); app.open_in_terminal(&b); } }
-                            MenuItem { label: "Export session".to_string(), icon: Some(I::Upload), onclick: move |_| { open.set(false); app.export(&c, larrier_formats::ExportFormat::LsfJsonl); } }
+                            MenuItem { label: if pinned { "Unpin".to_string() } else { "Pin".to_string() }, icon: Some(if pinned { I::PinOff } else { I::Pin }), onclick: move |_| { open.set(false); app.toggle_pin(&a); } }
+                            MenuItem { label: "Fork".to_string(), icon: Some(I::Fork), onclick: move |_| { open.set(false); app.fork(&b, None); } }
+                            MenuItem { label: "Open in the agent's CLI".to_string(), icon: Some(I::Terminal), onclick: move |_| { open.set(false); app.open_in_terminal(&c); } }
+                            super::SubMenu { label: "Export as", icon: I::Upload,
+                                for f in larrier_formats::ExportFormat::ALL.iter().copied() {
+                                    MenuItem { key: "{f.label()}", label: f.label().to_string(),
+                                        onclick: { let d = d.clone(); move |_| { open.set(false); app.export(&d, f); } } }
+                                }
+                            }
                         }
                     }
                 }
@@ -2024,19 +2033,17 @@ fn PlusMenu(
     }
 }
 
-/// A mode option, on one line: its icon and name, a check when chosen and
-/// its number key. What it does is its tooltip.
-#[component]
-fn ModeRow(id: &'static str, label: &'static str, description: &'static str, is_default: bool, checked: bool, number: Option<usize>, onclick: EventHandler<()>) -> Element {
-    let tip = if is_default && !description.is_empty() { format!("{description} (default)") } else { description.to_string() };
-    rsx! {
-        button { class: if checked { "menu-item checked" } else { "menu-item" }, title: "{tip}",
-            onclick: move |e| { e.stop_propagation(); onclick.call(()); },
-            span { class: "muted", Icon { i: mode_icon(id), size: 14 } }
-            span { class: "ellipsis", "{label}" }
-            if checked { span { class: "check", Icon { i: I::Check, size: 13 } } }
-            if let Some(n) = number { span { class: "kb", "{n}" } }
-        }
+/// An icon for a permissions option (Codex's sandbox and approvals).
+fn permission_icon(id: &str) -> I {
+    let id = id.to_ascii_lowercase();
+    if id.contains("read") {
+        I::Eye
+    } else if id.contains("full") || id.contains("bypass") || id.contains("yolo") {
+        I::Zap
+    } else if id.contains("review") {
+        I::Check
+    } else {
+        I::Lock
     }
 }
 
@@ -2064,31 +2071,175 @@ fn mode_icon(id: &str) -> I {
     }
 }
 
-/// One of the agent's mode groups beside the environment ("∞ Auto ▾"),
-/// always shown; it opens the group's options. Off its default it's blue.
+/// A project's other worktrees (the Existing worktree submenu): a search,
+/// then those a chat runs in, by the chat's name, and the rest, by their
+/// folder; each with its branch (or "detached") and commit.
 #[component]
-fn ModeChip(group: ModeGroupView, gi: usize, plan: bool, up: bool, onpick: EventHandler<(usize, Option<String>)>) -> Element {
-    let mut open = use_signal(|| false);
-    let g = group;
-    let chosen = g.options.get(g.chosen).map(|o| o.label).unwrap_or("");
-    let icon = if plan { I::List } else if gi == 0 { I::Infinity } else { I::Lock };
-    let tip = if gi == 0 { format!("{} · Shift+Tab to change", g.label) } else { g.label.to_string() };
-    rsx! {
-        div { class: "menu-anchor",
-            button { class: if g.chosen != g.default { "env-chip mode-chip changed" } else { "env-chip mode-chip" }, title: "{tip}", onclick: move |_| open.set(true),
-                Icon { i: icon, size: 13 }
-                span { "{chosen}" }
-                Icon { i: I::ChevronDown, size: 12 }
+fn WorktreeList(trees: Option<Vec<larrier_agents::git::Worktree>>, query: Signal<String>, existing: Option<String>, onpick: EventHandler<String>) -> Element {
+    let app = use_app();
+    let mut query = query;
+    let q = query.read().trim().to_lowercase();
+    let sessions = app.sessions.read();
+    // The chat running in a worktree: it says so (or made it: its branch
+    // is `larrier/agent-<the chat's id's end>`).
+    let user_of = |t: &larrier_agents::git::Worktree| {
+        let same = |a: &str, b: &str| a.replace('\\', "/").trim_end_matches('/').eq_ignore_ascii_case(b.replace('\\', "/").trim_end_matches('/'));
+        sessions
+            .iter()
+            .find(|s| s.worktree_path.as_deref().is_some_and(|p| same(p, &t.path)))
+            .or_else(|| t.branch.as_deref().and_then(|b| b.strip_prefix("larrier/agent-")).and_then(|end| sessions.iter().find(|s| s.id.ends_with(end))))
+            .map(|s| s.title.clone())
+    };
+    let rows: Vec<(larrier_agents::git::Worktree, Option<String>)> = trees.clone().unwrap_or_default().into_iter().map(|t| { let u = user_of(&t); (t, u) }).collect();
+    let folder = |t: &larrier_agents::git::Worktree| std::path::Path::new(&t.path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| t.path.clone());
+    let shown: Vec<(larrier_agents::git::Worktree, Option<String>)> = rows
+        .into_iter()
+        .filter(|(t, u)| q.is_empty() || [u.clone().unwrap_or_default(), folder(t), t.name()].iter().any(|s| s.to_lowercase().contains(&q)))
+        .collect();
+    let in_use: Vec<_> = shown.iter().filter(|(_, u)| u.is_some()).cloned().collect();
+    let free: Vec<_> = shown.iter().filter(|(_, u)| u.is_none()).cloned().collect();
+    let row = move |t: larrier_agents::git::Worktree, user: Option<String>| {
+        let title = user.unwrap_or_else(|| folder(&t));
+        let at = format!("{} @ {}", t.branch.clone().unwrap_or_else(|| "detached".into()), t.head.clone().unwrap_or_default());
+        let on = existing.as_deref() == Some(t.path.as_str());
+        let p = t.path.clone();
+        rsx! {
+            button { key: "{t.path}", class: if on { "menu-item wt-row checked menu-fresh" } else { "menu-item wt-row menu-fresh" }, title: "{t.path}",
+                onclick: move |_| onpick.call(p.clone()),
+                span { class: "muted", Icon { i: I::GitBranch, size: 14 } }
+                span { class: "wt-text",
+                    span { class: "ellipsis wt-title", "{title}" }
+                    span { class: "ellipsis wt-sub", "{at}" }
+                }
+                if on { span { class: "check", Icon { i: I::Check, size: 13 } } }
             }
-            Dropdown { open, up,
-                div { class: "menu-label", "{g.label}" }
-                for (oi, o) in g.options.iter().enumerate() {
-                    {
-                        let v = pick_value(&g, oi);
-                        rsx! {
-                            ModeRow { key: "{o.id}", id: o.id, label: o.label, description: o.description, is_default: oi == g.default, checked: oi == g.chosen, number: None,
-                                onclick: move |_| { open.set(false); onpick.call((gi, v.clone())); } }
+        }
+    };
+    rsx! {
+        div { class: "menu-search",
+            Icon { i: I::Search, size: 13 }
+            input { placeholder: "Search worktrees", value: "{query}", spellcheck: "false", oninput: move |e| query.set(e.value()) }
+        }
+        match trees {
+            None => rsx! { super::MenuSkeleton { rows: 3, two_line: true } },
+            Some(all) if all.is_empty() => rsx! { div { class: "menu-empty", "No other worktrees" } },
+            Some(_) => rsx! {
+                if shown.is_empty() {
+                    div { class: "menu-empty", "No worktrees match" }
+                }
+                if !in_use.is_empty() {
+                    div { class: "menu-label", "In use" }
+                    for (t, u) in in_use { {row(t, u)} }
+                }
+                if !free.is_empty() {
+                    div { class: "menu-label", "Not in use" }
+                    for (t, u) in free { {row(t, u)} }
+                }
+            },
+        }
+    }
+}
+
+/// The branch a new chat starts on (far right above the composer): the
+/// project's branches, its default marked; picked for a new worktree it's
+/// the branch the worktree starts from, for the checkout itself it's
+/// switched to. A chat running in a worktree that's already there keeps
+/// that worktree's branch.
+#[component]
+fn BranchPicker(folder: Option<String>, current: Option<String>, new_tree: bool, existing: Option<String>) -> Element {
+    let mut app = use_app();
+    let mut open = use_signal(|| false);
+    // `None` while they're read.
+    let mut list = use_signal(|| None::<(Vec<String>, String)>);
+    let mut q = use_signal(String::new);
+    let base = app.draft.read().base_branch.clone();
+    let shown_branch = if new_tree { base.clone().or(current.clone()) } else { current.clone() };
+    let label = shown_branch.clone().unwrap_or_else(|| "Branch".into());
+    let fixed = existing.is_some();
+    let f2 = folder.clone();
+    let query = q.read().trim().to_lowercase();
+    let rows: Vec<String> = list.read().as_ref().map(|(b, _)| b.iter().filter(|n| query.is_empty() || n.to_lowercase().contains(&query)).cloned().collect()).unwrap_or_default();
+    let default = list.read().as_ref().map(|(_, d)| d.clone());
+    let many = list.read().as_ref().is_some_and(|(b, _)| b.len() > 8);
+    rsx! {
+        div { class: "menu-anchor branch-pick",
+            button { class: "env-chip", disabled: fixed,
+                title: if fixed { "The worktree's branch".to_string() } else if new_tree { "The branch the new worktree starts from".to_string() } else { "The branch checked out in the project".to_string() },
+                onclick: move |_| {
+                    let Some(f) = f2.clone() else { return };
+                    list.set(None);
+                    q.set(String::new());
+                    open.set(true);
+                    spawn(async move {
+                        let got = tokio::task::spawn_blocking(move || {
+                            let p = std::path::Path::new(&f);
+                            (larrier_agents::git::branches(p), larrier_agents::git::default_branch(p))
+                        })
+                        .await
+                        .ok();
+                        // The default branch first, then the most recent.
+                        let (mut names, default) = got.unwrap_or_default();
+                        if let Some(i) = names.iter().position(|b| *b == default) {
+                            let d = names.remove(i);
+                            names.insert(0, d);
                         }
+                        list.set(Some((names, default)));
+                    });
+                },
+                Icon { i: I::GitBranch, size: 14, stroke: 1.5 }
+                span { class: "ellipsis", "{label}" }
+                if !fixed { Icon { i: I::ChevronDown, size: 12 } }
+            }
+            Dropdown { open, up: false, right: true, class: "branch-menu".to_string(),
+                if many {
+                    div { class: "menu-search",
+                        Icon { i: I::Search, size: 13 }
+                        input { placeholder: "Search branches", value: "{q}", autofocus: true, spellcheck: "false", oninput: move |e| q.set(e.value()) }
+                    }
+                }
+                {
+                    let pick = move |b: String| {
+                        open.set(false);
+                        if new_tree {
+                            app.draft.write().base_branch = Some(b);
+                        } else if let Some(f) = folder.clone() {
+                            spawn(async move {
+                                let b2 = b.clone();
+                                let r = tokio::task::spawn_blocking(move || larrier_agents::git::switch(std::path::Path::new(&f), &b2)).await;
+                                match r {
+                                    Ok(Ok(())) => app.toast(format!("Switched to {b}")),
+                                    Ok(Err(e)) => app.toast_err(format!("Couldn't switch to {b}: {e}")),
+                                    Err(_) => {}
+                                }
+                            });
+                        }
+                    };
+                    let sb = shown_branch.clone();
+                    let item = move |b: String, fresh: bool| {
+                        let on = sb.as_deref() == Some(b.as_str());
+                        let is_default = default.as_deref() == Some(b.as_str());
+                        let b2 = b.clone();
+                        let mut pick = pick.clone();
+                        rsx! {
+                            button { key: "{b}", class: format!("menu-item{}{}", if on { " checked" } else { "" }, if fresh { " menu-fresh" } else { "" }), title: "{b}",
+                                onclick: move |_| pick(b2.clone()),
+                                span { class: "muted", Icon { i: I::GitBranch, size: 14 } }
+                                span { class: "ellipsis", "{b}" }
+                                if is_default { span { class: "sub", "Default" } }
+                                if on { span { class: "check", Icon { i: I::Check, size: 13 } } }
+                            }
+                        }
+                    };
+                    match list.read().clone() {
+                        // The branch in use shows at once; the rest load.
+                        None => rsx! {
+                            if let Some(b) = shown_branch.clone() { {item(b, false)} }
+                            super::MenuSkeleton { rows: 2 }
+                        },
+                        Some(_) => rsx! {
+                            for b in rows.clone() { {item(b, true)} }
+                            if rows.is_empty() { div { class: "menu-empty", "No branches match" } }
+                        },
                     }
                 }
             }
@@ -2117,12 +2268,14 @@ fn EnvPicker(
 ) -> Element {
     let mut app = use_app();
     let mut open = open;
-    // The project's worktrees, read when the menu opens (and at first when
-    // it runs in one, to name it by its branch).
+    // The project's worktrees: read in the background when the menu opens
+    // (`None` while that runs), and at first when the chat runs in one, to
+    // name it by its branch.
     let mut trees = use_signal(|| match (&existing, &folder) {
-        (Some(_), Some(f)) => larrier_agents::git::worktrees(std::path::Path::new(f)),
-        _ => Vec::new(),
+        (Some(_), Some(f)) => Some(larrier_agents::git::worktrees(std::path::Path::new(f))),
+        _ => Some(Vec::new()),
     });
+    let mut tree_q = use_signal(String::new);
     let host = host_name();
     let f2 = folder.clone();
     let in_tree = worktree && is_repo;
@@ -2130,6 +2283,7 @@ fn EnvPicker(
         trees
             .read()
             .iter()
+            .flatten()
             .find(|t| &t.path == p)
             .map(|t| t.name())
             .unwrap_or_else(|| std::path::Path::new(p).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())
@@ -2144,8 +2298,13 @@ fn EnvPicker(
             button { class: "env-chip",
                 onclick: move |_| {
                     if !session && is_repo {
-                        if let Some(f) = &f2 {
-                            trees.set(larrier_agents::git::worktrees(std::path::Path::new(f)));
+                        if let Some(f) = f2.clone() {
+                            trees.set(None);
+                            tree_q.set(String::new());
+                            spawn(async move {
+                                let list = tokio::task::spawn_blocking(move || larrier_agents::git::worktrees(std::path::Path::new(&f))).await.unwrap_or_default();
+                                trees.set(Some(list));
+                            });
                         }
                     }
                     open.set(true);
@@ -2181,17 +2340,9 @@ fn EnvPicker(
                         title: Some("A git checkout of its own, on a new branch".to_string()),
                         onclick: { let mut set = set; move |_| { open.set(false); set(true, None); } } }
                     super::SubMenu { label: "Existing worktree", icon: I::GitBranch, value: existing_name.clone(), checked: in_tree && existing.is_some(),
-                        disabled: session || trees.read().is_empty(),
-                        for t in trees.read().clone() {
-                            MenuItem {
-                                key: "{t.path}",
-                                label: t.name(),
-                                title: Some(t.path.clone()),
-                                icon: Some(I::GitBranch),
-                                checked: existing.as_deref() == Some(t.path.as_str()),
-                                onclick: { let p = t.path.clone(); let mut set = set; move |_| { open.set(false); set(true, Some(p.clone())); } },
-                            }
-                        }
+                        disabled: session,
+                        WorktreeList { trees: trees.read().clone(), query: tree_q, existing: existing.clone(),
+                            onpick: move |p: String| { open.set(false); let mut set = set; set(true, Some(p)); } }
                     }
                     MenuItem { label: "Current checkout".to_string(), icon: Some(I::Folder), checked: !in_tree, disabled: session,
                         title: Some("The project folder itself".to_string()),

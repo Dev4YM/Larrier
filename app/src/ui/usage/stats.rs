@@ -407,6 +407,7 @@ mod tests {
             status: larrier_core::SessionStatus::Done,
             workspace: None,
             environment: "Local".into(),
+            worktree_path: None,
             created_at: now,
             updated_at: now,
             active_at: None,

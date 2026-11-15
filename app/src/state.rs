@@ -368,6 +368,21 @@ pub struct Draft {
     /// of a new one.
     #[serde(default)]
     pub existing_worktree: Option<String>,
+    /// The branch a new worktree starts from (else what's checked out).
+    #[serde(default)]
+    pub base_branch: Option<String>,
+}
+
+impl Draft {
+    /// Run the next chat in project `path` (Home when `None`): what was
+    /// picked for the last project's worktrees doesn't carry over.
+    pub fn set_workspace(&mut self, path: Option<String>) {
+        if self.workspace != path {
+            self.existing_worktree = None;
+            self.base_branch = None;
+        }
+        self.workspace = path;
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -451,6 +466,7 @@ impl App {
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
             worktree: cfg.settings.use_worktrees,
             existing_worktree: None,
+            base_branch: None,
         };
         // A message left on the new agent screen comes back with its picks.
         let draft = crate::keep::load().unwrap_or(draft);
@@ -1776,11 +1792,11 @@ impl App {
                         .map(PathBuf::from)
                         .unwrap_or_else(|| store().worktrees_dir());
                     let dir = base_dir.join(&w.name).join(format!("agent-{short}"));
-                    git::create_worktree(&repo, &dir, &branch)?;
+                    git::create_worktree(&repo, &dir, &branch, d.base_branch.as_deref())?;
                     s.environment = Environment::Worktree {
                         path: dir.to_string_lossy().to_string(),
                         branch,
-                        base: w.branch.clone(),
+                        base: d.base_branch.clone().or_else(|| w.branch.clone()),
                     };
                 }
             }
@@ -2251,7 +2267,7 @@ impl App {
                     c.add_workspace(&p);
                 });
                 if for_draft {
-                    self.draft.write().workspace = Some(p);
+                    self.draft.write().set_workspace(Some(p));
                 }
             }
         });

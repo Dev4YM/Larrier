@@ -1431,6 +1431,7 @@ mod tests {
             status: SessionStatus::Done,
             workspace: ws.map(WorkspaceRef::from_path),
             environment: "Local".into(),
+            worktree_path: None,
             created_at: at,
             updated_at: at,
             active_at: None,

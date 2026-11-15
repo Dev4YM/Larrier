@@ -1987,3 +1987,42 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 
 /* macOS: the traffic lights sit over the bar's left end; the menus are in the system menu bar. */
 .menubar.system { padding-left: 78px; }
+
+/* The chat's settings button beside + (ConfigMenu): its mode and
+   permissions open as submenus. */
+.c-plus .cfg-btn { background: transparent; }
+.c-plus .cfg-btn:hover, .c-plus .cfg-btn.open { background: var(--chip); }
+.menu.cfg-menu { min-width: 240px; }
+.menu-item .sub + .check { margin-left: 0; }
+
+/* Rows still loading in a menu (MenuSkeleton): soft bars where the names
+   will be, a shimmer passing over them; the rows that arrive fade in. */
+.menu-skel { padding: 2px 0; }
+.skel-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; }
+.skel-row.two { height: 42px; }
+.skel-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.skel {
+  display: block; border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fg) 6%, transparent) 0%, color-mix(in srgb, var(--fg) 11%, transparent) 50%, color-mix(in srgb, var(--fg) 6%, transparent) 100%);
+  background-size: 200% 100%; animation: skel 1.3s ease-in-out infinite;
+}
+.skel-dot { width: 14px; height: 14px; flex-shrink: 0; }
+.skel-bar { height: 8px; }
+.skel-bar.sm { height: 6px; opacity: .75; }
+@keyframes skel { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.menu-item.menu-fresh { animation: fade-in var(--t-2) var(--ease); }
+
+/* Existing worktrees: a search, then In use / Not in use, each row its
+   name over its branch and commit. */
+.menu.sub-menu:has(.wt-row, .menu-skel) { width: 320px; }
+.sub-menu .menu-search { margin: -2px -4px 4px; }
+.menu-item.wt-row { height: auto; min-height: 40px; padding: 5px 8px; }
+.wt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.wt-title { color: var(--fg); }
+.wt-sub { font-size: var(--ui-xs); color: var(--fg-3); }
+
+/* The branch a new chat starts on, far right above the composer. */
+.branch-pick .env-chip { max-width: 240px; }
+.branch-pick .env-chip:disabled { cursor: default; }
+.branch-pick .env-chip:disabled:hover { background: none; color: var(--fg-2); }
+.menu.branch-menu { min-width: 260px; max-width: 360px; }

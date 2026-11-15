@@ -1050,6 +1050,10 @@ impl Session {
             status: self.status,
             workspace: self.workspace.clone(),
             environment: self.environment.label().to_string(),
+            worktree_path: match &self.environment {
+                Environment::Worktree { path, .. } => Some(path.clone()),
+                _ => None,
+            },
             created_at: self.created_at,
             updated_at: self.updated_at,
             preview,
@@ -1308,6 +1312,9 @@ pub struct SessionSummary {
     pub workspace: Option<WorkspaceRef>,
     #[serde(default)]
     pub environment: String,
+    /// The worktree it runs in, if it runs in one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_path: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     #[serde(default)]

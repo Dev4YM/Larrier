@@ -958,8 +958,8 @@ pub fn DockPills(id: String, card: Signal<Option<super::tasks::DockCard>>) -> El
                                 }
                             }
                             Dropdown { open: menu, up: true,
-                                MenuItem { label: "Commit".to_string(), icon: Some(I::Commit), onclick: move |_| run2("commit") }
-                                MenuItem { label: "Commit & Push".to_string(), icon: Some(I::Upload), onclick: move |_| run3("push") }
+                                MenuItem { label: "Commit".to_string(), icon: Some(I::CommitV), onclick: move |_| run2("commit") }
+                                MenuItem { label: "Commit & Push".to_string(), icon: Some(I::CloudUpload), onclick: move |_| run3("push") }
                                 MenuItem { label: "Create Pull Request".to_string(), icon: Some(I::PullRequest), onclick: move |_| run4("pr") }
                             }
                         }

@@ -420,7 +420,7 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
                                     run_git("Committed", Box::new(move || git::commit(Path::new(&c), &msg, true)));
                                 }
                             },
-                            Icon { i: I::Commit, size: 13 }
+                            Icon { i: I::CommitV, size: 14 }
                             "Commit"
                         }
                         button { class: "ghost-btn", disabled: busy(),
@@ -439,7 +439,7 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
                                     }));
                                 }
                             },
-                            Icon { i: I::Upload, size: 13 }
+                            Icon { i: I::CloudUpload, size: 14 }
                             "Commit & Push"
                         }
                         if pr.is_none() {

@@ -96,6 +96,8 @@ icons! {
     Swap => "arrow-right-left",
     Download => "download",
     Upload => "upload",
+    CommitV => "git-commit-vertical",
+    CloudUpload => "cloud-upload",
     Refresh => "rotate-cw",
     External => "external-link",
     Copy => "copy",

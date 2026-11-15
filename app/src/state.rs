@@ -1863,7 +1863,10 @@ impl App {
     /// Start new chats in project `path` (Home when `None`), with the
     /// project's own defaults: its first agent, where its chats run.
     pub fn pick_project(mut self, path: Option<String>) {
-        let project = path.as_deref().and_then(|p| self.config.peek().project_for(p).cloned());
+        let project = match path.as_deref() {
+            Some(p) => self.config.peek().project_for(p).cloned(),
+            None => Some(self.config.peek().home_project()),
+        };
         let mut d = self.draft.write();
         d.set_workspace(path);
         if let Some(w) = project {
@@ -1890,6 +1893,20 @@ impl App {
                 w.pinned = !w.pinned;
             }
         });
+    }
+
+    /// Pin or unpin Home.
+    pub fn toggle_home_pin(self) {
+        self.update_config(|c| {
+            let mut h = c.home_project();
+            h.pinned = !h.pinned;
+            c.home_project = Some(h);
+        });
+    }
+
+    /// Edit Home: its name, look, agents and where its chats run.
+    pub fn edit_home(mut self) {
+        self.ui.write().modal = Some(Modal::Project(Some(larrier_core::config::HOME_PROJECT.into()), None));
     }
 
     /// Edit the project at `path` (a folder that isn't one yet opens as a

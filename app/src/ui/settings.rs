@@ -1025,6 +1025,7 @@ fn Workspaces() -> Element {
     let mut app = use_app();
     let mut list = app.config.read().workspaces.clone();
     list.sort_by_key(|w| (!w.pinned, w.name.to_lowercase()));
+    let home = app.config.read().home_project();
     rsx! {
         h1 { "Projects" }
         div { class: "sub", "Each has a name, an icon and a color, its folders and the agents it works with. Chats started in its folders are its chats; chats without one are in Home." }
@@ -1045,6 +1046,15 @@ fn Workspaces() -> Element {
                     }
                     button { class: "ghost-btn", onclick: { let id = w.id.clone(); move |_| app.ui.write().modal = Some(crate::state::Modal::Project(Some(id.clone()), None)) }, "Edit" }
                 }
+            }
+            div { class: "set-row pj-row",
+                super::projects::ProjectMark { icon: home.icon.clone(), color: home.color.clone(), size: 16, home: true }
+                div { class: "lbl", div { class: "t", "{home.name}" } div { class: "d", "Chats without a project folder" } }
+                button { class: if home.pinned { "icon-btn on" } else { "icon-btn" }, title: if home.pinned { "Unpin" } else { "Pin to the top of the sidebar" },
+                    onclick: move |_| app.toggle_home_pin(),
+                    Icon { i: if home.pinned { I::PinOff } else { I::Pin }, size: 13 }
+                }
+                button { class: "ghost-btn", onclick: move |_| app.edit_home(), "Edit" }
             }
             div { class: "set-row",
                 div { class: "lbl", div { class: "t", "New project" } div { class: "d", "Pick its folder, then name it and give it a look." } }

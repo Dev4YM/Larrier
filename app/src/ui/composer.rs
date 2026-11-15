@@ -979,7 +979,10 @@ pub fn Composer(
                             } else if ws_now.is_some() {
                                 Icon { i: I::Folder, size: 14, stroke: 1.5 }
                             } else {
-                                Icon { i: I::Home, size: 14, stroke: 1.5 }
+                                {
+                                    let h = app.config.read().home_project();
+                                    rsx! { super::projects::ProjectMark { icon: h.icon.clone(), color: h.color.clone(), size: 14, home: true } }
+                                }
                             }
                             span { "{ws_label}" }
                             Icon { i: I::ChevronDown, size: 12 }
@@ -1029,7 +1032,8 @@ pub fn Composer(
                             if !pj_shown.is_empty() || !pj_q.is_empty() {
                                 div { class: "menu-sep" }
                             }
-                            MenuItem { label: "Home".to_string(), icon: Some(I::Home), checked: ws_now.is_none(), title: Some("Chats without a project folder".to_string()),
+                            MenuItem { label: app.config.read().home_project().name, checked: ws_now.is_none(), title: Some("Chats without a project folder".to_string()),
+                                lead: { let h = app.config.read().home_project(); rsx! { super::projects::ProjectMark { icon: h.icon.clone(), color: h.color.clone(), size: 14, home: true } } },
                                 onclick: move |_| { ws_menu.set(false); app.pick_project(None); } }
                             MenuItem { label: "New project".to_string(), icon: Some(I::Plus), title: Some("Pick a folder to work in".to_string()),
                                 onclick: move |_| { ws_menu.set(false); app.edit_project(None); } }

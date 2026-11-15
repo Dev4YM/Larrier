@@ -90,20 +90,20 @@ fn repo_key(s: &SessionSummary) -> String {
 }
 
 /// Projects with their chats (Home among them), in the user's order.
-fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], sort: SidebarSort, order: &[String]) -> (Vec<SessionSummary>, Vec<Repo>) {
+fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], home_project: &larrier_core::Workspace, sort: SidebarSort, order: &[String]) -> (Vec<SessionSummary>, Vec<Repo>) {
     let mut pinned = Vec::new();
     let mut map: BTreeMap<String, Repo> = BTreeMap::new();
     let mut home = Repo {
         key: HOME_KEY.into(),
-        name: "Home".into(),
+        name: home_project.name.clone(),
         path: None,
         items: Vec::new(),
         latest: chrono::DateTime::<chrono::Utc>::MIN_UTC,
         agent: None,
         home: true,
-        icon: None,
-        color: None,
-        pinned: false,
+        icon: home_project.icon.clone(),
+        color: home_project.color.clone(),
+        pinned: home_project.pinned,
     };
     for s in list.iter() {
         if s.pinned {
@@ -156,7 +156,7 @@ fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace
         }
     }
     let mut projects: Vec<Repo> = map.into_values().collect();
-    if !home.items.is_empty() {
+    if !home.items.is_empty() || home.pinned {
         projects.push(home);
     }
     order_projects(&mut projects, order);
@@ -241,7 +241,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
         let pinned: Vec<SessionSummary> = rest.iter().filter(|s| s.pinned).cloned().collect();
         (pinned, build_agent_groups(&rest, sort))
     } else {
-        build_projects(&rest, if query.is_empty() { &workspaces } else { &[] }, sort, &order)
+        build_projects(&rest, if query.is_empty() { &workspaces } else { &[] }, &app.config.read().home_project(), sort, &order)
     };
     let group_label = match group {
         SidebarGroup::Agent => "Agents",
@@ -551,8 +551,7 @@ fn RepoGroup(
                 span { class: "ic",
                     span { class: "ic-rest",
                         if let Some(k) = agent.clone() { AgentGlyph { kind: k } }
-                        else if home { Icon { i: I::Home, size: 16, stroke: 1.5 } }
-                        else { super::projects::ProjectMark { icon: icon.clone(), color: color.clone(), open } }
+                        else { super::projects::ProjectMark { icon: icon.clone(), color: color.clone(), open, home } }
                     }
                     span { class: "ic-chev", Icon { i: I::ChevronRight, size: 15, stroke: 1.6 } }
                 }
@@ -561,15 +560,13 @@ fn RepoGroup(
                 if count > 0 { span { class: "cnt", "{count}" } }
                 if agent.is_none() {
                     div { class: "acts",
-                        if let Some(p) = path.clone() {
-                            div { class: "menu-anchor",
-                                button { class: "icon-btn sm", title: "Project options",
-                                    onclick: move |e: MouseEvent| { e.stop_propagation(); menu.set(true); },
-                                    Icon { i: I::More, size: 15 }
-                                }
-                                super::Dropdown { open: menu, up: false, right: true,
-                                    ProjectActions { path: Some(p.clone()), pinned, onclose: move |_| menu.set(false) }
-                                }
+                        div { class: "menu-anchor",
+                            button { class: "icon-btn sm", title: "Project options",
+                                onclick: move |e: MouseEvent| { e.stop_propagation(); menu.set(true); },
+                                Icon { i: I::More, size: 15 }
+                            }
+                            super::Dropdown { open: menu, up: false, right: true,
+                                ProjectActions { path: path.clone(), pinned, onclose: move |_| menu.set(false) }
                             }
                         }
                         button { class: "icon-btn sm", title: if path.is_some() { "New agent in {name}" } else { "New agent in Home" },
@@ -616,6 +613,12 @@ fn ProjectActions(path: Option<String>, pinned: bool, onclose: EventHandler<()>)
     rsx! {
         MenuItem { label: "New chat".to_string(), icon: Some(I::SquarePen),
             onclick: { let path = path.clone(); move |_| { onclose.call(()); app.pick_project(path.clone()); app.new_agent(); } } }
+        if path.is_none() {
+            MenuItem { label: if pinned { "Unpin Home".to_string() } else { "Pin Home".to_string() }, icon: Some(if pinned { I::PinOff } else { I::Pin }),
+                onclick: move |_| { onclose.call(()); app.toggle_home_pin(); } }
+            MenuItem { label: "Edit Home…".to_string(), icon: Some(I::Pencil), title: Some("Its name, look, agents and where its chats run".to_string()),
+                onclick: move |_| { onclose.call(()); app.edit_home(); } }
+        }
         if path.is_some() {
             MenuItem { label: if pinned { "Unpin project".to_string() } else { "Pin project".to_string() }, icon: Some(if pinned { I::PinOff } else { I::Pin }),
                 onclick: move |_| { onclose.call(()); app.toggle_project_pin(&p1); } }

@@ -96,8 +96,12 @@ onto the chat area:
 - **Spelling** is checked with Hunspell, the engine Chrome's spelling is
   built on, and its English dictionary. Right-click a misspelled word for
   its corrections (it's selected for you), or Add to Dictionary.
+- The sliders button beside **+** holds the chat's settings: its mode and
+  permissions (each a submenu), the agent's MCP servers and skills, and
+  for a chat that has started, Pin, Fork, the agent's own CLI and Export as.
+  **+** attaches files and mentions.
 - Below it: the branch, where the chat runs (this PC, in a worktree or the
-  checkout itself), the agent's mode, and two rings for plan usage and
+  checkout itself), and two rings for plan usage and
   context; hover them for the breakdown. What a Claude Code chat's context is
   made of is checked when you open the context ring (Claude Code counts it,
   which doesn't use your plan) and kept with the chat.
@@ -157,7 +161,11 @@ A centered composer with the project and environment pickers. The project
 menu searches your projects and also has Home (no project folder), New
 project and Manage projects. The environment menu runs the chat on this PC
 (your own cloud is coming) and, in a git project, in a new worktree, in a
-worktree that's already there, or in the checkout itself. **Plan New
+worktree that's already there (searchable; those a chat runs in come
+first, with each one's branch and commit), or in the checkout itself. On
+the far right is the branch it starts on: for a new worktree, the branch
+the worktree starts from; for the checkout itself, picking one switches to
+it. **Plan New
 Idea** (Shift+Tab cycles modes) starts in planning, and **Multitask** runs
 one prompt on several agents in parallel. A message left here waits as a
 draft.
@@ -181,7 +189,7 @@ each agent's own configuration and tagged with the agents that use it.
 - **General:** notifications, completion sound, tray icon, what sending
   during a turn does (steer or queue), window restore.
 - **Appearance:** themes, accent and per-token colors for light and dark,
-  fonts, **Text Size** (Small to Larger: every kind of text and its spacing
+  fonts (the interface is set in Inter, built into Larrier), **Text Size** (Small to Larger: every kind of text and its spacing
   move together), zoom, density, **Button Corners** (Balanced is a
   moderate scale; Solid squares it off, Rounded brings back pills and
   circles), sidebar side and **Reduce Motion** (motion is already short;

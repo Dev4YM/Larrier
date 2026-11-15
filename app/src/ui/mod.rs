@@ -1878,7 +1878,7 @@ pub fn place_at_js(id: &str, x: f64, y: f64, focus: bool) -> String {
 }
 
 /// Keyboard handling shared by every menu (expects `m` and `focusFirst`).
-const MENU_KEYS_JS: &str = r#"const items = () => [...m.querySelectorAll('button.menu-item:not(.disabled), button.mp-agent')].filter(b => b.offsetParent !== null);
+const MENU_KEYS_JS: &str = r#"const items = () => [...m.querySelectorAll('button.menu-item:not(.disabled), button.mp-agent')].filter(b => b.offsetParent !== null && b.closest('.menu') === m);
   const checked = m.querySelector('.menu-item.checked, .menu-item .check');
   if (checked) (checked.closest('.menu-item') || checked).scrollIntoView({ block: 'nearest' });
   const s = m.querySelector('.menu-search input, input[autofocus]');
@@ -1887,9 +1887,21 @@ const MENU_KEYS_JS: &str = r#"const items = () => [...m.querySelectorAll('button
   if (m.__keys) return; m.__keys = true;
   let typed = '', typedT = null;
   m.addEventListener('keydown', (e) => {
+    // A submenu inside this menu handles its own keys.
+    if (e.target instanceof Element && e.target.closest('.menu') !== m) return;
     const list = items(); const i = list.indexOf(document.activeElement);
-    const go = (n) => { if (!list.length) return; const t = list[(n + list.length) % list.length]; t.focus(); t.scrollIntoView({ block: 'nearest' }); };
-    if (e.key === 'ArrowDown') { e.preventDefault(); go(i < 0 ? 0 : i + 1); }
+    const go = (n) => {
+      if (!list.length) return; const t = list[(n + list.length) % list.length];
+      // Moving to another row closes the submenus it didn't open.
+      for (const c of m.querySelectorAll('.sub-menu > .sub-close')) if (c.parentElement.id + '-t' !== t.id) c.click();
+      t.focus(); t.scrollIntoView({ block: 'nearest' });
+    };
+    if (m.classList.contains('sub-menu') && (e.key === 'Escape' || e.key === 'ArrowLeft')) {
+      e.preventDefault(); e.stopPropagation();
+      const t = document.getElementById(m.id + '-t'); if (t) t.focus({ preventScroll: true });
+      const c = m.querySelector(':scope > .sub-close'); if (c) c.click();
+    }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); go(i < 0 ? 0 : i + 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); go(i < 0 ? list.length - 1 : i - 1); }
     else if (e.key === 'Home' && e.target.tagName !== 'INPUT') { e.preventDefault(); go(0); }
     else if (e.key === 'End' && e.target.tagName !== 'INPUT') { e.preventDefault(); go(list.length - 1); }
@@ -1988,6 +2000,121 @@ pub fn MenuItem(
             }
         }
     }
+}
+
+/// A menu row that opens a menu of its own beside the one it's in: on hover,
+/// a click, → or Enter. The menu it came from keeps its size and place; ← or
+/// Escape go back to the row. Leaving the row or the submenu closes it a
+/// moment later, unless the pointer gets to the other one first, so it can
+/// cross the rows between them.
+#[component]
+pub fn SubMenu(
+    label: String,
+    #[props(default)] icon: Option<I>,
+    /// The current choice, faint before the arrow.
+    #[props(default)]
+    value: Option<String>,
+    #[props(default = false)] disabled: bool,
+    /// One of its submenu's choices is the one in use.
+    #[props(default = false)]
+    checked: bool,
+    children: Element,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let mut gen = use_signal(|| 0u32);
+    let mut keyed = use_signal(|| false);
+    let id = use_hook(|| format!("sub-{}", crate::state::rand_id()));
+    let is_open = open();
+    let id2 = id.clone();
+    use_effect(use_reactive!(|is_open| {
+        if is_open {
+            document::eval(&place_sub_js(&id2, *keyed.peek()));
+        }
+    }));
+    let mut show = move |kb: bool| {
+        *gen.write() += 1;
+        keyed.set(kb);
+        open.set(true);
+    };
+    let mut later = move || {
+        *gen.write() += 1;
+        let g = *gen.peek();
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(260)).await;
+            if *gen.peek() == g {
+                open.set(false);
+            }
+        });
+    };
+    let id3 = id.clone();
+    let cls = format!("menu-item has-sub{}{}{}", if is_open { " open" } else { "" }, if disabled { " disabled" } else { "" }, if checked { " checked" } else { "" });
+    rsx! {
+        button { id: "{id}-t", class: "{cls}", "aria-haspopup": "menu", "aria-expanded": "{is_open}",
+            onmouseenter: move |_| if !disabled { show(false) },
+            onmouseleave: move |_| later(),
+            onclick: move |e| { e.stop_propagation(); if !disabled { show(false) } },
+            onkeydown: move |e: KeyboardEvent| {
+                if !disabled && matches!(e.key(), Key::ArrowRight | Key::Enter) {
+                    e.prevent_default();
+                    if open() {
+                        document::eval(&format!("const s = document.getElementById('{id3}'); const b = s && s.querySelector('button.menu-item:not(.disabled)'); if (b) b.focus();"));
+                    } else {
+                        show(true);
+                    }
+                }
+            },
+            if let Some(i) = icon {
+                span { class: "muted", Icon { i, size: 14 } }
+            }
+            span { class: "ellipsis", "{label}" }
+            if let Some(v) = value {
+                span { class: "sub", "{v}" }
+            }
+            span { class: "sub-arrow", Icon { i: I::ChevronRight, size: 12 } }
+        }
+        if is_open {
+            div { id: "{id}", class: "menu sub-menu", role: "menu", style: "visibility: hidden;",
+                onmouseenter: move |_| *gen.write() += 1,
+                onmouseleave: move |_| later(),
+                onclick: move |e| e.stop_propagation(),
+                // Closed from the keyboard script (← and Escape).
+                span { class: "sub-close", hidden: true, onclick: move |e| { e.stop_propagation(); open.set(false); } }
+                {children}
+            }
+        }
+    }
+}
+
+/// JS that places a submenu beside the row that opened it (`{id}-t`): right
+/// of its menu, or left when there's no room, its first row level with that
+/// row, inside the window.
+pub fn place_sub_js(id: &str, focus: bool) -> String {
+    format!(
+        r#"requestAnimationFrame(() => {{
+  const m = document.getElementById('{id}'), t = document.getElementById('{id}-t'); if (!m || !t) return;
+  const focusFirst = {focus};
+  const p = t.closest('.menu'); if (p) p.style.animation = 'none';
+  const vw = window.innerWidth, vh = window.innerHeight, pad = 8, gap = 2;
+  m.style.position = 'fixed'; m.style.left = '0px'; m.style.top = '0px'; m.style.right = 'auto'; m.style.bottom = 'auto';
+  m.style.maxHeight = (vh - pad * 2) + 'px'; m.style.maxWidth = (vw - pad * 2) + 'px';
+  // Where (0, 0) lands: a transformed or filtered ancestor moves it.
+  const o = m.getBoundingClientRect();
+  const r = t.getBoundingClientRect(), pr = (p || t).getBoundingClientRect();
+  const w = m.offsetWidth, h = Math.min(m.scrollHeight, vh - pad * 2);
+  const inset = parseFloat(getComputedStyle(m).paddingTop) || 0;
+  let left = pr.right + gap;
+  const flip = left + w > vw - pad;
+  if (flip) left = pr.left - gap - w;
+  left = Math.max(pad, Math.min(left, vw - w - pad));
+  const top = Math.max(pad, Math.min(r.top - inset, vh - h - pad));
+  m.style.left = (left - o.left) + 'px'; m.style.top = (top - o.top) + 'px';
+  m.style.overflowY = m.scrollHeight > h + 1 ? 'auto' : 'hidden';
+  m.classList.toggle('flip-left', flip);
+  m.style.visibility = 'visible'; m.classList.add('in');
+  {keys}
+}});"#,
+        keys = MENU_KEYS_JS
+    )
 }
 
 #[cfg(test)]

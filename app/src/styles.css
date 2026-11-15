@@ -398,6 +398,16 @@ svg { flex-shrink: 0; display: block; }
 .menu-item.disabled { opacity: .45; cursor: default; }
 .menu-item .check { margin-left: auto; color: var(--fg-2); padding-left: 8px; }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+/* A row that opens a submenu beside its menu (SubMenu). It stays lit while
+   its submenu is open. */
+.menu-item.has-sub.open { background: var(--hover); }
+.menu-item .sub-arrow { margin-left: auto; padding-left: 8px; display: inline-flex; color: var(--fg-3); }
+.menu-item .sub + .sub-arrow { margin-left: 0; padding-left: 6px; }
+.menu.sub-menu { min-width: 180px; }
+.menu.sub-menu.in { animation: sub-in var(--t-1) var(--ease); }
+.menu.sub-menu.in.flip-left { animation-name: sub-in-left; }
+@keyframes sub-in { from { opacity: 0; transform: translateX(-3px); } to { opacity: 1; transform: none; } }
+@keyframes sub-in-left { from { opacity: 0; transform: translateX(3px); } to { opacity: 1; transform: none; } }
 /* A menu's backdrop doesn't catch the pointer: what's outside an open menu
    stays hoverable and clickable. It's kept as the menu's close handler,
    which the window's pointerdown handler (ui/mod.rs) clicks. */

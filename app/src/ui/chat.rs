@@ -561,7 +561,6 @@ fn ChatHeader(id: String) -> Element {
     let id_m = id.clone();
     let info = use_memo(move || app.with_session(&id_m, head_info));
     let mut menu = use_signal(|| false);
-    let mut export_menu = use_signal(|| false);
     let Some(h) = info() else { return rsx! {} };
     let (id_c, id_d, id_e, id_f, id_g, id_h, id_i) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
     let (env_icon, env_tip) = h.env.clone();
@@ -594,27 +593,25 @@ fn ChatHeader(id: String) -> Element {
                     MenuItem { label: "Rename".to_string(), icon: Some(I::Pencil), onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::Rename(id_d.clone())); } }
                     MenuItem { label: "Fork".to_string(), icon: Some(I::Fork), onclick: move |_| { menu.set(false); app.fork(&id_e, None); } }
                     MenuItem { label: "Open in Terminal".to_string(), icon: Some(I::Terminal), onclick: move |_| { menu.set(false); app.open_in_terminal(&id_f); } }
-                    MenuItem { label: "Export…".to_string(), icon: Some(I::Upload), onclick: move |_| { menu.set(false); export_menu.set(true); } }
+                    super::SubMenu { label: "Export as", icon: I::Upload,
+                        for f in ExportFormat::ALL.iter().copied() {
+                            MenuItem {
+                                key: "{f.label()}",
+                                label: f.label().to_string(),
+                                onclick: {
+                                    let id = id.clone();
+                                    move |_| {
+                                        menu.set(false);
+                                        app.export(&id, f);
+                                    }
+                                },
+                            }
+                        }
+                    }
                     MenuItem { label: if h.pinned { "Unpin".to_string() } else { "Pin".to_string() }, icon: Some(if h.pinned { I::PinOff } else { I::Pin }), onclick: move |_| { menu.set(false); app.toggle_pin(&id_g); } }
                     MenuItem { label: if h.archived { "Unarchive".to_string() } else { "Archive".to_string() }, icon: Some(I::Archive), onclick: move |_| { menu.set(false); app.toggle_archive(&id_i); } }
                     div { class: "menu-sep" }
                     MenuItem { label: "Delete".to_string(), icon: Some(I::Trash), danger: true, onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::ConfirmDelete(id_h.clone())); } }
-                }
-                Dropdown { open: export_menu, up: false, right: true,
-                    div { class: "menu-label", "Export as" }
-                    for f in ExportFormat::ALL.iter().copied() {
-                        MenuItem {
-                            key: "{f.label()}",
-                            label: f.label().to_string(),
-                            onclick: {
-                                let id = id.clone();
-                                move |_| {
-                                    export_menu.set(false);
-                                    app.export(&id, f);
-                                }
-                            },
-                        }
-                    }
                 }
             }
         }

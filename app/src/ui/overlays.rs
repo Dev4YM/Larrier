@@ -263,11 +263,9 @@ pub fn TabMenu() -> Element {
 pub fn ContextMenu() -> Element {
     let mut app = use_app();
     let ctx = app.ui.read().ctx.clone();
-    let mut sub = use_signal(|| None::<&'static str>);
     let pos = ctx.as_ref().map(|c| (c.x, c.y));
-    // Re-place whenever it opens, moves or a submenu grows it.
+    // Placed whenever it opens or moves.
     use_effect(use_reactive!(|pos| {
-        let _ = sub();
         if let Some((x, y)) = pos {
             document::eval(&super::place_at_js("ctx-menu", x, y, true));
         }
@@ -279,7 +277,6 @@ pub fn ContextMenu() -> Element {
     let y = ctx.y;
     let close = move || {
         app.ui.write().ctx = None;
-        sub.set(None);
     };
     let item = |label: &'static str, icon: I, f: Box<dyn Fn()>| {
         let mut close = close;
@@ -292,11 +289,10 @@ pub fn ContextMenu() -> Element {
     };
     let (i1, i2, i3, i4, i5, i6, i7) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
     rsx! {
-        div { class: "menu-backdrop", onclick: move |_| { app.ui.write().ctx = None; sub.set(None); },
+        div { class: "menu-backdrop", onclick: move |_| app.ui.write().ctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().ctx = None; } }
         div { id: "ctx-menu", class: "menu", style: "position: fixed; left: {x}px; top: {y}px; visibility: hidden;",
             {item("Open", I::Message, Box::new(move || app.open_session(&i1)))}
-            {item("Open Side by Side", I::Columns, { let i = id.clone(); Box::new(move || app.open_split(&i)) })}
             if app.current_id().is_some_and(|c| c != id) {
                 {item("Open Side by Side", I::Columns, { let i = id.clone(); Box::new(move || app.open_split(&i)) })}
             }
@@ -311,44 +307,32 @@ pub fn ContextMenu() -> Element {
             {item(if s.pinned { "Unpin" } else { "Pin" }, I::Pin, Box::new(move || app.toggle_pin(&i3)))}
             {item(if s.unread { "Mark as Read" } else { "Mark as Unread" }, I::Circle, { let u = !s.unread; Box::new(move || app.set_unread(&i4, u)) })}
             {item("Fork", I::Fork, Box::new(move || app.fork(&i5, None)))}
-            button { class: "menu-item", onclick: move |_| sub.set(Some("port")),
-                span { class: "muted", Icon { i: I::Swap, size: 14 } }
-                span { "Continue with…" }
-                span { class: "sub", Icon { i: I::ChevronRight, size: 12 } }
-            }
-            button { class: "menu-item", onclick: move |_| sub.set(Some("export")),
-                span { class: "muted", Icon { i: I::Upload, size: 14 } }
-                span { "Export as…" }
-                span { class: "sub", Icon { i: I::ChevronRight, size: 12 } }
-            }
-            if sub() == Some("port") {
-                div { class: "menu-sep" }
+            super::SubMenu { label: "Continue with", icon: I::Swap,
                 for spec in larrier_core::agent::runnable() {
                     {
                         let k = spec.kind.clone();
                         let sid = id.clone();
                         let mut close = close;
                         rsx! {
-                            button { key: "{spec.kind.id()}", class: "menu-item", style: "padding-left: 22px;",
+                            button { key: "{spec.kind.id()}", class: if spec.kind == s.agent { "menu-item checked" } else { "menu-item" },
                                 onclick: move |_| { close(); app.ensure_loaded(&sid); app.port(&sid, k.clone()); },
                                 AgentGlyph { kind: spec.kind.clone() }
-                                span { "{spec.name}" }
+                                span { class: "ellipsis", "{spec.name}" }
                                 if spec.kind == s.agent { span { class: "check", Icon { i: I::Check, size: 13 } } }
                             }
                         }
                     }
                 }
             }
-            if sub() == Some("export") {
-                div { class: "menu-sep" }
+            super::SubMenu { label: "Export as", icon: I::Upload,
                 for f in ExportFormat::ALL.iter().copied() {
                     {
                         let sid = id.clone();
                         let mut close = close;
                         rsx! {
-                            button { key: "{f.label()}", class: "menu-item", style: "padding-left: 22px;",
+                            button { key: "{f.label()}", class: "menu-item",
                                 onclick: move |_| { close(); app.export(&sid, f); },
-                                span { "{f.label()}" }
+                                span { class: "ellipsis", "{f.label()}" }
                             }
                         }
                     }

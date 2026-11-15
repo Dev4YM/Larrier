@@ -406,10 +406,6 @@ svg { flex-shrink: 0; display: block; }
 .menu-item .sub-arrow { margin-left: auto; padding-left: 8px; display: inline-flex; color: var(--fg-3); }
 .menu-item .sub + .sub-arrow { margin-left: 0; padding-left: 6px; }
 .menu.sub-menu { min-width: 180px; }
-.menu.sub-menu.in { animation: sub-in var(--t-1) var(--ease); }
-.menu.sub-menu.in.flip-left { animation-name: sub-in-left; }
-@keyframes sub-in { from { opacity: 0; transform: translateX(-3px); } to { opacity: 1; transform: none; } }
-@keyframes sub-in-left { from { opacity: 0; transform: translateX(3px); } to { opacity: 1; transform: none; } }
 /* A menu's backdrop doesn't catch the pointer: what's outside an open menu
    stays hoverable and clickable. It's kept as the menu's close handler,
    which the window's pointerdown handler (ui/mod.rs) clicks. */
@@ -779,17 +775,19 @@ select.input { cursor: pointer; padding-right: 4px; }
 .app a, .md a { color: var(--accent-c); }
 .send-btn.ready:hover { filter: brightness(1.1); }
 
-/* What opens comes in from where it's anchored: a short slide (a few px)
-   and a fade, never a scale, so text and icons are at size on the first
-   frame. Closing is instant. */
-@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-@keyframes menu-in-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+/* Menus fade in and out, quickly: nothing slides or scales, so text and
+   icons are at size and in place on the first frame. Other things that
+   open come in with a short slide (a few px) and a fade. */
+@keyframes menu-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes menu-out { from { opacity: 1; } to { opacity: 0; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes pop-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes slide-in-right { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
-.menu.in { animation: menu-in var(--t-2) var(--ease); }
-.menu.in.flip-up { animation-name: menu-in-up; }
+.menu.in { animation: menu-in 120ms ease-out; }
+/* Closing: the menu stays where it was for its fade (see Dropdown). */
+.menu.in.out { animation: menu-out 100ms ease-in forwards; pointer-events: none; }
+.menu-leaving { display: none; }
 .overlay { animation: fade-in var(--t-1) ease-out; }
 .palette, .modal { animation: pop-in var(--t-2) var(--ease); }
 .right-pane { animation: slide-in-right var(--t-2) var(--ease); }

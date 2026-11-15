@@ -1811,21 +1811,41 @@ pub fn Dropdown(
     let mut open = open;
     let id = use_hook(|| format!("dd-{}", crate::state::rand_id()));
     let is_open = open();
+    // Closed, it stays a moment to fade out (clicks go through it then).
+    let mut leaving = use_signal(|| false);
+    let mut was_open = use_signal(|| false);
     let id2 = id.clone();
     use_effect(use_reactive!(|is_open| {
         if is_open {
+            leaving.set(false);
+            was_open.set(true);
             document::eval(&place_js(&id2, up, right));
+        } else if *was_open.peek() && !*leaving.peek() {
+            was_open.set(false);
+            leaving.set(true);
+            spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(110)).await;
+                if !*open.peek() {
+                    leaving.set(false);
+                }
+            });
         }
     }));
-    if !is_open {
+    // The first render after closing comes before the effect marks it
+    // leaving: `was_open` keeps the menu mounted through it, or it would be
+    // made anew, unplaced.
+    if !is_open && !leaving() && !*was_open.peek() {
         return rsx! {};
     }
-    let cls = format!("menu {} {} {}", if up { "up" } else { "down" }, if right { "right" } else { "" }, class.unwrap_or_default());
+    let cls = format!("menu {} {} {}{}", if up { "up" } else { "down" }, if right { "right" } else { "" }, class.unwrap_or_default(), if is_open { "" } else { " in out" });
     rsx! {
         // Its close handler, clicked by the window's script (see the
         // pointerdown handler): the click stops here, so a row the menu sits
         // in (a project's "…") isn't clicked too.
-        div { class: "menu-backdrop", onclick: move |e| { e.stop_propagation(); open.set(false); }, oncontextmenu: move |e| { e.prevent_default(); e.stop_propagation(); open.set(false); } }
+        // While it fades out the backdrop stays, inert, under another class:
+        // the same nodes keep the menu where it was placed (a changed
+        // structure would make a new, unplaced menu).
+        div { class: if is_open { "menu-backdrop" } else { "menu-leaving" }, onclick: move |e| { e.stop_propagation(); open.set(false); }, oncontextmenu: move |e| { e.prevent_default(); e.stop_propagation(); open.set(false); } }
         div { id: "{id}", class: "{cls}", style: "visibility: hidden;", role: "menu", onclick: move |e| e.stop_propagation(), {children} }
     }
 }

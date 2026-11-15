@@ -557,15 +557,9 @@ fn TurnView(
     show_reasoning: bool,
 ) -> Element {
     let app = use_app();
-    // The work's steps show while it runs and stay when it ends (a turn
-    // watched doesn't fold away under you); folded or opened by hand, it
-    // stays so, kept with the chat.
-    let mut seen_live = use_signal(|| live);
-    use_effect(use_reactive!(|live| {
-        if live && !*seen_live.peek() {
-            seen_live.set(true);
-        }
-    }));
+    // The work's steps show while it runs and fold away, smoothly, when it
+    // ends: the answer stays in sight. Opened or folded by hand, a turn stays
+    // so, kept with the chat.
     let mut chosen = use_signal(|| None::<bool>);
     let mut steps = use_signal(|| STEP_WINDOW);
     let _ = fp;
@@ -601,7 +595,8 @@ fn TurnView(
     let last_reply = turn.replies.last().cloned();
     let hidden = turn.replies.len().saturating_sub(steps());
     let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
-    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or_else(|| seen_live());
+    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or(false);
+    let final_mi = final_at.map(|(mi, _)| mi);
     // What a folded turn shows: its errors and its answer, by when they came.
     let mut folded: Vec<(usize, usize)> = turn
         .replies
@@ -646,17 +641,21 @@ fn TurnView(
                 span { class: "chev", if open { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
             }
         }
-        if live || open {
+        // The steps: in sight while it runs, then folded (they slide shut);
+        // once it's done the answer and errors are below them, never in.
+        super::Collapse { open: live || open, class: "trace".to_string(),
             // The newest steps; a long turn shows earlier ones on demand.
             if hidden > 0 {
                 button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
             }
             for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
-                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == turn.replies.len(), show_reasoning, skip_final: false }
+                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == turn.replies.len(), show_reasoning,
+                    skip_final: !live && Some(mi) == final_mi, drop_errors: !live }
             }
-        } else {
-            // Folded: the answer and any errors stay in sight, in the order
-            // they happened (a limit hit after the answer shows after it).
+        }
+        if !live {
+            // The answer and any errors, in the order they happened (a limit
+            // hit after the answer shows after it).
             for (k, mi, pi) in folded {
                 PartView {
                     key: "{k}",
@@ -1027,8 +1026,12 @@ fn group_parts(parts: &[Part]) -> Vec<Item> {
 }
 
 #[component]
-pub fn AssistantMessage(session_id: String, msg: Message, streaming: bool, show_reasoning: bool, #[props(default = false)] skip_final: bool) -> Element {
+pub fn AssistantMessage(session_id: String, msg: Message, streaming: bool, show_reasoning: bool, #[props(default = false)] skip_final: bool, #[props(default = false)] drop_errors: bool) -> Element {
     let mut parts = msg.parts.clone();
+    if drop_errors {
+        // Shown below the folded steps instead.
+        parts.retain(|p| !matches!(p, Part::Error { .. }));
+    }
     if skip_final {
         // Inside "Worked for…": everything except the answer and errors.
         if let Some(i) = parts.iter().rposition(|p| matches!(p, Part::Text { text } if !text.trim().is_empty())) {

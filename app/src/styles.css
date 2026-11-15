@@ -1396,6 +1396,8 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .collapse.open { grid-template-rows: 1fr; opacity: 1; }
 @starting-style { .collapse.open { opacity: 0; } }
 .collapse-inner { min-height: 0; overflow: hidden; }
+/* A finished turn's steps slide shut; reopened, they slide open. */
+.collapse.trace { transition: grid-template-rows var(--t-3) var(--ease), opacity var(--t-2) ease; }
 .repo-group { margin-bottom: 0; }
 .repo-group.open { margin-bottom: 8px; }
 .repo-row .ic-chev svg, .agent-sub-row .chev svg { transition: transform var(--t-3) var(--ease); }

@@ -1747,7 +1747,7 @@ pub fn glyph_color(hex: &str, dark: bool) -> String {
 /// Children that open and close by growing and shrinking (and fading).
 /// They stay mounted until the close has played out, then leave the page.
 #[component]
-pub fn Collapse(open: bool, children: Element) -> Element {
+pub fn Collapse(open: bool, #[props(default)] class: Option<String>, children: Element) -> Element {
     let mut mounted = use_signal(|| open);
     let mut turn = use_signal(|| 0u32);
     use_effect(use_reactive!(|open| {
@@ -1768,7 +1768,7 @@ pub fn Collapse(open: bool, children: Element) -> Element {
         return rsx! {};
     }
     rsx! {
-        div { class: if open { "collapse open" } else { "collapse" },
+        div { class: format!("collapse{}{}", class.map(|c| format!(" {c}")).unwrap_or_default(), if open { " open" } else { "" }),
             div { class: "collapse-inner", {children} }
         }
     }

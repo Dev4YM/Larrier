@@ -300,7 +300,7 @@ if (!window.__larrierEdReady) {
         scrollBeyondLastLine: false,
         roundedSelection: true,
         renderLineHighlight: 'all',
-        cursorBlinking: 'smooth',
+        cursorBlinking: 'blink',
         padding: { top: 10, bottom: 10 },
         scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
         overviewRulerBorder: false,
@@ -322,8 +322,8 @@ if (!window.__larrierEdReady) {
     const look = st.look || {};
     host.__ed.updateOptions({
       ...type(),
-      smoothScrolling: !still(),
-      cursorSmoothCaretAnimation: still() ? 'off' : 'on',
+      smoothScrolling: false,
+      cursorSmoothCaretAnimation: 'off',
       wordWrap: look.wrap ? 'on' : 'off',
       minimap: { enabled: !!look.minimap, renderCharacters: false, showSlider: 'mouseover' },
     });

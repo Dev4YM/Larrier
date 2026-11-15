@@ -65,14 +65,14 @@ pub(crate) const CSS: &str = r#"
 }
 
 .above-composer { position: relative; }
-.tk-chip { gap: 6px; color: var(--fg-2); transition: background .15s, color .15s; }
+.tk-chip { gap: 6px; color: var(--fg-2); transition: background var(--t-2), color var(--t-2); }
 .tk-chip:hover { background: var(--hover); color: var(--fg); }
 .tk-chip.on { background: var(--hover); color: var(--fg); }
 .tk-chip .n { font-variant-numeric: tabular-nums; }
 .tk-card { order: -1; flex: 0 0 100%; min-width: 0; margin-bottom: 2px; background: var(--card); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .14); padding: 2px 4px 4px; transform-origin: 50% 100%;
-  animation: tk-card-in .18s cubic-bezier(.2, .8, .2, 1); }
-@keyframes tk-card-in { from { opacity: 0; transform: translateY(4px); } }
+  animation: tk-card-in var(--t-2) var(--ease); }
+@keyframes tk-card-in { from { opacity: 0; } }
 .app.no-motion .tk-card { animation: none; }
 .tk-card-head { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 2px 0 8px; font-size: 12px; color: var(--fg-3); }
 .tk-card-head .tk-ic { color: var(--fg-3); }
@@ -85,13 +85,13 @@ pub(crate) const CSS: &str = r#"
 .tk-stop-all:hover { background: var(--hover); color: var(--red); }
 .tk-card-list { max-height: min(220px, 36vh); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .tk-item { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px;
-  font-size: 12px; line-height: 16px; color: var(--fg); cursor: pointer; min-width: 0; transition: background .12s; }
+  font-size: 12px; line-height: 16px; color: var(--fg); cursor: pointer; min-width: 0; transition: background var(--t-1); }
 .tk-item:hover { background: var(--hover); }
 .tk-item > .lead { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex: none; color: var(--fg-3); }
 .tk-item .ttl { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; max-width: 48%; }
 .tk-item .act { flex: 1; min-width: 0; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tk-item .when { color: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; flex: none; min-width: 28px; text-align: right; }
-.tk-item .go { display: inline-flex; flex: none; color: var(--fg-3); opacity: 0; transition: opacity .12s; }
+.tk-item .go { display: inline-flex; flex: none; color: var(--fg-3); opacity: 0; transition: opacity var(--t-1); }
 .tk-item:hover .go { opacity: 1; }
 .tk-card.terms .tk-item .ttl { flex: 1; max-width: none; font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
 
@@ -101,15 +101,15 @@ pub(crate) const CSS: &str = r#"
 .tk-group-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; margin-top: 6px; border-radius: 7px;
   width: 100%; text-align: left; font-size: 12px; color: var(--fg-3); }
 .tk-group-head:hover { background: var(--hover); color: var(--fg-2); }
-.tk-group-head .chev { display: inline-flex; transition: transform .18s ease; }
+.tk-group-head .chev { display: inline-flex; transition: transform var(--t-2) ease; }
 .tk-group.closed .tk-group-head .chev { transform: rotate(-90deg); }
 .tk-group-head .n { font-variant-numeric: tabular-nums; padding: 0 6px; line-height: 17px; border-radius: 9px; background: var(--chip); color: var(--fg-2); font-size: 11px; }
-.tk-group-body { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .22s cubic-bezier(.2, .8, .2, 1), opacity .18s; }
+.tk-group-body { display: grid; grid-template-rows: 1fr; transition: opacity var(--t-2); }
 .tk-group.closed .tk-group-body { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
 .tk-group-inner { min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
 .app.no-motion .tk-group-body, .app.no-motion .tk-group-head .chev { transition: none; }
 .tk-row { flex: none; box-sizing: border-box; height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 9px;
-  color: var(--fg); min-width: 0; cursor: pointer; transition: background .12s; }
+  color: var(--fg); min-width: 0; cursor: pointer; transition: background var(--t-1); }
 .tk-row:hover { background: var(--hover); }
 .tk-row > .tk-lead { display: inline-flex; align-items: center; justify-content: center; width: 16px; flex: none; color: var(--fg-3); }
 .tk-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

@@ -533,7 +533,7 @@ const CSS: &str = r#"
 .pf-photo { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 0; }
 .pf-avatar { position: relative; border-radius: 50%; }
 .pf-avatar .avatar img, .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
-.pf-cam { position: absolute; inset: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: rgba(0, 0, 0, .38); opacity: 0; transition: opacity .15s ease; }
+.pf-cam { position: absolute; inset: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: rgba(0, 0, 0, .38); opacity: 0; transition: opacity var(--t-2) ease; }
 .pf-avatar:hover .pf-cam { opacity: 1; }
 .pf-link { font-size: 12px; color: var(--fg-3); }
 .pf-link:hover { color: var(--fg); }

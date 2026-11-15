@@ -378,7 +378,7 @@ pub fn Transcript(id: String) -> Element {
                             }
                             let uid = it.uid.clone();
                             document::eval(&format!(
-                                "setTimeout(() => {{ const m = document.getElementById('m-{uid}'); const t = m && (m.closest('.turn') || m); if (t) t.scrollIntoView({{block: 'start', behavior: document.querySelector('.app.no-motion') ? 'auto' : 'smooth'}}); }}, 30)"
+                                "setTimeout(() => {{ const m = document.getElementById('m-{uid}'); const t = m && (m.closest('.turn') || m); if (t) t.scrollIntoView({{block: 'start', behavior: 'auto'}}); }}, 30)"
                             ));
                         },
                         span { class: "tn-dash" }
@@ -496,7 +496,7 @@ pub fn Transcript(id: String) -> Element {
                     button { class: "round-btn", title: "Scroll to bottom",
                         onclick: move |e| {
                             e.stop_propagation();
-                            document::eval(&format!("const el = document.getElementById('{tid3}'); el && el.scrollTo({{top: el.scrollHeight, behavior: 'smooth'}});"));
+                            document::eval(&format!("const el = document.getElementById('{tid3}'); el && el.scrollTo({{top: el.scrollHeight}});"));
                         },
                         Icon { i: I::ArrowDown, size: 15 }
                     }

@@ -18,7 +18,7 @@ const CSS: &str = r#"
 .setup-note { font-size: 12.5px; line-height: 18px; color: var(--fg-2); background: var(--chip); border-radius: 8px; padding: 8px 10px; }
 .setup-opts { display: flex; flex-direction: column; gap: 8px; }
 .setup-opt { display: flex; gap: 12px; align-items: flex-start; text-align: left; width: 100%; padding: 12px 14px; border-radius: 10px;
-  border: 1px solid var(--border); background: var(--card); cursor: pointer; transition: border-color .15s, background .15s; }
+  border: 1px solid var(--border); background: var(--card); cursor: pointer; transition: border-color var(--t-2), background var(--t-2); }
 .setup-opt:hover { border-color: var(--border-2); }
 .setup-opt.on { border-color: var(--accent-c); background: color-mix(in srgb, var(--accent-c) 6%, var(--card)); }
 .setup-opt .ic { display: inline-flex; color: var(--fg-2); margin-top: 1px; }

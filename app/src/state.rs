@@ -926,7 +926,7 @@ impl App {
         }
         if st.dirty() {
             self.editing.write().confirm = Some(target);
-            document::eval("setTimeout(() => document.querySelector('.user-msg.editing')?.scrollIntoView({block: 'nearest', behavior: 'smooth'}), 20)");
+            document::eval("setTimeout(() => document.querySelector('.user-msg.editing')?.scrollIntoView({block: 'nearest'}), 20)");
             return;
         }
         self.set_edit(target);

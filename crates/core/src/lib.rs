@@ -10,7 +10,7 @@ pub mod secrets;
 pub mod store;
 
 pub use agent::{AgentKind, AgentSpec, ModeGroup, ModeOption, ModeSelection, Protocol};
-pub use config::{Account, AccountAuth, AgentEndpoint, ApiAccount, ApiKind, BusySend, ButtonCorners, Config, CustomModel, Density, EndpointKind, Profile, Provider, ProviderKind, RunMode, Settings, SidebarGroup, SidebarSort, TextSize, Theme, UpdateChannel, UpdateMode, Workspace};
+pub use config::{Account, AccountAuth, AgentEndpoint, ApiAccount, ApiKind, BusySend, ButtonCorners, Config, CustomModel, Density, EndpointKind, FavoriteModel, Profile, Provider, ProviderKind, RunMode, Settings, SidebarGroup, SidebarSort, TextSize, Theme, UpdateChannel, UpdateMode, Workspace};
 pub use lsf::Environment;
 pub use lsf::{
     FileDiff, Message, NativeLink, Origin, Part, PlanEntry, PlanStatus, Role, Session, SessionStatus, SessionSummary,

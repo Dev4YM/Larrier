@@ -335,6 +335,10 @@ pub struct Settings {
     pub transcript_width: u32,
     #[serde(default)]
     pub reduce_motion: bool,
+    /// Models starred in the model picker, shown in its Favorites tab in the
+    /// order they were starred.
+    #[serde(default)]
+    pub favorite_models: Vec<FavoriteModel>,
     /// Per-theme color overrides: keys like `light.bg`, `dark.sidebar`.
     #[serde(default)]
     pub custom_colors: std::collections::BTreeMap<String, String>,
@@ -441,6 +445,29 @@ impl BusySend {
         match self {
             BusySend::Steer | BusySend::Interrupt => BusySend::Queue,
             BusySend::Queue => BusySend::Steer,
+        }
+    }
+}
+
+/// A model starred in the model picker: which harness runs it, and its id
+/// as the picker stores it (Larrier Chat's as `account/model`).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct FavoriteModel {
+    pub agent: AgentKind,
+    pub model: String,
+}
+
+impl Settings {
+    pub fn is_favorite(&self, agent: &AgentKind, model: &str) -> bool {
+        self.favorite_models.iter().any(|f| &f.agent == agent && f.model == model)
+    }
+
+    /// Star a model, or unstar it when it already is.
+    pub fn toggle_favorite(&mut self, agent: &AgentKind, model: &str) {
+        if self.is_favorite(agent, model) {
+            self.favorite_models.retain(|f| !(&f.agent == agent && f.model == model));
+        } else {
+            self.favorite_models.push(FavoriteModel { agent: agent.clone(), model: model.to_string() });
         }
     }
 }
@@ -563,6 +590,7 @@ impl Default for Settings {
             sidebar_right: false,
             transcript_width: default_transcript_width(),
             reduce_motion: false,
+            favorite_models: Vec::new(),
             custom_colors: Default::default(),
             code_theme_light: None,
             code_theme_dark: None,
@@ -1205,6 +1233,19 @@ mod tests {
         assert_eq!((api(pi).api, api(pi).env_var.as_deref(), api(pi).secret_ref.as_deref()), (ApiKind::OpenAi, Some("OPENAI_API_KEY"), Some("account:a2")));
         let saved = serde_json::to_string(&old).unwrap();
         assert!(!saved.contains("\"endpoints\"") && !saved.contains("api_key") && saved.contains("\"account\":\"e2\""), "{saved}");
+    }
+
+    #[test]
+    fn favorites_star_and_unstar() {
+        let mut s = Settings::default();
+        let claude = AgentKind::ClaudeCode;
+        s.toggle_favorite(&claude, "claude-opus-5-5");
+        s.toggle_favorite(&AgentKind::Chat, "anthropic/claude-sonnet-5-5");
+        assert!(s.is_favorite(&claude, "claude-opus-5-5") && !s.is_favorite(&AgentKind::Codex, "claude-opus-5-5"));
+        s.toggle_favorite(&claude, "claude-opus-5-5");
+        assert_eq!(s.favorite_models, vec![FavoriteModel { agent: AgentKind::Chat, model: "anthropic/claude-sonnet-5-5".into() }]);
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.favorite_models, s.favorite_models);
     }
 
     #[test]

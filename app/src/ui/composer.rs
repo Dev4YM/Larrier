@@ -1406,11 +1406,11 @@ Effort: {}", c.efforts.iter().map(|e| larrier_agents::models::effort_label(e)).c
     rows
 }
 
-/// Agent + model picker: enabled agents on the left, the hovered agent's
-/// models on the right; typing searches every model each agent offers. A
-/// model's Edit button opens its properties (context, effort, Fast).
-/// Fixed size so it never jumps while you browse; it folds into one column
-/// on narrow windows.
+/// Agent + model picker: a search box, a rail of icons (the favorites, then
+/// each harness) and the chosen tab's models beside it; typing searches every
+/// model each harness offers. A model's star keeps it in the favorites and
+/// its Edit button opens its properties (context, effort, Fast). Fixed size
+/// so it never jumps while you browse.
 #[component]
 fn ModelPicker(
     open: Signal<bool>,
@@ -1427,14 +1427,15 @@ fn ModelPicker(
 ) -> Element {
     let app = use_app();
     let mut query = use_signal(String::new);
-    let mut browse = use_signal(|| agent.clone());
+    // The rail's tab: a harness, or the favorites (`None`).
+    let mut browse = use_signal(|| Some(agent.clone()));
     // The model whose properties are open (agent, id, where its Edit was).
     let mut edit = use_signal(|| None::<(AgentKind, String, f64, f64)>);
     let is_open = open();
     let a0 = agent.clone();
     use_effect(use_reactive!(|is_open| {
         if is_open {
-            browse.set(a0.clone());
+            browse.set(Some(a0.clone()));
             query.set(String::new());
         }
         edit.set(None);
@@ -1457,7 +1458,8 @@ fn ModelPicker(
     }));
     let agents = pickable_agents(&app, &agent);
     let q = query.read().trim().to_lowercase();
-    let cur = browse();
+    let tab = browse();
+    let cur = tab.clone().unwrap_or_else(|| agent.clone());
     let cur_meta = agents.iter().find(|(k, _, _)| *k == cur).cloned();
     // The family in use (Cursor stores a variant of it).
     let now = crate::agent_models::resolve(&app, &agent, model.as_deref(), effort.as_deref());
@@ -1493,14 +1495,51 @@ fn ModelPicker(
     let editable = |id: &Option<String>| -> bool {
         id.as_ref().and_then(|id| cur_choices.iter().find(|c| &c.id == id)).is_some_and(|c| !c.efforts.is_empty() || c.fast || c.context.is_some() || c.params.is_some())
     };
+    // A row's star: in the favorites or not (the default row can't be).
+    let star = move |k: AgentKind, id: Option<String>| {
+        if let Some(m) = id {
+            app.update_config(move |c| c.settings.toggle_favorite(&k, &m));
+        }
+    };
+    let favorites = app.config.read().settings.favorite_models.clone();
+    let starred = |k: &AgentKind, id: &Option<String>| id.as_ref().is_some_and(|m| favorites.iter().any(|f| &f.agent == k && &f.model == m));
+    // Favorites, under the harness that runs each.
+    let fav_groups: Vec<(AgentKind, String, Vec<PickRow>)> = {
+        let mut out: Vec<(AgentKind, String, Vec<PickRow>)> = Vec::new();
+        for (k, name, _) in agents.iter() {
+            let mine: Vec<&larrier_core::FavoriteModel> = favorites.iter().filter(|f| &f.agent == k).collect();
+            if mine.is_empty() {
+                continue;
+            }
+            let all = pick_rows(&app, k, true);
+            let rows: Vec<PickRow> = mine
+                .iter()
+                .map(|f| {
+                    all.iter().find(|r| r.id.as_deref() == Some(f.model.as_str())).cloned().unwrap_or_else(|| PickRow {
+                        id: Some(f.model.clone()),
+                        label: f.model.clone(),
+                        note: String::new(),
+                        meta: String::new(),
+                        tip: f.model.clone(),
+                        logo_id: Some(f.model.clone()),
+                    })
+                })
+                .collect();
+            out.push((k.clone(), name.clone(), rows));
+        }
+        out
+    };
+    let fav = tab.is_none();
+    let sub_now = cur_meta.as_ref().map(|m| m.2.clone()).unwrap_or_default();
     rsx! {
         Dropdown { open, up, right: true, class: "model-picker",
-            div { class: "menu-search",
+            div { class: "mp-search",
                 Icon { i: I::Search, size: 12 }
                 input {
-                    placeholder: "Search models, or type a model id…",
+                    placeholder: "Search models",
                     value: "{query}",
                     autofocus: true,
+                    spellcheck: "false",
                     oninput: move |e| query.set(e.value()),
                     onkeydown: {
                         let cur = cur.clone();
@@ -1522,31 +1561,108 @@ fn ModelPicker(
                     },
                 }
             }
-            if q.is_empty() {
-                div { class: "mp-body",
-                    div { class: "mp-agents",
-                        for (k, name, sub) in agents.clone() {
-                            {
-                                let on = k == cur;
-                                let using = k == agent;
-                                let (k1, k2) = (k.clone(), k.clone());
-                                let logo = agent_logo(&k);
-                                rsx! {
-                                    button { key: "{k.id()}", class: if on { "mp-agent on" } else { "mp-agent" }, title: "{name} {sub}",
-                                        onmouseenter: move |_| browse.set(k1.clone()),
-                                        onclick: move |_| browse.set(k2.clone()),
-                                        span { class: "lg", if let Some(svg) = logo { Logo { svg, size: 15 } } else { Icon { i: I::Bot, size: 14 } } }
-                                        span { class: "nm ellipsis", "{name}" }
-                                        if using { span { class: "using", title: "In use", Icon { i: I::Check, size: 13 } } }
-                                    }
+            div { class: "mp-body",
+                // The rail: favorites, then each harness by its icon.
+                div { class: "mp-rail",
+                    button { class: if fav && q.is_empty() { "mp-agent mp-tab on" } else { "mp-agent mp-tab" }, title: "Favorites",
+                        onclick: move |_| { browse.set(None); query.set(String::new()); },
+                        Icon { i: I::Star, size: 14, stroke: 1.5 }
+                    }
+                    div { class: "mp-rail-sep" }
+                    for (k, name, sub) in agents.clone() {
+                        {
+                            let on = !fav && k == cur && q.is_empty();
+                            let using = k == agent;
+                            let k1 = k.clone();
+                            let logo = agent_logo(&k);
+                            let tip = if using { format!("{name} · in use") } else if sub.is_empty() { name.clone() } else { format!("{name} · {sub}") };
+                            rsx! {
+                                button { key: "{k.id()}", class: if on { "mp-agent mp-tab on" } else { "mp-agent mp-tab" }, title: "{tip}",
+                                    onclick: move |_| { browse.set(Some(k1.clone())); query.set(String::new()); },
+                                    if let Some(svg) = logo { Logo { svg, size: 14 } } else { Icon { i: I::Bot, size: 14 } }
+                                    if using { span { class: "mp-using" } }
                                 }
                             }
                         }
                     }
-                    div { class: "mp-models",
-                        div { class: "mp-head",
-                            span { class: "nm", "{cur_name}" }
-                            if let Some((_, _, sub)) = cur_meta.clone() { span { class: "sub", "{sub}" } }
+                    div { class: "grow" }
+                    button { class: "mp-agent mp-tab", title: "Manage {cur_name} models",
+                        onclick: {
+                            let k = cur.clone();
+                            move |_| {
+                                let mut o = open;
+                                o.set(false);
+                                app.open_models(Some(k.clone()));
+                            }
+                        },
+                        Icon { i: I::Settings, size: 14, stroke: 1.5 }
+                    }
+                }
+                div { class: "mp-list",
+                    if !q.is_empty() {
+                        // Search: every model each harness offers, by harness.
+                        for (gk, gname) in agents.iter().filter(|(k, _, _)| results.iter().any(|(rk, _, _)| rk == k)).map(|(k, n, _)| (k.clone(), n.clone())) {
+                            div { key: "h-{gk.id()}", class: "mp-group", "{gname}" }
+                            for (k, _, row) in results.iter().filter(|(rk, _, _)| *rk == gk).cloned() {
+                                PickRowItem { key: "{k.id()}-{row.id.clone().unwrap_or_default()}",
+                                    agent: k.clone(), row: row.clone(),
+                                    checked: k == agent && in_use(&row.id), starred: starred(&k, &row.id),
+                                    can_edit: false, editing: false, reset: false,
+                                    onpick: { let (k, id) = (k.clone(), row.id.clone()); move |_| onpick.call((k.clone(), id.clone())) },
+                                    onstar: { let (k, id) = (k.clone(), row.id.clone()); move |_| star(k.clone(), id.clone()) },
+                                    onedit: move |_| {},
+                                    onreset: move |_| {},
+                                }
+                            }
+                        }
+                        if results.is_empty() {
+                            div { class: "mp-empty", "No models match." }
+                        }
+                        {
+                            let k = cur.clone();
+                            let t = typed.clone();
+                            rsx! {
+                                button { class: "menu-item mp-row mp-use",
+                                    onclick: move |_| onpick.call((k.clone(), Some(t.clone()))),
+                                    span { class: "lg", Icon { i: I::CornerDownLeft, size: 13 } }
+                                    span { class: "mp-name", span { class: "mp-label", "Use “{typed}”" } span { class: "mp-note", "with {cur_name}" } }
+                                }
+                            }
+                        }
+                    } else if fav {
+                        if fav_groups.is_empty() {
+                            div { class: "mp-empty",
+                                Icon { i: I::Star, size: 16, stroke: 1.5 }
+                                span { "Star a model to keep it here." }
+                            }
+                        }
+                        for (gk, gname, rows) in fav_groups.clone() {
+                            div { key: "f-{gk.id()}", class: "mp-group", "{gname}" }
+                            for row in rows {
+                                {
+                                    let choices = crate::agent_models::choices(&app, &gk);
+                                    let can_edit = row.id.as_ref().and_then(|id| choices.iter().find(|c| &c.id == id)).is_some_and(|c| !c.efforts.is_empty() || c.fast || c.context.is_some() || c.params.is_some());
+                                    let editing = edit().is_some_and(|(ek, eid, _, _)| ek == gk && Some(eid) == row.id);
+                                    let (k1, k2, k3) = (gk.clone(), gk.clone(), gk.clone());
+                                    let (m1, m2, m3) = (row.id.clone(), row.id.clone(), row.id.clone().unwrap_or_default());
+                                    rsx! {
+                                        PickRowItem { key: "{gk.id()}-{m3}",
+                                            agent: gk.clone(), row: row.clone(),
+                                            checked: gk == agent && in_use(&row.id), starred: true,
+                                            can_edit, editing, reset: false,
+                                            onpick: move |_| onpick.call((k1.clone(), m1.clone())),
+                                            onstar: move |_| star(k2.clone(), m2.clone()),
+                                            onedit: move |(x, y): (f64, f64)| edit.set(if editing { None } else { Some((k3.clone(), m3.clone(), x, y)) }),
+                                            onreset: move |_| {},
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        div { class: "mp-group",
+                            "{cur_name}"
+                            if !sub_now.is_empty() { span { class: "sub", "{sub_now}" } }
                         }
                         // The accounts it can run as (Settings → Harnesses). Larrier
                         // Chat's model already names its account.
@@ -1580,95 +1696,24 @@ fn ModelPicker(
                         for row in pick_rows(&app, &cur, false) {
                             {
                                 let checked = cur == agent && in_use(&row.id);
-                                let row_key = row.id.clone().unwrap_or_else(|| "default".into());
-                                let mlogo = row.logo_id.as_deref().and_then(model_logo);
-                                let k = cur.clone();
-                                let m2 = row.id.clone();
                                 let can_edit = editable(&row.id);
                                 let editing = edit().is_some_and(|(ek, eid, _, _)| ek == cur && Some(eid) == row.id);
-                                let (k3, m3) = (cur.clone(), row.id.clone().unwrap_or_default());
-                                let mut cls = String::from("menu-item mp-row");
-                                if checked {
-                                    cls.push_str(" checked");
-                                }
-                                if editing {
-                                    cls.push_str(" editing");
-                                }
                                 // The model in use, set off its defaults: Reset
                                 // takes it back to them.
-                                let custom = checked && can_edit && (effort.is_some() || cur_fast);
-                                let (k4, m4) = (cur.clone(), row.id.clone());
+                                let reset = checked && can_edit && (effort.is_some() || cur_fast);
+                                let (k1, k2, k3, k4) = (cur.clone(), cur.clone(), cur.clone(), cur.clone());
+                                let (m1, m2, m3, m4) = (row.id.clone(), row.id.clone(), row.id.clone().unwrap_or_default(), row.id.clone());
                                 rsx! {
-                                    button { key: "{row_key}", class: "{cls}", title: "{row.tip}",
-                                        onclick: move |_| onpick.call((k.clone(), m2.clone())),
-                                        span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } else { Icon { i: I::Sparkle, size: 13, stroke: 1.5 } } }
-                                        span { class: "mp-name",
-                                            span { class: "mp-label", "{row.label}" }
-                                            if !row.note.is_empty() { span { class: "mp-note", "{row.note}" } }
-                                        }
-                                        if !row.meta.is_empty() { span { class: "mp-meta", "{row.meta}" } }
-                                        if custom {
-                                            span { class: "mp-edit-btn mp-reset", role: "button", title: "Back to its default effort and options",
-                                                onclick: move |e: MouseEvent| {
-                                                    e.stop_propagation();
-                                                    edit.set(None);
-                                                    onpick.call((k4.clone(), m4.clone()));
-                                                    oneffort.call((None, false));
-                                                },
-                                                Icon { i: I::Undo, size: 12 }
-                                            }
-                                        }
-                                        if can_edit {
-                                            span { class: "mp-edit-btn", role: "button", title: "Context, effort and options",
-                                                onclick: move |e: MouseEvent| {
-                                                    e.stop_propagation();
-                                                    let p = e.client_coordinates();
-                                                    edit.set(if editing { None } else { Some((k3.clone(), m3.clone(), p.x, p.y)) });
-                                                },
-                                                "Edit"
-                                            }
-                                        }
-                                        span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
+                                    PickRowItem { key: "{row.id.clone().unwrap_or_else(|| \"default\".into())}",
+                                        agent: cur.clone(), row: row.clone(),
+                                        checked, starred: starred(&cur, &row.id),
+                                        can_edit, editing, reset,
+                                        onpick: move |_| onpick.call((k1.clone(), m1.clone())),
+                                        onstar: move |_| star(k2.clone(), m2.clone()),
+                                        onedit: move |(x, y): (f64, f64)| edit.set(if editing { None } else { Some((k3.clone(), m3.clone(), x, y)) }),
+                                        onreset: move |_| { edit.set(None); onpick.call((k4.clone(), m4.clone())); oneffort.call((None, false)); },
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            } else {
-                div { class: "mp-results",
-                    for (k, name, row) in results.clone() {
-                        {
-                            let checked = k == agent && in_use(&row.id);
-                            let row_key = row.id.clone().unwrap_or_else(|| "default".into());
-                            let mlogo = row.logo_id.as_deref().and_then(model_logo).or_else(|| agent_logo(&k));
-                            let (k2, m2) = (k.clone(), row.id.clone());
-                            rsx! {
-                                button { key: "{k.id()}-{row_key}", class: if checked { "menu-item mp-row checked" } else { "menu-item mp-row" }, title: "{row.tip}",
-                                    onclick: move |_| onpick.call((k2.clone(), m2.clone())),
-                                    span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } }
-                                    span { class: "mp-name",
-                                        span { class: "mp-label", "{row.label}" }
-                                        span { class: "mp-note", "{name}" }
-                                    }
-                                    if !row.meta.is_empty() { span { class: "mp-meta", "{row.meta}" } }
-                                    span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
-                                }
-                            }
-                        }
-                    }
-                    if results.is_empty() {
-                        div { class: "menu-empty", "No matching models" }
-                    }
-                    {
-                        let k = cur.clone();
-                        let t = typed.clone();
-                        rsx! {
-                            button { class: "menu-item mp-row",
-                                onclick: move |_| onpick.call((k.clone(), Some(t.clone()))),
-                                span { class: "lg", Icon { i: I::CornerDownLeft, size: 13 } }
-                                span { class: "ellipsis", "Use “{typed}”" }
-                                span { class: "sub", "with {cur_name}" }
                             }
                         }
                     }
@@ -1766,21 +1811,64 @@ fn ModelPicker(
                     }
                 }
             }
-            div { class: "mp-foot",
-                button { class: "menu-item",
-                    onclick: {
-                        let k = cur.clone();
-                        move |_| {
-                            let mut o = open;
-                            o.set(false);
-                            app.open_models(Some(k.clone()));
-                        }
-                    },
-                    span { class: "muted", Icon { i: I::Settings, size: 14 } }
-                    span { class: "ellipsis", "Manage {cur_name} models…" }
-                }
-                span { class: "mp-keys", "↑↓ ↵" }
+        }
+    }
+}
+
+/// One model in the picker: its logo and name, and on hover its star and
+/// Edit (context, effort, Fast).
+#[component]
+fn PickRowItem(
+    agent: AgentKind,
+    row: PickRow,
+    checked: bool,
+    starred: bool,
+    can_edit: bool,
+    editing: bool,
+    reset: bool,
+    onpick: EventHandler<()>,
+    onstar: EventHandler<()>,
+    onedit: EventHandler<(f64, f64)>,
+    onreset: EventHandler<()>,
+) -> Element {
+    let mlogo = row.logo_id.as_deref().and_then(model_logo).or_else(|| agent_logo(&agent));
+    let mut cls = String::from("menu-item mp-row");
+    if checked {
+        cls.push_str(" checked");
+    }
+    if editing {
+        cls.push_str(" editing");
+    }
+    if starred {
+        cls.push_str(" starred");
+    }
+    rsx! {
+        button { class: "{cls}", title: "{row.tip}", onclick: move |_| onpick.call(()),
+            span { class: "lg", if let Some(svg) = mlogo { Logo { svg, size: 13 } } else { Icon { i: I::Sparkle, size: 12, stroke: 1.5 } } }
+            span { class: "mp-name",
+                span { class: "mp-label", "{row.label}" }
+                if !row.note.is_empty() { span { class: "mp-note", "{row.note}" } }
             }
+            if !row.meta.is_empty() { span { class: "mp-meta", "{row.meta}" } }
+            if reset {
+                span { class: "mp-edit-btn mp-reset", role: "button", title: "Back to its default effort and options",
+                    onclick: move |e: MouseEvent| { e.stop_propagation(); onreset.call(()); },
+                    Icon { i: I::Undo, size: 12 }
+                }
+            }
+            if can_edit {
+                span { class: "mp-edit-btn", role: "button", title: "Context, effort and options",
+                    onclick: move |e: MouseEvent| { e.stop_propagation(); let p = e.client_coordinates(); onedit.call((p.x, p.y)); },
+                    "Edit"
+                }
+            }
+            if row.id.is_some() {
+                span { class: if starred { "mp-star on" } else { "mp-star" }, role: "button", title: if starred { "Remove from favorites" } else { "Add to favorites" },
+                    onclick: move |e: MouseEvent| { e.stop_propagation(); onstar.call(()); },
+                    Icon { i: I::Star, size: 12, stroke: 1.5 }
+                }
+            }
+            span { class: "check", style: if checked { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
         }
     }
 }

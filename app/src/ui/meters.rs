@@ -12,7 +12,7 @@ use larrier_core::{AgentKind, Usage};
 use serde_json::Value;
 
 use super::loaders::Orbit;
-use super::usage::{fmt_cost, fmt_int, fmt_reset, fmt_tokens, refresh_quotas, severity, QUOTAS, QUOTA_BUSY};
+use super::usage::{fmt_cost, fmt_reset, fmt_tokens, refresh_quotas, severity, QUOTAS, QUOTA_BUSY};
 use super::Dropdown;
 use crate::icons::{Icon, I};
 use crate::quota::{Quota, Window};
@@ -103,7 +103,7 @@ fn PlanPanel(agent: AgentKind, quota: Option<Quota>, usage: Option<Usage>, cost:
     let note = quota.as_ref().and_then(|q| q.note.clone()).unwrap_or_else(|| format!("{name} doesn't report plan limits here."));
     let u = usage.filter(|u| u.total_tokens() > 0);
     rsx! {
-        div { class: "mp-head",
+        div { class: "meter-head",
             span { class: "t", "{name} plan" }
             if let Some(p) = quota.as_ref().and_then(|q| q.plan.clone()) { span { class: "s", "{p}" } }
             div { class: "grow" }
@@ -135,11 +135,11 @@ fn PlanPanel(agent: AgentKind, quota: Option<Quota>, usage: Option<Usage>, cost:
         if let Some(u) = u {
             div { class: "sec", "This chat" }
             div { class: "grid",
-                span { class: "k", "Input" } span { class: "v", "{fmt_int(u.input_tokens)}" }
-                span { class: "k", "Output" } span { class: "v", "{fmt_int(u.output_tokens)}" }
-                if u.reasoning_tokens > 0 { span { class: "k", "Reasoning" } span { class: "v", "{fmt_int(u.reasoning_tokens)}" } }
-                span { class: "k", "Cache read" } span { class: "v", "{fmt_int(u.cache_read_tokens)}" }
-                span { class: "k", "Cache write" } span { class: "v", "{fmt_int(u.cache_write_tokens)}" }
+                span { class: "k", "Input" } span { class: "v", "{fmt_tokens(u.input_tokens)}" }
+                span { class: "k", "Output" } span { class: "v", "{fmt_tokens(u.output_tokens)}" }
+                if u.reasoning_tokens > 0 { span { class: "k", "Reasoning" } span { class: "v", "{fmt_tokens(u.reasoning_tokens)}" } }
+                span { class: "k", "Cache read" } span { class: "v", "{fmt_tokens(u.cache_read_tokens)}" }
+                span { class: "k", "Cache write" } span { class: "v", "{fmt_tokens(u.cache_write_tokens)}" }
                 if let Some(c) = cost { span { class: "k", "Cost" } span { class: "v", "{fmt_cost(c)}" } }
             }
         }
@@ -331,7 +331,7 @@ fn ContextPanel(session_id: String, agent: AgentKind, used: u64, window: Option<
     let on_bar: Vec<(usize, Part)> = b.parts.iter().cloned().enumerate().filter(|(_, p)| p.kind != "deferred").collect();
     let lit = hot();
     rsx! {
-        div { class: "mp-head",
+        div { class: "meter-head",
             span { class: "t", "Context window" }
             div { class: "grow" }
             if loading { span { class: "s", title: "Asking Claude Code what's in it", Orbit { size: 12 } } }

@@ -1847,11 +1847,14 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .m-ring .fg { stroke: var(--fg-2); stroke-linecap: round; transition: stroke-dasharray var(--t-3) var(--ease), stroke var(--t-2); }
 .m-ring.warn .fg { stroke: var(--amber); }
 .m-ring.crit .fg { stroke: var(--red); }
-.menu.meter-pop { width: 320px; max-width: min(320px, calc(100vw - 24px)); max-height: 480px; padding: 12px 14px 8px; display: flex; flex-direction: column; gap: 10px; font-size: var(--ui-sm); color: var(--fg-2); }
-.meter-pop .mp-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
-.meter-pop .mp-head .t { font-size: var(--ui-sm); font-weight: 600; color: var(--fg); }
-.meter-pop .mp-head .s { color: var(--fg-3); display: inline-flex; align-items: center; }
-.meter-pop .mp-head .grow { flex: 1; }
+.menu.meter-pop { width: 320px; max-width: min(320px, calc(100vw - 24px)); max-height: 480px; padding: var(--sp-6) var(--sp-6) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-5); font-size: var(--ui-sm); color: var(--fg-2); }
+/* Every part of the panel starts at the same edge: the header, the
+   windows, the section label, the rows and the footer's row text. */
+.meter-pop .meter-head { display: flex; align-items: center; gap: var(--sp-4); min-height: 22px; }
+.meter-pop .meter-head .t { font-size: var(--ui-sm); font-weight: 600; color: var(--fg); }
+.meter-pop .meter-head .s { color: var(--fg-3); display: inline-flex; align-items: center; }
+.meter-pop .meter-head .grow { flex: 1; }
+.meter-pop .meter-head .icon-btn { margin-right: calc(-1 * var(--sp-3)); }
 .meter-pop .win { display: flex; flex-direction: column; gap: 5px; --mc: var(--fg-2); }
 .meter-pop .win.warn { --mc: var(--amber); }
 .meter-pop .win.crit { --mc: var(--red); }
@@ -1861,12 +1864,12 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .meter-pop .win .pct { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
 .meter-pop .track { height: 6px; border-radius: var(--r-xs); overflow: hidden; background: color-mix(in srgb, var(--mc) 16%, transparent); }
 .meter-pop .fill { height: 100%; border-radius: var(--r-xs); background: var(--mc); transition: width var(--t-3) var(--ease); }
-.meter-pop .sec { border-top: 1px solid var(--border); padding-top: 10px; font-size: var(--ui-xs); font-weight: 600; color: var(--fg-3); }
-.meter-pop .grid { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+.meter-pop .sec { border-top: 1px solid var(--border); padding-top: var(--sp-5); margin-bottom: calc(-1 * var(--sp-2)); font-size: var(--ui-xs); font-weight: 600; color: var(--fg-3); }
+.meter-pop .grid { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-3) var(--sp-5); }
 .meter-pop .grid .k { color: var(--fg-2); }
 .meter-pop .grid .v { text-align: right; color: var(--fg); font-variant-numeric: tabular-nums; }
 .meter-pop .note { font-size: var(--ui-xs); line-height: 17px; color: var(--fg-3); }
-.meter-pop .foot { border-top: 1px solid var(--border); margin: 0 -8px; padding-top: 4px; }
+.meter-pop .foot { border-top: 1px solid var(--border); margin: 0 calc(-1 * var(--sp-4)); padding-top: var(--sp-3); }
 .meter-pop .ctx-total .big { font-size: var(--ui-xl); font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
 .meter-pop .ctx-total .s { color: var(--fg-3); }
 /* One line, its parts flush: only the line's ends are round. */
@@ -1874,8 +1877,8 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ctx-bar .part { min-width: 2px; height: 100%; transition: opacity var(--t-2) ease; }
 .ctx-bar.has-hot .part { opacity: .3; }
 .ctx-bar.has-hot .part.hot { opacity: 1; }
-.ctx-legend { display: flex; flex-direction: column; gap: 1px; margin: 0 -8px; }
-.ctx-legend .row { display: grid; grid-template-columns: 10px 1fr auto 46px; align-items: center; gap: 8px; padding: 4px 8px; border-radius: var(--r-md); cursor: default; transition: background var(--t-1), opacity var(--t-1); }
+.ctx-legend { display: flex; flex-direction: column; gap: 1px; margin: 0 calc(-1 * var(--sp-4)); }
+.ctx-legend .row { display: grid; grid-template-columns: 9px 1fr auto 46px; align-items: center; gap: var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: var(--r-md); cursor: default; transition: background var(--t-1), opacity var(--t-1); }
 .ctx-legend .row .dot { width: 9px; height: 9px; border-radius: var(--r-xs); }
 .ctx-legend .row .nm { color: var(--fg-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ctx-legend .row .v { color: var(--fg); text-align: right; font-variant-numeric: tabular-nums; }

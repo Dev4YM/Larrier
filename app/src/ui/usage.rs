@@ -24,7 +24,7 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 // ------------------------------------------------------------------ formatting
 
-/// "950", "12.3k", "4.5M", "1.2B".
+/// "950", "12.3K", "4.5M", "1.2B".
 pub fn fmt_tokens(n: u64) -> String {
     let f = n as f64;
     let (v, suffix) = if n >= 1_000_000_000 {
@@ -32,7 +32,7 @@ pub fn fmt_tokens(n: u64) -> String {
     } else if n >= 1_000_000 {
         (f / 1e6, "M")
     } else if n >= 1_000 {
-        (f / 1e3, "k")
+        (f / 1e3, "K")
     } else {
         return n.to_string();
     };
@@ -1466,8 +1466,8 @@ mod tests {
     #[test]
     fn formats() {
         assert_eq!(fmt_tokens(950), "950");
-        assert_eq!(fmt_tokens(12_300), "12.3k");
-        assert_eq!(fmt_tokens(1_000), "1k");
+        assert_eq!(fmt_tokens(12_300), "12.3K");
+        assert_eq!(fmt_tokens(1_000), "1K");
         assert_eq!(fmt_tokens(4_500_000), "4.5M");
         assert_eq!(fmt_tokens(1_200_000_000), "1.2B");
         assert_eq!(fmt_cost(0.0), "$0.00");

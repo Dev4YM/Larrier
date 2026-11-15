@@ -1842,14 +1842,9 @@ fn clip(s: String, max: usize) -> String {
     format!("{}\n… ({} more bytes)", &s[..cut], s.len() - cut)
 }
 
+/// A count in short form, as everywhere in Larrier ("950", "12.3K", "4.5M").
 pub fn human_count(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        n.to_string()
-    }
+    super::usage::fmt_tokens(n)
 }
 
 #[cfg(test)]

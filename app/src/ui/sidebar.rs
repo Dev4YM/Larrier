@@ -593,7 +593,8 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
     }
     let time = rel_time(s.updated_at);
     let (id4, id5) = (s.id.clone(), s.id.clone());
-    let tip = format!("{} · {}{}", s.agent.display_name(), s.title, if s.preview.is_empty() { String::new() } else { format!("\n{}", s.preview) });
+    // Which agent, and the title in full (the row may cut it short).
+    let tip = format!("{} · {}", s.agent.display_name(), s.title);
     rsx! {
         div {
             class: "{cls}",

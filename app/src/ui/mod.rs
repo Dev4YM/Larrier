@@ -531,28 +531,52 @@ pub fn Root() -> Element {
               }, true);
             }
             // Larrier's own tooltips instead of the system's: a hovered
-            // element's title moves to data-tip and shows in a bubble.
+            // element's title moves to data-tip and shows in a small label.
+            // The first one waits for the pointer to rest; moving on to a
+            // neighbour right after shows the next at once. Rows (chats,
+            // projects) wait longer and never chain, so running the pointer
+            // down the sidebar doesn't flash a label on every row.
             if (!window.__larrierTips) {
               window.__larrierTips = true;
               const tip = document.createElement('div');
               tip.className = 'l-tip';
               tip.setAttribute('role', 'tooltip');
               document.body.appendChild(tip);
-              let target = null, timer = null;
-              const hide = () => { clearTimeout(timer); timer = null; target = null; tip.classList.remove('on'); };
+              const ROWS = '.chat-row, .repo-row, .agent-item, .nav-row';
+              let target = null, timer = null, warm = 0;
+              const hide = () => {
+                clearTimeout(timer);
+                timer = null;
+                if (tip.classList.contains('on') && target && !target.matches(ROWS)) warm = performance.now() + 500;
+                target = null;
+                tip.classList.remove('on', 'warm');
+              };
               const place = (el) => {
                 const r = el.getBoundingClientRect();
                 const t = tip.getBoundingClientRect();
                 let x = Math.max(6, Math.min(r.left + r.width / 2 - t.width / 2, innerWidth - t.width - 6));
-                let y = r.bottom + 6;
+                let y = r.bottom + 4;
                 // A browser page is a window over the app: a tip that would
                 // land on it shows above its button instead.
                 const page = document.getElementById('lb-area');
                 const p = page && page.getBoundingClientRect();
                 const onPage = p && p.width > 0 && x < p.right && x + t.width > p.left && y < p.bottom && y + t.height > p.top;
-                if (y + t.height > innerHeight - 6 || onPage) y = r.top - t.height - 6;
+                if (y + t.height > innerHeight - 6 || onPage) y = r.top - t.height - 4;
                 tip.style.left = x + 'px';
                 tip.style.top = y + 'px';
+              };
+              // 'Search (Ctrl+K)': the shortcut is set apart, dimmer.
+              const KEY = /^([\s\S]*?)\s*\(((?:Ctrl|Cmd|Shift|Alt|Option|Esc|Tab|Enter|F\d|⌘|⌃|⌥|⇧)[^()]*)\)([\s\S]*)$/;
+              const fill = (text) => {
+                const t = window.__larrierKeys ? window.__larrierKeys(text) : text;
+                const m = KEY.exec(t);
+                tip.textContent = m ? m[1] : t;
+                if (!m) return;
+                const k = document.createElement('span');
+                k.className = 'k';
+                k.textContent = m[2];
+                tip.appendChild(k);
+                if (m[3]) tip.appendChild(document.createTextNode(m[3]));
               };
               document.addEventListener('mouseover', (e) => {
                 const el = e.target && e.target.closest ? e.target.closest('[title], [data-tip]') : null;
@@ -566,17 +590,21 @@ pub fn Root() -> Element {
                 hide();
                 if (!el.getAttribute('data-tip')) return;
                 target = el;
-                timer = setTimeout(() => {
+                const row = el.matches(ROWS);
+                const chained = !row && performance.now() < warm;
+                const show = () => {
                   if (target !== el || !el.isConnected) return;
                   const root = document.querySelector('.larrier-root');
                   tip.classList.toggle('dark', !!root && root.getAttribute('data-theme') === 'dark');
                   tip.classList.toggle('still', !!root && root.classList.contains('no-motion'));
-                  tip.textContent = window.__larrierKeys ? window.__larrierKeys(el.getAttribute('data-tip')) : el.getAttribute('data-tip');
+                  tip.classList.toggle('warm', chained);
+                  fill(el.getAttribute('data-tip'));
                   tip.style.left = '0px';
                   tip.style.top = '0px';
                   place(el);
                   tip.classList.add('on');
-                }, 450);
+                };
+                if (chained) show(); else timer = setTimeout(show, row ? 900 : 500);
               }, true);
               document.addEventListener('mousedown', hide, true);
               document.addEventListener('keydown', hide, true);

@@ -128,6 +128,7 @@ icons! {
     Loader => "loader",
     Lines => "text",
     Sliders => "sliders-horizontal",
+    Settings2 => "settings-2",
     Home => "house",
     Laptop => "laptop",
     FolderPlus => "folder-plus",

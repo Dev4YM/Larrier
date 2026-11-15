@@ -1976,7 +1976,7 @@ fn ConfigMenu(session_id: Option<String>, agent: AgentKind, groups: Vec<ModeGrou
         div { class: "menu-anchor",
             button { class: if open() { "plus-btn cfg-btn open" } else { "plus-btn cfg-btn" }, title: if tip.is_empty() { "Chat settings".to_string() } else { format!("Chat settings · {tip}") },
                 onclick: move |_| open.set(true),
-                Icon { i: I::Sliders, size: 15, stroke: 1.6 }
+                Icon { i: I::Settings2, size: 16, stroke: 1.6 }
             }
             Dropdown { open, up: true, class: "cfg-menu".to_string(),
                 for (gi, g) in groups.iter().cloned().enumerate() {

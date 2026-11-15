@@ -719,8 +719,8 @@ select.input { cursor: pointer; padding-right: 4px; }
 .composer.home-c .composer-row { flex-wrap: wrap; }
 .composer.home-c textarea { min-height: 76px; padding: 6px 8px; flex-basis: 100%; }
 .composer.home-c .composer-row .spacer { flex: 1; }
-.plus-btn { width: 30px; height: 30px; border-radius: var(--r-md); background: var(--chip); color: var(--fg-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.plus-btn:hover, .plus-btn.open { color: var(--fg); background: var(--chip-2); }
+.plus-btn { width: 30px; height: 30px; border-radius: var(--r-md); background: transparent; color: var(--fg); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.plus-btn:hover, .plus-btn.open { background: var(--hover); }
 .picker { height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: var(--r-md); font-size: var(--ui-md); color: var(--fg); white-space: nowrap; max-width: 340px; min-width: 0; }
 .picker:hover, .picker.open { background: var(--hover); }
 .picker .lb { overflow: hidden; text-overflow: ellipsis; }
@@ -1989,9 +1989,8 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .menubar.system { padding-left: 78px; }
 
 /* The chat's settings button beside + (ConfigMenu): its mode and
-   permissions open as submenus. */
-.c-plus .cfg-btn { background: transparent; }
-.c-plus .cfg-btn:hover, .c-plus .cfg-btn.open { background: var(--chip); }
+   permissions open as submenus. Its sliders stand upright. */
+.c-plus .cfg-btn svg { transform: rotate(90deg); }
 .menu.cfg-menu { min-width: 240px; }
 .menu-item .sub + .check { margin-left: 0; }
 

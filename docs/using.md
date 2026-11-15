@@ -96,9 +96,9 @@ onto the chat area:
 - **Spelling** is checked with Hunspell, the engine Chrome's spelling is
   built on, and its English dictionary. Right-click a misspelled word for
   its corrections (it's selected for you), or Add to Dictionary.
-- Below it: the branch, where the chat runs (this PC or a worktree), the
-  agent's mode, and two rings for plan usage and context; hover them for
-  the breakdown. What the context is made of is checked after each turn
+- Below it: the branch, where the chat runs (this PC, in a worktree or the
+  checkout itself), the agent's mode, and two rings for plan usage and
+  context; hover them for the breakdown. What the context is made of is checked after each turn
   and kept with the chat.
 
 ## The side panel
@@ -152,7 +152,11 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
 
 ![New Agent](assets/new-agent.png)
 
-A centered composer with the project and environment pickers. **Plan New
+A centered composer with the project and environment pickers. The project
+menu searches your projects and also has Home (no project folder), New
+project and Manage projects. The environment menu runs the chat on this PC
+(your own cloud is coming) and, in a git project, in a new worktree, in a
+worktree that's already there, or in the checkout itself. **Plan New
 Idea** (Shift+Tab cycles modes) starts in planning, and **Multitask** runs
 one prompt on several agents in parallel. A message left here waits as a
 draft.

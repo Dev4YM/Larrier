@@ -117,7 +117,9 @@ pub fn CodeEditor(path: String, text: String) -> Element {
     }));
     rsx! {
         // Monaco's own right-click menu, not Larrier's.
-        div { id: "fv-editor", class: "fv-editor", "data-ctx": "editor" }
+        // `monaco-component` carries the editor's theme colors down to what
+        // it draws beside the editor, like its right-click menu.
+        div { id: "fv-editor", class: "fv-editor monaco-component", "data-ctx": "editor" }
     }
 }
 

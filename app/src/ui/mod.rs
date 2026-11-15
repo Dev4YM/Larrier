@@ -639,7 +639,9 @@ pub fn Root() -> Element {
               // a side-by-side view.
               if (!mod && !e.altKey && !e.isComposing && !e.defaultPrevented && (e.key || '').length === 1) {
                 const el = e.target && e.target.nodeType === 1 && e.target.closest ? e.target : null;
-                const typable = el && el.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+                // The code editor takes keys without a text field of its own
+                // (Monaco's EditContext), as a terminal does.
+                const typable = el && el.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .monaco-editor, .xterm');
                 const pressed = e.key === ' ' && el && el.closest('button, a, summary, label, [role="button"], [role="checkbox"], [role="tab"]');
                 const open = [...document.querySelectorAll('.menu, .menu-backdrop, .overlay, .palette, [role="dialog"]')].some(m => m.offsetParent || m.getClientRects().length);
                 if (!typable && !pressed && !open) {

@@ -564,18 +564,20 @@ svg { flex-shrink: 0; display: block; }
 .set-row .lbl .t { font-size: var(--ui-sm); font-weight: 500; }
 .set-row .lbl .d { font-size: var(--ui-xs); color: var(--fg-2); margin-top: var(--sp-1); line-height: 16px; }
 .set-row.top { align-items: flex-start; }
-.input { height: var(--h-ctl); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); padding: 0 var(--sp-4); font-size: var(--ui-sm); outline: none; min-width: 0; user-select: text; }
-.input:focus { border-color: var(--border-2); }
+/* Larrier's fields and switches; the code editor's own parts that share
+   these class names (its find box, its toggles) keep their look. */
+.input:not(.monaco-editor *) { height: var(--h-ctl); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); padding: 0 var(--sp-4); font-size: var(--ui-sm); outline: none; min-width: 0; user-select: text; }
+.input:not(.monaco-editor *):focus { border-color: var(--border-2); }
 .input.wide { width: 300px; }
 .input.full { width: 100%; }
 select.input { cursor: pointer; padding-right: 4px; }
 .seg { display: inline-flex; background: var(--chip); border-radius: var(--r-md); padding: 2px; gap: 2px; }
 .seg button { height: 22px; padding: 0 10px; border-radius: var(--r-sm); font-size: var(--ui-sm); color: var(--fg-2); }
 .seg button.on { background: var(--card-2); color: var(--fg); box-shadow: var(--shadow); }
-.toggle { width: 28px; height: 16px; border-radius: var(--r-md); background: var(--fg-4); position: relative; transition: background var(--t-2); flex-shrink: 0; }
-.toggle::after { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: transform var(--t-2) var(--ease); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
-.toggle.on { background: var(--green); }
-.toggle.on::after { transform: translateX(12px); }
+.toggle:not(.monaco-editor *) { width: 28px; height: 16px; border-radius: var(--r-md); background: var(--fg-4); position: relative; transition: background var(--t-2); flex-shrink: 0; }
+.toggle:not(.monaco-editor *)::after { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: transform var(--t-2) var(--ease); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.toggle.on:not(.monaco-editor *) { background: var(--green); }
+.toggle.on:not(.monaco-editor *)::after { transform: translateX(12px); }
 .status-pill { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--r-sm); font-size: var(--ui-xs); white-space: nowrap; }
 .status-pill.ok { background: var(--green-bg); color: var(--green); }
 .status-pill.missing { background: var(--hover); color: var(--fg-3); }

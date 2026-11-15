@@ -400,6 +400,14 @@ pub fn ModalHost() -> Element {
                     Modal::ConfirmDelete(id) => rsx! { DeleteModal { id } },
                     Modal::Export(id) => rsx! { DeleteModal { id } },
                     Modal::AddAccount(kind) => rsx! { AddAccountModal { kind } },
+                    Modal::EditAccount(id) => rsx! { EditAccountModal { id } },
+                    Modal::AddCustomAgent => rsx! {
+                        div { class: "modal-head", "Add a custom agent" }
+                        div { class: "modal-body",
+                            "Any program that speaks the Agent Client Protocol or one of the stream protocols."
+                            super::settings::AddCustomAgent {}
+                        }
+                    },
                     Modal::AddWorkspace => rsx! { div {} },
                     Modal::WhatsNew(version, updated) => rsx! { WhatsNewModal { version, updated } },
                 }
@@ -777,6 +785,28 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                     || (auth() == AuthKind::Existing && signed_in(&kind, &folder()).is_none())
                     || (auth() == AuthKind::Api && ((api_kind().needs_key() && key().trim().is_empty()) || (url().trim().is_empty() && api_kind().default_url().is_empty()) || (chat && models().trim().is_empty()))),
                 onclick: save, "Add account" }
+        }
+    }
+}
+
+/// An API account's name, API, address, key and models, edited in place.
+#[component]
+fn EditAccountModal(id: String) -> Element {
+    let mut app = use_app();
+    let acc = app.config.read().account(&id).cloned();
+    let Some(a) = acc else {
+        return rsx! { div { class: "modal-body", "That account is gone." } };
+    };
+    let AccountAuth::Api(api) = a.auth.clone() else {
+        return rsx! { div { class: "modal-body", "Only API accounts have settings to edit." } };
+    };
+    rsx! {
+        div { class: "modal-head", AgentGlyph { kind: a.agent.clone(), class: "md" } span { "Edit {a.label}" } }
+        div { class: "modal-body",
+            super::settings::ApiEditor { a: a.clone(), api }
+        }
+        div { class: "modal-foot",
+            button { class: "primary-btn", onclick: move |_| app.ui.write().modal = None, "Done" }
         }
     }
 }

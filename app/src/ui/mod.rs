@@ -8,6 +8,7 @@ mod composer;
 mod customize;
 pub mod editor;
 mod files;
+pub mod harness_run;
 mod home;
 pub mod loaders;
 pub mod mentions;

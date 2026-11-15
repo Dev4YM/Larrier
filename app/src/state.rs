@@ -138,6 +138,9 @@ pub enum Modal {
     ConfirmDelete(String),
     Export(String),
     AddAccount(AgentKind),
+    /// Edit an API account (its id).
+    EditAccount(String),
+    AddCustomAgent,
     AddWorkspace,
     /// A release's notes; `true` when Larrier was just updated to it.
     WhatsNew(String, bool),

@@ -768,6 +768,10 @@ pub fn UsageView() -> Element {
                     }
                 },
             }
+            // The prices and context windows the costs above come from.
+            div { style: "margin-top: 28px;",
+                super::models::ModelRegistry {}
+            }
         }
     }
 }

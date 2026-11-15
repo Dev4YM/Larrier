@@ -1,4 +1,4 @@
-//! Settings → Harnesses, under the list: the model registry — every model Larrier knows with
+//! Settings → Plan & Usage, under the usage: the model registry — every model Larrier knows with
 //! its vendor, context window, output cap and prices, searchable and
 //! filterable.
 

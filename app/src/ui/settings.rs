@@ -278,7 +278,7 @@ fn SourceControl() -> Element {
 
 // ------------------------------------------------------------------ agents
 
-fn protocol_label(p: Protocol) -> &'static str {
+pub fn protocol_label(p: Protocol) -> &'static str {
     match p {
         Protocol::ClaudeStream => "stream-json (Claude)",
         Protocol::CodexExec => "codex exec --json",
@@ -298,7 +298,7 @@ fn protocol_label(p: Protocol) -> &'static str {
 }
 
 #[component]
-fn AddCustomAgent() -> Element {
+pub fn AddCustomAgent() -> Element {
     let app = use_app();
     let mut name = crate::keep::use_kept(crate::keep::WINDOW, "settings.custom.name", String::new);
     let mut command = crate::keep::use_kept(crate::keep::WINDOW, "settings.custom.command", String::new);
@@ -332,7 +332,7 @@ fn AddCustomAgent() -> Element {
 // ------------------------------------------------------------------ harnesses
 
 /// Settings → Harnesses: everything that runs a chat, or one harness's page
-/// (`ui.models_agent`) with its accounts, models and how it runs.
+/// (`ui.models_agent`).
 #[component]
 fn Harnesses() -> Element {
     let app = use_app();
@@ -343,370 +343,342 @@ fn Harnesses() -> Element {
     }
 }
 
-/// What a harness runs as, in a few words, for its row in the list.
-fn accounts_note(cfg: &larrier_core::Config, kind: &AgentKind) -> String {
+/// What a harness runs as, in a few words.
+fn runs_as(cfg: &larrier_core::Config, kind: &AgentKind) -> String {
     let list = cfg.accounts_for(kind);
-    match list.len() {
-        0 if *kind == AgentKind::Chat => "No API account yet".into(),
-        0 => "Current sign-in".into(),
-        1 => list[0].label.clone(),
-        n => {
-            let def = cfg.default_account(kind).map(|a| a.label.clone()).unwrap_or_default();
-            format!("{n} accounts · {def} by default")
-        }
+    match (list.len(), cfg.default_account(kind)) {
+        (0, _) if *kind == AgentKind::Chat => "No API account yet".into(),
+        (0, _) => "Current sign-in".into(),
+        (1, Some(a)) => a.label.clone(),
+        (n, Some(a)) => format!("{} · {n} accounts", a.label),
+        _ => String::new(),
     }
 }
 
 #[component]
 fn HarnessList() -> Element {
-    let app = use_app();
+    let mut app = use_app();
+    let detected = app.detected.read().clone();
     let customs = app.config.read().custom_agents.clone();
+    let installed = |k: &AgentKind| detected.iter().any(|d| &d.kind == k && d.installed());
+    let agents: Vec<AgentKind> = catalog().iter().filter(|s| !s.binaries.is_empty()).map(|s| s.kind.clone()).collect();
+    let (have, more): (Vec<AgentKind>, Vec<AgentKind>) = agents.into_iter().partition(|k| installed(k));
+    let mut show_more = crate::keep::use_kept(crate::keep::WINDOW, "harnesses.more", || false);
     rsx! {
         h1 { "Harnesses" }
-        div { class: "sub", "Everything that runs a chat, and the accounts each one runs as: a sign-in, an API key or your own endpoint. Keys stay in your OS keychain." }
-        div { class: "set-group-title", "Larrier" }
-        div { class: "set-card",
+        div { class: "sub", "What runs your chats: Larrier Chat and the coding agents on this computer, each with the accounts it runs as." }
+        div { class: "set-card hn-list",
             HarnessRow { kind: AgentKind::Chat }
-        }
-        div { class: "set-group-title", "Coding agents"
-            button { class: "icon-btn sm", title: "Find agents again and look up their latest versions",
-                onclick: move |_| { app.detect_agents(); crate::agent_versions::check_now(); app.toast("Finding agents and their latest versions…"); },
-                Icon { i: I::Refresh, size: 12 }
+            for k in have {
+                HarnessRow { key: "{k.id()}", kind: k }
             }
-        }
-        div { class: "set-card",
-            for spec in catalog().iter().filter(|s| !s.binaries.is_empty()) {
-                HarnessRow { key: "{spec.kind.id()}", kind: spec.kind.clone() }
-            }
-        }
-        div { class: "set-group-title", "Custom agents" }
-        div { class: "set-card",
             for c in customs {
-                div { key: "{c.id}", class: "set-row",
-                    AgentGlyph { kind: AgentKind::Custom(c.id.clone()), class: "lg" }
-                    div { class: "lbl",
-                        div { class: "t", "{c.name}" }
-                        div { class: "d", span { class: "code-inline", "{c.command} {c.args.join(\" \")}" } " · {protocol_label(c.protocol)}" }
-                    }
-                    button { class: "icon-btn", title: "Remove",
-                        onclick: { let id = c.id.clone(); move |_| app.update_config(|cfg| cfg.custom_agents.retain(|x| x.id != id)) },
-                        Icon { i: I::Trash, size: 13 }
+                HarnessRow { key: "c-{c.id}", kind: AgentKind::Custom(c.id.clone()) }
+            }
+        }
+        div { class: "hn-foot",
+            button { class: "ghost-btn sm", onclick: move |_| app.ui.write().modal = Some(Modal::AddCustomAgent),
+                Icon { i: I::Plus, size: 12 } "Add a custom agent"
+            }
+            button { class: "ghost-btn sm", title: "Find agents again and look up their latest versions",
+                onclick: move |_| { app.detect_agents(); crate::agent_versions::check_now(); app.toast("Finding agents and their latest versions…"); },
+                Icon { i: I::Refresh, size: 12 } "Find agents again"
+            }
+        }
+        if !more.is_empty() {
+            button { class: "hn-more", onclick: move |_| show_more.set(!show_more()),
+                span { class: "chev", if show_more() { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
+                "Not installed ({more.len()})"
+            }
+            if show_more() {
+                div { class: "set-card hn-list",
+                    for k in more {
+                        HarnessRow { key: "{k.id()}", kind: k }
                     }
                 }
             }
-            AddCustomAgent {}
-        }
-        div { style: "margin-top: 28px;",
-            super::models::ModelRegistry {}
         }
     }
 }
 
-/// A harness in the list: its version (or that it isn't installed), what it
-/// runs as, on or off. Opens its page.
+/// A harness in the list: what it runs as and how, and its version.
 #[component]
 fn HarnessRow(kind: AgentKind) -> Element {
     let mut app = use_app();
     let spec = kind.spec();
     let chat = kind == AgentKind::Chat;
+    let custom = matches!(kind, AgentKind::Custom(_));
     let d = app.detected.read().iter().find(|d| d.kind == kind).cloned();
-    let installed = chat || d.as_ref().is_some_and(|d| d.installed());
-    let enabled = chat || app.config.read().agent(&kind).enabled;
-    let newer = if chat { None } else { crate::agent_versions::update_to(&app, &kind) };
-    let job = crate::agent_versions::JOBS.read().get(&kind.id()).cloned();
-    let running = job.as_ref().is_some_and(|j| j.ok.is_none());
-    let note = accounts_note(&app.config.read(), &kind);
-    let (k1, k2) = (kind.clone(), kind.clone());
+    let installed = chat || custom || d.as_ref().is_some_and(|d| d.installed());
+    let ac = app.config.read().agent(&kind);
+    let on = chat || custom || ac.enabled;
+    let newer = if chat || custom { None } else { crate::agent_versions::update_to(&app, &kind) };
+    let (name, meta) = match &kind {
+        AgentKind::Custom(id) => {
+            let c = app.config.read().custom_agent(id).cloned();
+            (c.as_ref().map(|c| c.name.clone()).unwrap_or_else(|| id.clone()), c.map(|c| format!("{} · {}", c.command, protocol_label(c.protocol))).unwrap_or_default())
+        }
+        _ if !installed => (spec.name.to_string(), spec.vendor.to_string()),
+        _ => {
+            let how = super::harness_run::current_label(&app.config.read(), &kind);
+            (spec.name.to_string(), [runs_as(&app.config.read(), &kind), how].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
+        }
+    };
+    let status = if chat || custom {
+        String::new()
+    } else if !installed {
+        if d.is_some() { "Not installed".into() } else { String::new() }
+    } else if !on {
+        "Off".into()
+    } else {
+        d.as_ref().and_then(|d| d.version.clone()).map(|v| format!("v{v}")).unwrap_or_default()
+    };
+    let k1 = kind.clone();
     rsx! {
-        div { class: if enabled { "set-row agent-row hn-row" } else { "set-row agent-row hn-row off" }, role: "button",
+        button { class: if on || !installed { "hn-row" } else { "hn-row off" },
             onclick: move |_| app.ui.write().models_agent = Some(k1.clone()),
             AgentGlyph { kind: kind.clone(), class: "lg" }
             div { class: "lbl",
-                div { class: "t", "{spec.name} " span { class: "faint", style: "font-weight: 400", "· {spec.vendor}" } }
-                div { class: "d", "{note}" }
+                div { class: "t", "{name}" }
+                div { class: "d", "{meta}" }
             }
-            if running {
-                span { class: "status-pill busy", super::loaders::Orbit { size: 11 } if job.as_ref().is_some_and(|j| j.installing) { "Installing…" } else { "Updating…" } }
-            } else if !chat {
-                match (&d, &newer) {
-                    (Some(d), Some(v)) if d.installed() => rsx! { span { class: "status-pill new", title: "Installed: {d.version.clone().unwrap_or_default()}", "v{v} available" } },
-                    (Some(d), _) if d.installed() => rsx! { span { class: "status-pill ok", {d.version.clone().map(|v| format!("v{v}")).unwrap_or("Installed".into())} } },
-                    (Some(_), _) => rsx! { span { class: "status-pill missing", "Not installed" } },
-                    (None, _) => rsx! { super::loaders::Orbit { size: 13 } },
-                }
+            if let Some(v) = newer {
+                span { class: "hn-tag new", "v{v} available" }
+            } else if !status.is_empty() {
+                span { class: "hn-tag", "{status}" }
             }
-            if installed && !chat {
-                div { class: "agent-on", title: if enabled { "On: offered in pickers, its sessions sync" } else { "Off: hidden from pickers and the sidebar, its sessions don't sync" },
-                    onclick: move |e| e.stop_propagation(),
-                    Toggle { on: enabled, onchange: move |v| app.update_config(|c| c.agent_mut(&k2).enabled = v) }
-                }
-            }
-            span { class: "faint chev", Icon { i: I::ChevronRight, size: 13 } }
+            span { class: "chev", Icon { i: I::ChevronRight, size: 13 } }
         }
     }
 }
 
-/// One harness: its accounts first, then (for agents) its models, how it
-/// runs, its version and its sessions.
+#[derive(Clone, Copy, PartialEq)]
+enum HarnessTab {
+    Accounts,
+    Models,
+    Running,
+    Version,
+}
+
+/// One harness, in tabs: its accounts, its models, how it runs, its version.
 #[component]
 fn HarnessPage(kind: AgentKind) -> Element {
     let mut app = use_app();
     let spec = kind.spec();
     let chat = kind == AgentKind::Chat;
+    let custom = matches!(kind, AgentKind::Custom(_));
     let d = app.detected.read().iter().find(|d| d.kind == kind).cloned();
-    let installed = chat || d.as_ref().is_some_and(|d| d.installed());
+    let installed = chat || custom || d.as_ref().is_some_and(|d| d.installed());
     let ac = app.config.read().agent(&kind);
-    let id = kind.id();
-    let detected_path = d.as_ref().and_then(|d| d.path.clone()).map(|p| p.to_string_lossy().to_string());
-    let job = crate::agent_versions::JOBS.read().get(&id).cloned();
+    let mut tab = use_signal(|| if installed || chat { HarnessTab::Accounts } else { HarnessTab::Version });
+    let newer = if chat || custom { None } else { crate::agent_versions::update_to(&app, &kind) };
+    let job = crate::agent_versions::JOBS.read().get(&kind.id()).cloned();
     let running = job.as_ref().is_some_and(|j| j.ok.is_none());
-    let newer = if chat { None } else { crate::agent_versions::update_to(&app, &kind) };
-    let latest = crate::agent_versions::LATEST.read().get(&id).cloned();
-    let checking = crate::agent_versions::CHECKING();
-    let versions = larrier_agents::updates::of(&kind);
-    let update_cmd = if installed && !chat { crate::agent_versions::step(&app, &kind, false) } else { None };
-    let install_cmd = if installed { None } else { larrier_agents::updates::install_step(&kind) };
-    let live_note = match kind {
-        AgentKind::ClaudeCode => "Its own protocol: live approvals, questions, plans and steering.",
-        AgentKind::Codex => "Its app server: live approvals, questions, plans and steering.",
-        _ => "Its own headless mode: what it would ask about is refused, and Larrier says so.",
+    let name = match &kind {
+        AgentKind::Custom(id) => app.config.read().custom_agent(id).map(|c| c.name.clone()).unwrap_or_else(|| id.clone()),
+        _ => spec.name.to_string(),
     };
-    let accounts_line = if chat {
-        "Larrier Chat talks to model APIs itself. Each account is one API: a provider's own, or any endpoint that speaks it, with the models it offers.".to_string()
-    } else if larrier_agents::request::api_kinds(&kind).is_empty() && spec.key_env.is_empty() {
-        format!("What {} runs as. The default runs new chats; a chat can switch in its model picker.", spec.name)
+    let line = if chat {
+        "Larrier's own chat: talks to model APIs itself, on your API accounts.".to_string()
+    } else if custom {
+        "A custom agent: a command of your own.".to_string()
     } else {
-        format!("What {} runs as: its sign-in, or an API key. The default runs new chats; a chat can switch in its model picker.", spec.name)
+        match d.as_ref() {
+            Some(d) if d.installed() => format!("{} · {}", spec.vendor, d.version.clone().map(|v| format!("v{v}")).unwrap_or_else(|| "installed".into())),
+            Some(_) => format!("{} · not installed", spec.vendor),
+            None => spec.vendor.to_string(),
+        }
     };
-    let (k1, k4, k5, k6, k8, k9, k10, k11) = (kind.clone(), kind.clone(), kind.clone(), kind.clone(), kind.clone(), kind.clone(), kind.clone(), kind.clone());
+    let tabs: Vec<(HarnessTab, &str)> = if chat {
+        vec![]
+    } else if custom {
+        vec![(HarnessTab::Running, "How it runs")]
+    } else {
+        vec![(HarnessTab::Accounts, "Accounts"), (HarnessTab::Models, "Models"), (HarnessTab::Running, "How it runs"), (HarnessTab::Version, "Version")]
+    };
+    let cur = if custom { HarnessTab::Running } else { tab() };
+    let (k1, k2, k3) = (kind.clone(), kind.clone(), kind.clone());
     rsx! {
         button { class: "hn-back", onclick: move |_| app.ui.write().models_agent = None,
             Icon { i: I::ArrowLeft, size: 13 }
-            "All harnesses"
+            "Harnesses"
         }
         div { class: "hn-head",
             AgentGlyph { kind: kind.clone(), class: "lg" }
             div { class: "lbl",
-                h1 { "{spec.name}" }
-                div { class: "sub", "{spec.tagline}" }
+                h1 { "{name}" }
+                div { class: "sub", "{line}" }
+            }
+            if let Some(v) = newer.clone() {
+                button { class: "primary-btn", disabled: running, onclick: move |_| crate::agent_versions::run(app, k1.clone(), false),
+                    Icon { i: I::ArrowUp, size: 12 } "Update to v{v}"
+                }
+            }
+            if installed && !chat && !custom {
+                div { class: "hn-on", title: if ac.enabled { "On: offered in pickers, its sessions sync" } else { "Off: hidden from pickers and the sidebar, its sessions don't sync" },
+                    span { if ac.enabled { "On" } else { "Off" } }
+                    Toggle { on: ac.enabled, onchange: move |v| app.update_config(|c| c.agent_mut(&k2).enabled = v) }
+                }
             }
         }
-
-        div { class: "set-group-title",
-            span { "Accounts" }
-            div { class: "grow" }
-            if installed || chat {
-                button { class: "ghost-btn sm", onclick: move |_| app.ui.write().modal = Some(Modal::AddAccount(k1.clone())),
-                    Icon { i: I::Plus, size: 12 } "Add account"
+        if tabs.len() > 1 {
+            div { class: "hn-tabs", role: "tablist",
+                for (t, label) in tabs {
+                    button { key: "{label}", class: if cur == t { "on" } else { "" }, role: "tab", onclick: move |_| tab.set(t), "{label}" }
                 }
             }
         }
-        div { class: "hn-line", "{accounts_line}" }
-        AgentAccounts { kind: kind.clone() }
-
-        if !chat {
-            div { class: "hn-models",
-                super::agent_models::AgentModelsPanel { kind: kind.clone() }
-            }
-
-            div { class: "set-group-title", "Running" }
-            div { class: "set-card ad-card",
-                div { class: "ad-row",
-                    span { class: "k", "Executable" }
-                    div { class: "v",
-                        input { class: "input full",
-                            placeholder: detected_path.clone().unwrap_or_else(|| spec.binaries.join(" / ")),
-                            value: "{ac.binary.clone().unwrap_or_default()}",
-                            onchange: move |e| { let v = e.value(); app.update_config(|c| c.agent_mut(&k4).binary = if v.trim().is_empty() { None } else { Some(v) }); app.detect_agents(); },
-                        }
-                        div { class: "h", if detected_path.is_some() { "Found on this PC. Set a path to use another copy." } else { "Not found: install it below, or set its path." } }
+        match cur {
+            HarnessTab::Accounts => rsx! {
+                div { class: "hn-sec-head",
+                    div { class: "hn-line",
+                        if chat { "Each account is one API: a provider's own, or any endpoint that speaks it, with the models it offers. Keys stay in your OS keychain." }
+                        else { "The default runs new chats; a chat can switch in its model picker. Keys stay in your OS keychain." }
                     }
-                }
-                // The agent's own mode groups (Claude Code modes, Codex
-                // plan + permissions, …): default for new agents.
-                for (gi, g) in spec.mode_groups.iter().enumerate() {
-                    {
-                        let kk = kind.clone();
-                        let current = if gi == 0 { ac.default_mode.clone() } else { ac.default_permission.clone() };
-                        let auto_label = format!("{} (from Autonomy)", g.default_for(app.config.read().settings.run_mode).label);
-                        let options: Vec<(String, String)> = std::iter::once((String::new(), auto_label))
-                            .chain(g.options.iter().map(|o| (o.id.to_string(), o.label.to_string())))
-                            .collect();
-                        rsx! {
-                            div { key: "m{gi}", class: "ad-row",
-                                span { class: "k", "Default {g.label.to_lowercase()}" }
-                                div { class: "v",
-                                    super::Select { value: current.unwrap_or_default(), options, wide: true,
-                                        onchange: move |v: String| {
-                                            let v = if v.is_empty() { None } else { Some(v) };
-                                            let k = kk.clone();
-                                            app.update_config(move |c| if gi == 0 { c.agent_mut(&k).default_mode = v } else { c.agent_mut(&k).default_permission = v });
-                                        } }
-                                }
-                            }
+                    if installed {
+                        button { class: "ghost-btn sm", onclick: move |_| app.ui.write().modal = Some(Modal::AddAccount(k3.clone())),
+                            Icon { i: I::Plus, size: 12 } "Add account"
                         }
                     }
                 }
-                div { class: "ad-row",
-                    span { class: "k", "Extra arguments" }
-                    div { class: "v",
-                        input { class: "input full", placeholder: "e.g. --max-turns 40",
-                            value: "{ac.extra_args.join(\" \")}",
-                            onchange: move |e| { let v: Vec<String> = e.value().split_whitespace().map(|s| s.to_string()).collect(); app.update_config(|c| c.agent_mut(&k5).extra_args = v); },
-                        }
-                    }
-                }
-                div { class: "ad-row",
-                    span { class: "k", "Connection" }
-                    div { class: "v",
-                        if let Some(acp) = spec.acp_command {
-                            div { class: "seg",
-                                button { class: if !ac.prefer_acp { "on" } else { "" }, onclick: move |_| app.update_config(|c| c.agent_mut(&k6).prefer_acp = false), "Native" }
-                                button { class: if ac.prefer_acp { "on" } else { "" }, onclick: move |_| app.update_config(|c| c.agent_mut(&k8).prefer_acp = true), "ACP" }
-                            }
-                            div { class: "h",
-                                if ac.prefer_acp { "Agent Client Protocol: " span { class: "mono", "{acp.join(\" \")}" } } else { "{live_note}" }
-                            }
-                        } else {
-                            span { class: "plain", "{protocol_label(spec.protocol)}" }
-                            div { class: "h", "{live_note}" }
-                        }
-                    }
-                }
-                if spec.can_import {
-                    div { class: "ad-row",
-                        span { class: "k", "Import sessions" }
-                        div { class: "v",
-                            Toggle { on: ac.import, onchange: move |v| app.update_config(|c| c.agent_mut(&k9).import = v) }
-                            div { class: "h", "From " span { class: "mono", "{spec.session_location}" } }
-                        }
-                    }
-                }
-            }
-
-            div { class: "set-group-title", "Version" }
-            div { class: "set-card ad-card",
-                div { class: "ad-row",
-                    span { class: "k", "Installed" }
-                    div { class: "v",
-                        span { class: "plain strong",
-                            match d.as_ref() {
-                                Some(d) if d.installed() => d.version.clone().map(|v| format!("v{v}")).unwrap_or("Installed (its version isn't known)".into()),
-                                Some(_) => "Not installed".to_string(),
-                                None => "Looking…".to_string(),
-                            }
-                        }
-                    }
-                }
-                if let Some(vs) = versions {
-                    div { class: "ad-row",
-                        span { class: "k", "Latest" }
-                        div { class: "v",
-                            div { class: "row",
-                                span { class: "plain",
-                                    match (&latest, checking) {
-                                        (Some(v), _) => format!("v{v}"),
-                                        (None, true) => "Looking it up…".to_string(),
-                                        (None, false) => "Not looked up yet".to_string(),
-                                    }
-                                }
-                                if newer.is_some() { span { class: "status-pill new", "Newer" } }
-                                else if latest.is_some() && installed && d.as_ref().is_some_and(|d| d.version.is_some()) { span { class: "status-pill ok", Icon { i: I::Check, size: 11 } "Up to date" } }
-                                div { class: "grow" }
-                                button { class: "ghost-btn", disabled: checking, onclick: move |_| crate::agent_versions::check_now(),
-                                    Icon { i: I::Refresh, size: 11 } "Check now"
-                                }
-                            }
-                            div { class: "h", "From {larrier_agents::updates::source_label(&vs.source)}" }
-                        }
-                    }
-                }
-                if let Some(c) = update_cmd.clone() {
-                    div { class: "ad-row",
-                        span { class: "k", "Update" }
-                        div { class: "v",
-                            div { class: "row",
-                                span { class: "cmd mono", title: "{c.shown}", "{c.shown}" }
-                                div { class: "grow" }
-                                button { class: if newer.is_some() { "primary-btn" } else { "ghost-btn" }, disabled: running,
-                                    onclick: move |_| crate::agent_versions::run(app, k10.clone(), false),
-                                    Icon { i: I::ArrowUp, size: 12 }
-                                    if let Some(v) = &newer { "Update to v{v}" } else { "Update" }
-                                }
-                            }
-                            div { class: "h", "As {spec.vendor} says to update it; Larrier runs it and shows what it prints." }
-                        }
-                    }
-                } else if installed && versions.is_some() {
-                    div { class: "ad-row",
-                        span { class: "k", "Update" }
-                        div { class: "v", span { class: "plain faint", "Larrier can't update it itself: update it as its site says." } }
-                    }
-                }
-                if let Some(c) = install_cmd.clone().filter(|_| d.is_some()) {
-                    div { class: "ad-row",
-                        span { class: "k", "Install" }
-                        div { class: "v",
-                            div { class: "row",
-                                span { class: "cmd mono", title: "{c.shown}", "{c.shown}" }
-                                div { class: "grow" }
-                                button { class: "primary-btn", disabled: running,
-                                    onclick: move |_| crate::agent_versions::run(app, k11.clone(), true),
-                                    Icon { i: I::Download, size: 12 } "Install"
-                                }
-                            }
-                            div { class: "h", "Its official installer; Larrier runs it and shows what it prints." }
-                        }
-                    }
-                }
-                if !installed {
-                    for (lbl, cmd) in spec.install.iter() {
-                        div { key: "{lbl}", class: "ad-row",
-                            span { class: "k", "{lbl}" }
-                            div { class: "v row",
-                                span { class: "cmd mono", title: "{cmd}", "{cmd}" }
-                                button { class: "ghost-btn", title: "Run in a terminal",
-                                    onclick: { let c = cmd.to_string(); move |_| { let home = dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or(".".into()); let _ = crate::state::open_terminal(&home, &c); } },
-                                    Icon { i: I::Play, size: 11 } "Run"
-                                }
-                            }
-                        }
-                    }
-                }
-                if let Some(j) = job.clone() {
-                    div { class: "ad-row",
-                        span { class: "k", if j.installing { "Installing" } else { "Updating" } }
-                        div { class: "v",
-                            div { class: "plain",
-                                match j.ok {
-                                    None => rsx! { span { class: "row", super::loaders::Orbit { size: 12 } span { class: "mono", "{j.shown}" } } },
-                                    Some(true) => rsx! { span { class: "ok-c", "Done: " span { class: "mono", "{j.shown}" } } },
-                                    Some(false) => rsx! { span { class: "err-c", "Didn't go through: " span { class: "mono", "{j.shown}" } } },
-                                }
-                            }
-                            // Newest at the bottom, kept in view.
-                            div { class: "ad-log mono",
-                                if j.log.is_empty() { div { class: "faint", "Nothing printed yet" } }
-                                for (i, l) in j.log.iter().enumerate().rev() {
-                                    div { key: "{i}", "{l}" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            div { class: "ad-foot",
-                a { href: "{spec.homepage}", "Documentation" Icon { i: I::ArrowUpRight, size: 11 } }
-            }
+                AgentAccounts { kind: kind.clone() }
+            },
+            HarnessTab::Models => rsx! { super::agent_models::AgentModelsPanel { kind: kind.clone() } },
+            HarnessTab::Running => rsx! { super::harness_run::RunPanel { kind: kind.clone() } },
+            HarnessTab::Version => rsx! { VersionPanel { kind: kind.clone() } },
         }
     }
+}
+
+/// A harness's version: installed, latest, and updating or installing it.
+#[component]
+fn VersionPanel(kind: AgentKind) -> Element {
+    let app = use_app();
+    let spec = kind.spec();
+    let id = kind.id();
+    let d = app.detected.read().iter().find(|d| d.kind == kind).cloned();
+    let installed = d.as_ref().is_some_and(|d| d.installed());
+    let job = crate::agent_versions::JOBS.read().get(&id).cloned();
+    let running = job.as_ref().is_some_and(|j| j.ok.is_none());
+    let newer = crate::agent_versions::update_to(&app, &kind);
+    let latest = crate::agent_versions::LATEST.read().get(&id).cloned();
+    let checking = crate::agent_versions::CHECKING();
+    let versions = larrier_agents::updates::of(&kind);
+    let update_cmd = if installed { crate::agent_versions::step(&app, &kind, false) } else { None };
+    let install_cmd = if installed { None } else { larrier_agents::updates::install_step(&kind) };
+    let (k1, k2) = (kind.clone(), kind.clone());
+    rsx! {
+        div { class: "set-card ad-card",
+            div { class: "ad-row",
+                span { class: "k", "Installed" }
+                div { class: "v",
+                    span { class: "plain strong",
+                        match d.as_ref() {
+                            Some(d) if d.installed() => d.version.clone().map(|v| format!("v{v}")).unwrap_or("Installed (its version isn't known)".into()),
+                            Some(_) => "Not installed".to_string(),
+                            None => "Looking…".to_string(),
+                        }
+                    }
+                    if let Some(p) = d.as_ref().and_then(|d| d.path.clone()) {
+                        span { class: "h", title: "{p.to_string_lossy()}", {short_path(&p.to_string_lossy())} }
+                    }
+                }
+            }
+            if let Some(vs) = versions {
+                div { class: "ad-row",
+                    span { class: "k", "Latest" }
+                    div { class: "v",
+                        div { class: "row",
+                            span { class: "plain",
+                                match (&latest, checking) {
+                                    (Some(v), _) => format!("v{v}"),
+                                    (None, true) => "Looking it up…".to_string(),
+                                    (None, false) => "Not looked up yet".to_string(),
+                                }
+                            }
+                            if newer.is_some() { span { class: "hn-tag new", "Newer" } }
+                            else if latest.is_some() && installed && d.as_ref().is_some_and(|d| d.version.is_some()) { span { class: "hn-tag ok", "Up to date" } }
+                            div { class: "grow" }
+                            button { class: "ghost-btn sm", disabled: checking, onclick: move |_| crate::agent_versions::check_now(), "Check now" }
+                        }
+                        div { class: "h", "From {larrier_agents::updates::source_label(&vs.source)}" }
+                    }
+                }
+            }
+            if let Some(c) = update_cmd.clone() {
+                div { class: "ad-row",
+                    span { class: "k", "Update" }
+                    div { class: "v",
+                        div { class: "row",
+                            span { class: "cmd mono", title: "{c.shown}", "{c.shown}" }
+                            button { class: if newer.is_some() { "primary-btn" } else { "ghost-btn" }, disabled: running,
+                                onclick: move |_| crate::agent_versions::run(app, k1.clone(), false),
+                                if let Some(v) = &newer { "Update to v{v}" } else { "Update" }
+                            }
+                        }
+                        div { class: "h", "As {spec.vendor} says to update it; Larrier runs it and shows what it prints." }
+                    }
+                }
+            }
+            if let Some(c) = install_cmd.clone().filter(|_| d.is_some()) {
+                div { class: "ad-row",
+                    span { class: "k", "Install" }
+                    div { class: "v",
+                        div { class: "row",
+                            span { class: "cmd mono", title: "{c.shown}", "{c.shown}" }
+                            button { class: "primary-btn", disabled: running, onclick: move |_| crate::agent_versions::run(app, k2.clone(), true), "Install" }
+                        }
+                        div { class: "h", "Its official installer; Larrier runs it and shows what it prints." }
+                    }
+                }
+            }
+            if let Some(j) = job.clone() {
+                div { class: "ad-row",
+                    span { class: "k", if j.installing { "Installing" } else { "Updating" } }
+                    div { class: "v",
+                        div { class: "plain",
+                            match j.ok {
+                                None => rsx! { span { class: "row", super::loaders::Orbit { size: 12 } span { class: "mono", "{j.shown}" } } },
+                                Some(true) => rsx! { span { class: "ok-c", "Done: " span { class: "mono", "{j.shown}" } } },
+                                Some(false) => rsx! { span { class: "err-c", "Didn't go through: " span { class: "mono", "{j.shown}" } } },
+                            }
+                        }
+                        div { class: "ad-log mono",
+                            if j.log.is_empty() { div { class: "faint", "Nothing printed yet" } }
+                            for (i, l) in j.log.iter().enumerate().rev() {
+                                div { key: "{i}", "{l}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        div { class: "ad-foot",
+            a { href: "{spec.homepage}", "Documentation" Icon { i: I::ArrowUpRight, size: 11 } }
+        }
+    }
+}
+
+/// A path as people read it: the home folder as `~`, and the middle left
+/// out when it's long (the full path is in its tooltip).
+pub fn short_path(p: &str) -> String {
+    let home = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_default();
+    let p = if !home.is_empty() && p.to_lowercase().starts_with(&home.to_lowercase()) { format!("~{}", &p[home.len()..]) } else { p.to_string() };
+    let chars: Vec<char> = p.chars().collect();
+    if chars.len() <= 56 {
+        return p;
+    }
+    let head: String = chars[..22].iter().collect();
+    let tail: String = chars[chars.len() - 30..].iter().collect();
+    format!("{head}…{tail}")
 }
 
 // ------------------------------------------------------------------ accounts
 
 /// A harness's accounts, the same wherever they show: what each runs as,
-/// whether it is signed in or has its key, which is the default, how many
-/// chats use it; signing in, checking, editing and removing.
+/// whether it is signed in or has its key, which is the default, and how
+/// many chats use it. One action shows when something is needed; the rest
+/// are in its "…" menu.
 #[component]
 pub fn AgentAccounts(kind: AgentKind) -> Element {
     let app = use_app();
@@ -721,10 +693,7 @@ pub fn AgentAccounts(kind: AgentKind) -> Element {
     rsx! {
         div { class: "set-card",
             if rows.is_empty() {
-                div { class: "set-row",
-                    span { class: "faint", Icon { i: I::Key, size: 15 } }
-                    div { class: "lbl", div { class: "d", "No API account yet. Add one for Anthropic, OpenAI, Google Gemini, OpenRouter, Ollama or any OpenAI-compatible endpoint." } }
-                }
+                div { class: "hn-empty", "No API account yet. Add one for Anthropic, OpenAI, Google Gemini, OpenRouter, Ollama or any OpenAI-compatible endpoint." }
             }
             for (a, only) in rows {
                 AccountRow { key: "{a.id}", a, only }
@@ -734,7 +703,7 @@ pub fn AgentAccounts(kind: AgentKind) -> Element {
 }
 
 /// Apply a change to one saved account.
-fn edit_account(app: crate::state::App, id: String, f: impl FnOnce(&mut Account) + 'static) {
+pub fn edit_account(app: crate::state::App, id: String, f: impl FnOnce(&mut Account) + 'static) {
     app.update_config(move |c| {
         if let Some(a) = c.accounts.iter_mut().find(|a| a.id == id) {
             f(a);
@@ -744,57 +713,72 @@ fn edit_account(app: crate::state::App, id: String, f: impl FnOnce(&mut Account)
 
 #[component]
 fn AccountRow(a: Account, only: bool) -> Element {
-    let app = use_app();
+    let mut app = use_app();
     let spec = a.agent.spec();
-    let mut editing = use_signal(|| false);
+    let mut menu = use_signal(|| false);
     let mut checked = use_signal(|| None::<Result<String, String>>);
     let mut checking = use_signal(|| false);
-    let (ok, email) = crate::state::signed_in_as(&a);
+    let (signed, email) = crate::state::signed_in_as(&a);
+    // Only Claude Code and Codex say whether they're signed in.
+    let knows_sign_in = matches!(a.agent, AgentKind::ClaudeCode | AgentKind::Codex);
     let can_sign_in = spec.login_command.is_some() && a.auth.is_sign_in();
     let api = match &a.auth {
         AccountAuth::Api(x) => Some(x.clone()),
         _ => None,
     };
     let key = a.auth.secret_ref().and_then(secrets::get).filter(|k| !k.trim().is_empty());
+    let needs_key = api.as_ref().is_some_and(|x| x.api.needs_key()) && key.is_none();
     let used = app.sessions.read().iter().filter(|s| s.account_id.as_deref() == Some(a.id.as_str())).count();
-    let detail = match &a.auth {
+    let what = match &a.auth {
         AccountAuth::SystemLogin => format!("Whatever {} is signed into on this computer", spec.name),
-        AccountAuth::ConfigDir { path } => format!("Separate sign-in · {path}"),
+        AccountAuth::ConfigDir { path } => format!("Separate sign-in · {}", short_path(path)),
         AccountAuth::Api(x) => {
             let mut s = x.api.label().to_string();
             match &x.env_var {
-                Some(v) => s.push_str(&format!(" · passed as {v}")),
-                None => s.push_str(&format!(" · {}", x.base_url.clone().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| x.api.default_url().to_string()))),
+                Some(v) => s.push_str(&format!(" · as {v}")),
+                None => {
+                    if let Some(u) = x.base_url.clone().filter(|u| !u.trim().is_empty() && u != x.api.default_url()) {
+                        s.push_str(&format!(" · {}", u.trim_start_matches("https://").trim_start_matches("http://")));
+                    }
+                }
             }
             if a.agent == AgentKind::Chat {
                 s.push_str(&match x.models.len() {
-                    0 => " · no models yet".to_string(),
+                    0 => " · no models".to_string(),
                     1 => " · 1 model".to_string(),
                     n => format!(" · {n} models"),
                 });
             }
             s
         }
-        AccountAuth::ApiKey { env_var, .. } => format!("API key · passed as {env_var}"),
-        AccountAuth::Env { vars } => format!("Environment · {} variables", vars.len()),
+        AccountAuth::ApiKey { env_var, .. } => format!("API key · as {env_var}"),
+        AccountAuth::Env { vars } => format!("{} variables", vars.len()),
     };
-    let (state, state_ok) = match &a.auth {
-        // Only Claude Code and Codex say whether they're signed in.
-        AccountAuth::SystemLogin | AccountAuth::ConfigDir { .. } if !matches!(a.agent, AgentKind::ClaudeCode | AgentKind::Codex) => (String::new(), true),
-        AccountAuth::SystemLogin | AccountAuth::ConfigDir { .. } => match (ok, email) {
-            (true, Some(e)) => (format!("Signed in as {e}"), true),
-            (true, None) => ("Signed in".to_string(), true),
-            (false, _) => ("Not signed in".to_string(), false),
-        },
-        AccountAuth::Api(x) if !x.api.needs_key() => ("No key needed".to_string(), true),
-        AccountAuth::Api(_) | AccountAuth::ApiKey { .. } => match &key {
-            Some(k) => (format!("Key saved · {}", secrets::mask(k)), true),
-            None => ("No key saved".to_string(), false),
-        },
-        AccountAuth::Env { .. } => (String::new(), true),
+    // Its state, in a word or two.
+    let (state, good) = if checking() {
+        ("Checking…".to_string(), true)
+    } else if let Some(r) = checked() {
+        match r {
+            Ok(m) => (m, true),
+            Err(e) => (format!("Check failed: {e}"), false),
+        }
+    } else {
+        match &a.auth {
+            AccountAuth::SystemLogin | AccountAuth::ConfigDir { .. } if knows_sign_in => match (signed, email) {
+                (true, Some(e)) => (e, true),
+                (true, None) => ("Signed in".to_string(), true),
+                (false, _) => ("Not signed in".to_string(), false),
+            },
+            AccountAuth::Api(x) if !x.api.needs_key() => (String::new(), true),
+            AccountAuth::Api(_) | AccountAuth::ApiKey { .. } => match &key {
+                Some(k) => (format!("Key {}", secrets::mask(k)), true),
+                None => ("No key".to_string(), false),
+            },
+            _ => (String::new(), true),
+        }
     };
-    // A key for the harness maker's own service can't be checked from here.
     let can_check = api.as_ref().is_some_and(|x| x.api != larrier_core::ApiKind::Service && !x.url().is_empty());
+    let is_default = only || a.is_default;
     let icon = match a.auth {
         AccountAuth::Api(_) | AccountAuth::ApiKey { .. } => I::Key,
         AccountAuth::ConfigDir { .. } => I::Lock,
@@ -803,98 +787,90 @@ fn AccountRow(a: Account, only: bool) -> Element {
     };
     let x_check = api.clone();
     let key_check = key.clone();
+    let (id1, id2, id3, id4) = (a.id.clone(), a.id.clone(), a.id.clone(), a.id.clone());
+    let (a_sign, a_sign2, a_del) = (a.clone(), a.clone(), a.clone());
+    let k_def = a.agent.clone();
     rsx! {
-        div { class: if editing() { "hn-acct open" } else { "hn-acct" },
-            div { class: "set-row",
-                span { class: "faint", Icon { i: icon, size: 15 } }
-                div { class: "lbl",
-                    div { class: "t", "{a.label}" }
-                    div { class: "d", "{detail}" }
-                    if !state.is_empty() || checked().is_some() {
-                        div { class: "hn-state",
-                            if !state.is_empty() { span { class: if state_ok { "acct-who ok" } else { "acct-who off" }, "{state}" } }
-                            match checked() {
-                                Some(Ok(m)) => rsx! { span { class: "acct-who ok", "{m}" } },
-                                Some(Err(e)) => rsx! { span { class: "acct-who off", title: "{e}", "Check failed: {e}" } },
-                                None => rsx! {},
-                            }
-                        }
+        div { class: "hn-acct",
+            span { class: "ic", Icon { i: icon, size: 15 } }
+            div { class: "lbl",
+                div { class: "t",
+                    span { class: "ellipsis", "{a.label}" }
+                    if is_default { span { class: "hn-default", "Default" } }
+                }
+                div { class: "d",
+                    span { "{what}" }
+                    if !state.is_empty() { span { class: if good { "st ok" } else { "st off" }, title: "{state}", "{state}" } }
+                    if used > 0 { span { class: "st", if used == 1 { "1 chat" } else { "{used} chats" } } }
+                }
+            }
+            // The one thing it needs, when it needs one.
+            if needs_key {
+                button { class: "ghost-btn sm", onclick: move |_| app.ui.write().modal = Some(Modal::EditAccount(id1.clone())), "Add key" }
+            } else if can_sign_in && knows_sign_in && !signed {
+                button { class: "ghost-btn sm", onclick: move |_| app.sign_in(&a_sign), "Sign in" }
+            }
+            div { class: "menu-anchor",
+                button { class: if menu() { "icon-btn sm active" } else { "icon-btn sm" }, title: "More", onclick: move |_| menu.set(true),
+                    Icon { i: I::More, size: 14 }
+                }
+                super::Dropdown { open: menu, up: false, right: true,
+                    if !is_default {
+                        super::MenuItem { label: "Make default".to_string(), icon: Some(I::Check),
+                            onclick: move |_| { menu.set(false); let id = id2.clone(); let k = k_def.clone(); app.update_config(move |c| for x in c.accounts.iter_mut().filter(|x| x.agent == k) { x.is_default = x.id == id; }); } }
                     }
-                }
-                if used > 0 {
-                    span { class: "hn-used", title: "Chats that picked this account", if used == 1 { "1 chat" } else { "{used} chats" } }
-                }
-                if only || a.is_default {
-                    span { class: "status-pill ok", "Default" }
-                } else {
-                    button { class: "ghost-btn sm",
-                        onclick: { let id = a.id.clone(); let k = a.agent.clone(); move |_| app.update_config(|c| for x in c.accounts.iter_mut().filter(|x| x.agent == k) { x.is_default = x.id == id; }) },
-                        "Make default"
+                    if can_check {
+                        super::MenuItem { label: "Check".to_string(), sub: Some("asks the API".to_string()), icon: Some(I::Refresh),
+                            onclick: move |_| {
+                                menu.set(false);
+                                let Some(x) = x_check.clone() else { return };
+                                let k = key_check.clone();
+                                checking.set(true);
+                                checked.set(None);
+                                spawn(async move {
+                                    let r = larrier_agents::drivers::chat::check_api(x.api, &x.url(), k.as_deref()).await;
+                                    checking.set(false);
+                                    checked.set(Some(r.map(|list| match list.len() {
+                                        0 => "Works".to_string(),
+                                        n => format!("Works · {n} models"),
+                                    })));
+                                });
+                            } }
                     }
-                }
-                if can_check {
-                    button { class: "ghost-btn sm", disabled: checking(), title: "Ask the API for its models with this key. Nothing is sent until you press it.",
-                        onclick: move |_| {
-                            let Some(x) = x_check.clone() else { return };
-                            let k = key_check.clone();
-                            checking.set(true);
-                            checked.set(None);
-                            spawn(async move {
-                                let r = larrier_agents::drivers::chat::check_api(x.api, &x.url(), k.as_deref()).await;
-                                checking.set(false);
-                                checked.set(Some(r.map(|list| match list.len() {
-                                    0 => "Works".to_string(),
-                                    n => format!("Works · {n} models"),
-                                })));
-                            });
-                        },
-                        if checking() { super::loaders::Orbit { size: 11 } "Checking…" } else { "Check" }
+                    if api.is_some() && !only {
+                        super::MenuItem { label: "Edit…".to_string(), icon: Some(I::Pencil),
+                            onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::EditAccount(id3.clone())); } }
                     }
-                }
-                if api.is_some() && !only {
-                    button { class: if editing() { "ghost-btn sm on" } else { "ghost-btn sm" }, onclick: move |_| editing.set(!editing()),
-                        if editing() { "Done" } else { "Edit" }
+                    if can_sign_in {
+                        super::MenuItem { label: if knows_sign_in && signed { "Sign in again".to_string() } else { "Sign in".to_string() }, icon: Some(I::User),
+                            onclick: move |_| { menu.set(false); app.sign_in(&a_sign2); } }
                     }
-                }
-                if can_sign_in {
-                    button { class: "ghost-btn sm", title: "Opens {spec.name}'s sign-in for this account",
-                        onclick: { let a2 = a.clone(); move |_| app.sign_in(&a2) },
-                        {if ok { "Sign in again" } else { "Sign in" }}
-                    }
-                }
-                if !only {
-                    button { class: "icon-btn", title: "Remove account",
-                        onclick: {
-                            let a2 = a.clone();
-                            move |_| {
-                                if let Some(r) = a2.auth.secret_ref() { secrets::delete(r); }
-                                let id = a2.id.clone();
-                                app.update_config(|c| {
+                    if !only {
+                        div { class: "menu-sep" }
+                        super::MenuItem { label: "Remove".to_string(), icon: Some(I::Trash), danger: true,
+                            onclick: move |_| {
+                                menu.set(false);
+                                if let Some(r) = a_del.auth.secret_ref() { secrets::delete(r); }
+                                let id = id4.clone();
+                                app.update_config(move |c| {
                                     c.accounts.retain(|x| x.id != id);
                                     // Models added for it run on the chat's account now.
                                     for ag in c.agents.iter_mut() {
                                         for m in ag.custom_models.iter_mut().filter(|m| m.account.as_deref() == Some(id.as_str())) { m.account = None; }
                                     }
                                 });
-                            }
-                        },
-                        Icon { i: I::Trash, size: 13 }
+                            } }
                     }
-                }
-            }
-            if editing() {
-                if let Some(x) = api.clone() {
-                    ApiEditor { a: a.clone(), api: x }
                 }
             }
         }
     }
 }
 
-/// Everything an API account holds, edited in place: its name, which API,
+/// Everything an API account holds (in its Edit dialog): its name, which API,
 /// its address, its key and (for Larrier Chat) the models it offers.
 #[component]
-fn ApiEditor(a: Account, api: larrier_core::ApiAccount) -> Element {
+pub fn ApiEditor(a: Account, api: larrier_core::ApiAccount) -> Element {
     let app = use_app();
     let spec = a.agent.spec();
     let chat = a.agent == AgentKind::Chat;

@@ -89,6 +89,33 @@ pub fn adopt_login_path() {
     }
 }
 
+/// Windows: the window class gets the program's own icon. A window that
+/// stops answering for a moment ("Not Responding") is drawn by Windows from
+/// its class, without asking the window, so without this it shows a blank
+/// program icon in the taskbar until the window answers again.
+pub fn set_class_icon() {
+    #[cfg(windows)]
+    unsafe {
+        use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+        use windows::core::PCWSTR;
+        use windows::Win32::Foundation::{HINSTANCE, HWND};
+        use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, LoadImageW, SetClassLongPtrW, GCLP_HICON, GCLP_HICONSM, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, SM_CXSMICON, SM_CYSMICON};
+        let hwnd = HWND(dioxus::desktop::window().window.hwnd() as *mut _);
+        let Ok(module) = GetModuleHandleW(None) else { return };
+        let inst = HINSTANCE(module.0);
+        // The icon the build gives the program (resource 1, see build.rs):
+        // an id, not an address (MAKEINTRESOURCE).
+        let id = PCWSTR(std::ptr::without_provenance(1));
+        if let Ok(big) = LoadImageW(Some(inst), id, IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED) {
+            SetClassLongPtrW(hwnd, GCLP_HICON, big.0 as isize);
+        }
+        if let Ok(small) = LoadImageW(Some(inst), id, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED) {
+            SetClassLongPtrW(hwnd, GCLP_HICONSM, small.0 as isize);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

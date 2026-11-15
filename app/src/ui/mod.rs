@@ -39,6 +39,7 @@ pub use overlays::{ContextMenu, GlobalMenu, ModalHost, Palette, TabMenu, Toasts}
 #[component]
 pub fn Root() -> Element {
     let app = use_context_provider(App::new);
+    use_hook(crate::platform::set_class_icon);
 
     crate::notify::track_window();
     crate::notify::use_tray(move || app.new_agent());

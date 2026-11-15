@@ -80,14 +80,14 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 12] = [
+    /// The pages listed. Accounts and Models are part of Harnesses now
+    /// (`Agents`); they stay as views so saved window state still opens.
+    pub const ALL: [SettingsTab; 10] = [
         SettingsTab::Profile,
         SettingsTab::General,
         SettingsTab::Appearance,
         SettingsTab::Usage,
         SettingsTab::Agents,
-        SettingsTab::Accounts,
-        SettingsTab::Models,
         SettingsTab::SourceControl,
         SettingsTab::Sessions,
         SettingsTab::Workspaces,
@@ -101,7 +101,7 @@ impl SettingsTab {
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Usage => "Plan & Usage",
             SettingsTab::SourceControl => "Source Control",
-            SettingsTab::Agents => "Agents",
+            SettingsTab::Agents => "Harnesses",
             SettingsTab::Accounts => "Accounts",
             SettingsTab::Models => "Models & API Keys",
             SettingsTab::Sessions => "Sessions & Import",
@@ -202,7 +202,7 @@ pub struct Ui {
     /// An agent's terminal shown read-only in the Terminal tab:
     /// (session id, shell tool call id).
     pub agent_term: Option<(String, String)>,
-    /// Agent whose models Settings → Models shows.
+    /// The harness whose page Settings → Harnesses shows (`None`: the list).
     pub models_agent: Option<AgentKind>,
 }
 
@@ -1132,12 +1132,11 @@ impl App {
         self.navigate(View::Settings(tab));
     }
 
-    /// Settings → Models, on one agent's models.
+    /// Settings → Harnesses: one harness's page (its accounts, models and
+    /// how it runs), or the list of them with `None`.
     pub fn open_models(mut self, agent: Option<AgentKind>) {
-        if agent.is_some() {
-            self.ui.write().models_agent = agent;
-        }
-        self.navigate(View::Settings(SettingsTab::Models));
+        self.ui.write().models_agent = agent;
+        self.navigate(View::Settings(SettingsTab::Agents));
     }
 
     /// Make sure a session is loaded into memory.

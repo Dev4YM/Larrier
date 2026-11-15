@@ -119,7 +119,17 @@ impl Store {
             }),
             Err(_) => Config::default(),
         };
+        let before = cfg.version;
         cfg.migrate();
+        // Written once in this version's form, so what the migration made
+        // (accounts and their ids) stays put; what the older Larrier wrote
+        // is kept beside it.
+        if before < cfg.version && p.exists() {
+            let _ = std::fs::copy(&p, self.root.join(format!("config.v{before}.json")));
+            if let Err(e) = self.save_config(&cfg) {
+                tracing::warn!("couldn't save the updated config: {e}");
+            }
+        }
         cfg
     }
 
@@ -319,6 +329,23 @@ mod tests {
         assert_eq!(store2.list().len(), 1);
         store2.delete(&s.id).unwrap();
         assert!(store2.list().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A config an older Larrier wrote is saved once in today's form, with
+    /// the old file kept beside it, so the accounts it became keep their ids.
+    #[test]
+    fn migrated_config_is_saved_once() {
+        let dir = std::env::temp_dir().join(format!("larrier-test-{}", crate::lsf::new_id()));
+        let store = Store::open(&dir).unwrap();
+        let old = r#"{"version": 3, "agents": [{"kind": "codex", "endpoints": [{"id": "e1", "name": "Local", "kind": "open_ai_compatible", "base_url": "http://localhost:8000/v1"}]}]}"#;
+        std::fs::write(dir.join("config.json"), old).unwrap();
+        let first = store.load_config();
+        assert_eq!(std::fs::read_to_string(dir.join("config.v3.json")).unwrap(), old);
+        let saved = std::fs::read_to_string(dir.join("config.json")).unwrap();
+        assert!(saved.contains("\"version\": 4") && !saved.contains("endpoints"), "{saved}");
+        let again = store.load_config();
+        assert_eq!(first.accounts, again.accounts, "the same accounts, ids included");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -1123,7 +1123,7 @@ pub fn PartView(session_id: String, part: Part, live: bool, show_reasoning: bool
                                                 let _ = crate::state::open_terminal(&cwd, cmd);
                                                 app.toast(format!("Finish signing in to {} in the terminal, then retry", spec.name));
                                             }
-                                            None => app.open_settings(crate::state::SettingsTab::Accounts),
+                                            None => app.open_models(Some(s.agent.clone())),
                                         }
                                     }
                                 },

@@ -123,7 +123,7 @@ pub struct Layout {
     /// Sidebar lists showing all their chats ("More").
     #[serde(default)]
     pub expanded: BTreeSet<String>,
-    /// The agent Settings → Models was on.
+    /// The harness Settings → Harnesses was on.
     #[serde(default)]
     pub models_agent: Option<AgentKind>,
     /// A prompt being edited in place.

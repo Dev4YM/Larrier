@@ -14,9 +14,14 @@ pub struct Config {
     pub settings: Settings,
     #[serde(default)]
     pub agents: Vec<AgentConfig>,
+    /// Every way a harness runs: sign-ins, API keys and endpoints,
+    /// environments. Each belongs to one harness ([`Account::agent`]).
     #[serde(default)]
     pub accounts: Vec<Account>,
-    #[serde(default = "default_providers")]
+    /// Chat providers as Larrier wrote them before accounts held every
+    /// credential: read once and turned into Larrier Chat accounts
+    /// ([`Config::migrate`]), never written.
+    #[serde(default, skip_serializing)]
     pub providers: Vec<Provider>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
@@ -53,7 +58,7 @@ fn config_version() -> u32 {
 }
 
 /// The config format this build writes (see `Config::migrate`).
-pub const CONFIG_VERSION: u32 = 3;
+pub const CONFIG_VERSION: u32 = 4;
 
 /// Agents whose own headless runners refuse whatever needs asking, while
 /// over the Agent Client Protocol the asks reach the user: they connect
@@ -69,7 +74,7 @@ impl Default for Config {
             settings: Settings::default(),
             agents: Vec::new(),
             accounts: Vec::new(),
-            providers: default_providers(),
+            providers: Vec::new(),
             workspaces: Vec::new(),
             custom_agents: Vec::new(),
             automations: Vec::new(),
@@ -93,7 +98,69 @@ impl Config {
                 self.settings.text_size = TextSize::nearest(px);
             }
         }
+        if self.version < 4 {
+            // 4: every credential is an account of one harness.
+            self.migrate_credentials();
+        }
         self.version = self.version.max(CONFIG_VERSION);
+    }
+
+    /// Chat providers, agents' endpoints and key-in-a-variable accounts
+    /// become API accounts. Ids and keychain entries stay as they were, so
+    /// chats that named a provider or a model's endpoint keep working and no
+    /// key has to be entered again.
+    fn migrate_credentials(&mut self) {
+        let defaults: Vec<String> = default_providers().into_iter().map(|p| p.id).collect();
+        let mut chat_default = !self.accounts.iter().any(|a| a.agent == AgentKind::Chat);
+        // Chat providers the user set up (the built-in list, untouched,
+        // carries nothing to keep).
+        for p in std::mem::take(&mut self.providers) {
+            if !(p.enabled || p.secret_ref.is_some() || !defaults.contains(&p.id)) {
+                continue;
+            }
+            let mut models = p.models.clone();
+            if let Some(d) = p.default_model.as_ref().filter(|d| !models.contains(d)) {
+                models.insert(0, d.clone());
+            }
+            let api = ApiAccount { api: p.kind.into(), base_url: Some(p.base_url.clone()), secret_ref: p.secret_ref.clone(), env_var: None, models };
+            let mut acc = Account::new(AgentKind::Chat, p.name.clone(), AccountAuth::Api(api));
+            acc.id = p.id.clone();
+            acc.is_default = chat_default && p.enabled;
+            chat_default &= !acc.is_default;
+            self.accounts.push(acc);
+        }
+        // Each agent's endpoints; one that carried every model becomes the
+        // agent's default account, which is what carries every model now.
+        for i in 0..self.agents.len() {
+            let kind = self.agents[i].kind.clone();
+            let endpoints = std::mem::take(&mut self.agents[i].endpoints);
+            // The agent ran on its own sign-in, which stays its default
+            // unless an endpoint took every model.
+            if !endpoints.is_empty() && !self.accounts.iter().any(|a| a.agent == kind) {
+                let mut cur = Account::new(kind.clone(), "Current sign-in", AccountAuth::SystemLogin);
+                cur.is_default = true;
+                self.accounts.push(cur);
+            }
+            for e in endpoints {
+                let api = ApiAccount { api: e.kind.into(), base_url: Some(e.base_url.clone()), secret_ref: e.secret_ref.clone(), env_var: None, models: Vec::new() };
+                let mut acc = Account::new(kind.clone(), e.name.clone(), AccountAuth::Api(api));
+                acc.id = e.id.clone();
+                if e.enabled && e.use_for_all {
+                    for a in self.accounts.iter_mut().filter(|a| a.agent == kind) {
+                        a.is_default = false;
+                    }
+                    acc.is_default = true;
+                }
+                self.accounts.push(acc);
+            }
+        }
+        // A key exported as one variable is an API account that says which.
+        for a in self.accounts.iter_mut() {
+            if let AccountAuth::ApiKey { env_var, secret_ref } = &a.auth {
+                let api = ApiAccount { api: ApiKind::for_variable(env_var), base_url: None, secret_ref: Some(secret_ref.clone()), env_var: Some(env_var.clone()), models: Vec::new() };
+                a.auth = AccountAuth::Api(api);
+            }
+        }
     }
 
     pub fn agent(&self, kind: &AgentKind) -> AgentConfig {
@@ -118,12 +185,29 @@ impl Config {
         list.iter().find(|a| a.is_default).copied().or_else(|| list.first().copied())
     }
 
-    pub fn account(&self, id: &str) -> Option<&Account> {
-        self.accounts.iter().find(|a| a.id == id)
+    /// The account a chat runs as: the one it picked if it still exists
+    /// for this harness, else the harness's default.
+    pub fn account_for(&self, kind: &AgentKind, picked: Option<&str>) -> Option<&Account> {
+        picked.and_then(|id| self.account(id)).filter(|a| &a.agent == kind).or_else(|| self.default_account(kind))
     }
 
-    pub fn provider(&self, id: &str) -> Option<&Provider> {
-        self.providers.iter().find(|p| p.id == id)
+    /// The API account a model of `kind` runs through: the account it was
+    /// added with, else the chat's account when that is one. `None` runs
+    /// it on the harness's own sign-in.
+    pub fn api_for(&self, kind: &AgentKind, picked: Option<&str>, model: Option<&str>) -> Option<(&Account, &ApiAccount)> {
+        let added = model.and_then(|m| self.agent(kind).custom_models.into_iter().find(|c| c.id == m)).and_then(|c| c.account);
+        let acc = match added {
+            Some(id) => self.account(&id).filter(|a| &a.agent == kind),
+            None => self.account_for(kind, picked),
+        }?;
+        match &acc.auth {
+            AccountAuth::Api(api) => Some((acc, api)),
+            _ => None,
+        }
+    }
+
+    pub fn account(&self, id: &str) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.id == id)
     }
 
     pub fn workspace_by_path(&self, path: &str) -> Option<&Workspace> {
@@ -601,9 +685,9 @@ pub struct AgentConfig {
     /// Models the user added for this agent.
     #[serde(default)]
     pub custom_models: Vec<CustomModel>,
-    /// The user's own API endpoints and keys, for agents that can take one
-    /// at launch.
-    #[serde(default)]
+    /// API endpoints as Larrier wrote them before they were accounts: read
+    /// once and turned into this agent's API accounts, never written.
+    #[serde(default, skip_serializing)]
     pub endpoints: Vec<AgentEndpoint>,
 }
 
@@ -635,41 +719,30 @@ impl AgentConfig {
         let mut v = self.custom_models.clone();
         for id in &self.extra_models {
             if !v.iter().any(|m| &m.id == id) {
-                v.push(CustomModel { id: id.clone(), name: None, endpoint: None });
+                v.push(CustomModel { id: id.clone(), name: None, account: None });
             }
         }
         v
     }
-
-    pub fn endpoint(&self, id: &str) -> Option<&AgentEndpoint> {
-        self.endpoints.iter().find(|e| e.id == id)
-    }
-
-    /// The endpoint a model runs through: the one it was added with, else
-    /// an endpoint set to carry every model.
-    pub fn endpoint_for(&self, model: Option<&str>) -> Option<&AgentEndpoint> {
-        let added = model.and_then(|m| self.custom_models.iter().find(|c| c.id == m)).and_then(|c| c.endpoint.as_deref());
-        match added {
-            Some(id) => self.endpoint(id).filter(|e| e.enabled),
-            None => self.endpoints.iter().find(|e| e.enabled && e.use_for_all),
-        }
-    }
 }
 
 /// A model the user added to an agent: an id the agent accepts but doesn't
-/// list, or a model served by one of the agent's [`AgentEndpoint`]s.
+/// list, or a model served by one of the agent's API accounts.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct CustomModel {
     /// What the agent is given (`--model <id>`).
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
-    /// Id of the endpoint that serves it; `None` is the agent's own service.
-    #[serde(default)]
-    pub endpoint: Option<String>,
+    /// The API account that serves it (written as `endpoint` before
+    /// endpoints were accounts; the ids are the same); `None` is whatever
+    /// the chat runs as.
+    #[serde(default, alias = "endpoint")]
+    pub account: Option<String>,
 }
 
-/// The user's own API endpoint for an agent (an OpenAI or Anthropic key, a
+/// Before API accounts (config version 4): the user's own API endpoint for
+/// an agent, read only to become an account. An OpenAI or Anthropic key, a
 /// gateway, a local server). Its key lives in the OS keychain.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct AgentEndpoint {
@@ -761,12 +834,17 @@ impl Account {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AccountAuth {
-    /// Uses whatever the agent CLI is logged into by default.
+    /// Whatever the harness is signed into on this computer (its own
+    /// subscription or login).
     SystemLogin,
-    /// A separate config/home directory with its own login
+    /// A sign-in of its own, in a separate folder
     /// (e.g. `CLAUDE_CONFIG_DIR`, `CODEX_HOME`).
     ConfigDir { path: String },
-    /// API key kept in the OS keychain under `secret_ref`, exported as `env_var`.
+    /// A provider's API, or any endpoint that speaks it, with a key in the
+    /// OS keychain.
+    Api(ApiAccount),
+    /// An API key exported as one variable, as Larrier wrote it before API
+    /// accounts: read, then turned into [`AccountAuth::Api`].
     ApiKey { env_var: String, secret_ref: String },
     /// Arbitrary environment variables (values may reference secrets as `secret:<ref>`).
     Env { vars: Vec<(String, String)> },
@@ -775,15 +853,173 @@ pub enum AccountAuth {
 impl AccountAuth {
     pub fn label(&self) -> &'static str {
         match self {
-            AccountAuth::SystemLogin => "System login",
-            AccountAuth::ConfigDir { .. } => "Separate login",
-            AccountAuth::ApiKey { .. } => "API key",
+            AccountAuth::SystemLogin => "Current sign-in",
+            AccountAuth::ConfigDir { .. } => "Separate sign-in",
+            AccountAuth::Api(_) | AccountAuth::ApiKey { .. } => "API",
             AccountAuth::Env { .. } => "Environment",
+        }
+    }
+
+    /// A subscription or login (as opposed to an API key or variables).
+    pub fn is_sign_in(&self) -> bool {
+        matches!(self, AccountAuth::SystemLogin | AccountAuth::ConfigDir { .. })
+    }
+
+    /// The keychain entry it owns, if any.
+    pub fn secret_ref(&self) -> Option<&str> {
+        match self {
+            AccountAuth::Api(a) => a.secret_ref.as_deref(),
+            AccountAuth::ApiKey { secret_ref, .. } => Some(secret_ref),
+            _ => None,
         }
     }
 }
 
-/// A model API endpoint for the built-in Chat agent.
+/// An API account: which API, where it is served, its key and, for
+/// Larrier Chat, the models it offers.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ApiAccount {
+    pub api: ApiKind,
+    /// Where it's served; `None` is the provider's own address.
+    #[serde(default)]
+    pub base_url: Option<String>,
+    /// Its key in the OS keychain (`None` for a local server without one).
+    #[serde(default)]
+    pub secret_ref: Option<String>,
+    /// For a harness that reads its key from the environment: the variable
+    /// the key goes in. `None`: Larrier points the harness at the API itself.
+    #[serde(default)]
+    pub env_var: Option<String>,
+    /// The models it offers in Larrier Chat (agents list their own).
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+impl ApiAccount {
+    /// The address requests go to.
+    pub fn url(&self) -> String {
+        self.base_url.clone().filter(|u| !u.trim().is_empty()).unwrap_or_else(|| self.api.default_url().to_string())
+    }
+}
+
+/// The API an account speaks.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiKind {
+    Anthropic,
+    OpenAi,
+    Gemini,
+    OpenRouter,
+    Ollama,
+    /// Any OpenAI-compatible `/chat/completions` endpoint (Groq, Together,
+    /// DeepSeek, Mistral, LM Studio, vLLM, a gateway…).
+    OpenAiCompatible,
+    /// The harness maker's own API key (Cursor, Factory, Amp…).
+    Service,
+}
+
+impl ApiKind {
+    pub const ALL: [ApiKind; 7] =
+        [ApiKind::Anthropic, ApiKind::OpenAi, ApiKind::Gemini, ApiKind::OpenRouter, ApiKind::Ollama, ApiKind::OpenAiCompatible, ApiKind::Service];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ApiKind::Anthropic => "Anthropic",
+            ApiKind::OpenAi => "OpenAI",
+            ApiKind::Gemini => "Google Gemini",
+            ApiKind::OpenRouter => "OpenRouter",
+            ApiKind::Ollama => "Ollama",
+            ApiKind::OpenAiCompatible => "OpenAI-compatible",
+            ApiKind::Service => "Its own API key",
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            ApiKind::Anthropic => "anthropic",
+            ApiKind::OpenAi => "open_ai",
+            ApiKind::Gemini => "gemini",
+            ApiKind::OpenRouter => "open_router",
+            ApiKind::Ollama => "ollama",
+            ApiKind::OpenAiCompatible => "open_ai_compatible",
+            ApiKind::Service => "service",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<ApiKind> {
+        ApiKind::ALL.into_iter().find(|k| k.id() == id)
+    }
+
+    pub fn default_url(self) -> &'static str {
+        match self {
+            ApiKind::Anthropic => "https://api.anthropic.com",
+            ApiKind::OpenAi => "https://api.openai.com/v1",
+            ApiKind::Gemini => "https://generativelanguage.googleapis.com/v1beta",
+            ApiKind::OpenRouter => "https://openrouter.ai/api/v1",
+            ApiKind::Ollama => "http://localhost:11434/v1",
+            ApiKind::OpenAiCompatible | ApiKind::Service => "",
+        }
+    }
+
+    pub fn needs_key(self) -> bool {
+        !matches!(self, ApiKind::Ollama)
+    }
+
+    /// Models to start a Larrier Chat account with; the user edits the list.
+    pub fn suggested_models(self) -> &'static [&'static str] {
+        match self {
+            ApiKind::Anthropic => &["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+            ApiKind::OpenAi => &["gpt-5", "gpt-5-mini", "gpt-4.1", "o3"],
+            ApiKind::Gemini => &["gemini-2.5-pro", "gemini-2.5-flash"],
+            ApiKind::OpenRouter => &["anthropic/claude-sonnet-4.5", "openai/gpt-5", "x-ai/grok-4", "deepseek/deepseek-chat"],
+            ApiKind::Ollama => &["llama3.1", "qwen2.5-coder"],
+            ApiKind::OpenAiCompatible | ApiKind::Service => &[],
+        }
+    }
+
+    /// The API a key variable belongs to (`ANTHROPIC_API_KEY` → Anthropic);
+    /// the harness's own service for anything else.
+    pub fn for_variable(var: &str) -> ApiKind {
+        let v = var.to_ascii_uppercase();
+        if v.contains("ANTHROPIC") {
+            ApiKind::Anthropic
+        } else if v.contains("OPENROUTER") {
+            ApiKind::OpenRouter
+        } else if v.contains("OPENAI") {
+            ApiKind::OpenAi
+        } else if v.contains("GEMINI") || v.contains("GOOGLE") {
+            ApiKind::Gemini
+        } else {
+            ApiKind::Service
+        }
+    }
+}
+
+impl From<ProviderKind> for ApiKind {
+    fn from(k: ProviderKind) -> Self {
+        match k {
+            ProviderKind::OpenAi => ApiKind::OpenAi,
+            ProviderKind::Anthropic => ApiKind::Anthropic,
+            ProviderKind::Gemini => ApiKind::Gemini,
+            ProviderKind::OpenRouter => ApiKind::OpenRouter,
+            ProviderKind::Ollama => ApiKind::Ollama,
+            ProviderKind::OpenAiCompatible => ApiKind::OpenAiCompatible,
+        }
+    }
+}
+
+impl From<EndpointKind> for ApiKind {
+    fn from(k: EndpointKind) -> Self {
+        match k {
+            EndpointKind::Anthropic => ApiKind::Anthropic,
+            EndpointKind::OpenAi => ApiKind::OpenAi,
+            EndpointKind::OpenAiCompatible => ApiKind::OpenAiCompatible,
+        }
+    }
+}
+
+/// Before API accounts (config version 4): a model API for the built-in
+/// Chat agent, read only to become a Larrier Chat account.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Provider {
     pub id: String,
@@ -912,5 +1148,70 @@ mod tests {
         again.migrate();
         assert_eq!(again.settings.text_size, TextSize::Large);
         assert_eq!([11, 13, 14, 15, 16, 22].map(|px| TextSize::nearest(px).px()), [13, 13, 14, 15, 16, 16]);
+    }
+
+    fn api(a: &Account) -> &ApiAccount {
+        match &a.auth {
+            AccountAuth::Api(x) => x,
+            other => panic!("not an API account: {other:?}"),
+        }
+    }
+
+    /// Providers the user set up become Larrier Chat accounts with the same
+    /// ids and keys; the untouched built-in list leaves nothing behind.
+    #[test]
+    fn chat_providers_become_accounts() {
+        let mut old: Config = serde_json::from_str(r#"{"version": 3, "providers": [
+            {"id": "anthropic", "name": "Anthropic", "kind": "anthropic", "base_url": "https://api.anthropic.com", "secret_ref": "provider:anthropic", "models": ["claude-sonnet-4-5"], "enabled": true, "default_model": "claude-opus-4-5"},
+            {"id": "openai", "name": "OpenAI", "kind": "open_ai", "base_url": "https://api.openai.com/v1", "models": ["gpt-5"], "enabled": false},
+            {"id": "custom-1", "name": "Groq", "kind": "open_ai_compatible", "base_url": "https://api.groq.com/openai/v1", "models": [], "enabled": false}
+        ]}"#).unwrap();
+        old.migrate();
+        let chat = old.accounts_for(&AgentKind::Chat);
+        assert_eq!(chat.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["anthropic", "custom-1"]);
+        let a = api(chat[0]);
+        assert_eq!((a.api, a.secret_ref.as_deref(), a.models.clone()), (ApiKind::Anthropic, Some("provider:anthropic"), vec!["claude-opus-4-5".to_string(), "claude-sonnet-4-5".to_string()]));
+        assert!(chat[0].is_default && !chat[1].is_default);
+        assert_eq!(api(chat[1]).url(), "https://api.groq.com/openai/v1");
+        let saved = serde_json::to_string(&old).unwrap();
+        assert!(!saved.contains("\"providers\""), "{saved}");
+        let mut again: Config = serde_json::from_str(&saved).unwrap();
+        again.migrate();
+        assert_eq!(again.accounts.len(), 2, "migrates once");
+    }
+
+    /// An agent's endpoints become its API accounts: one that carried every
+    /// model becomes the default; otherwise the agent's own sign-in stays
+    /// the default and only the models added with an endpoint use it.
+    #[test]
+    fn endpoints_become_accounts() {
+        let mut old: Config = serde_json::from_str(r#"{"version": 3, "agents": [
+            {"kind": "claude-code", "endpoints": [{"id": "e1", "name": "Gateway", "kind": "anthropic", "base_url": "https://gw.example.com", "secret_ref": "endpoint:e1", "use_for_all": true}]},
+            {"kind": "codex", "custom_models": [{"id": "llama", "endpoint": "e2"}], "endpoints": [{"id": "e2", "name": "Local", "kind": "open_ai_compatible", "base_url": "http://localhost:8000/v1"}]}
+        ], "accounts": [
+            {"id": "a1", "agent": "claude-code", "label": "Work", "auth": {"type": "system_login"}, "is_default": true, "created_at": "2026-01-01T00:00:00Z"},
+            {"id": "a2", "agent": "pi", "label": "Key", "auth": {"type": "api_key", "env_var": "OPENAI_API_KEY", "secret_ref": "account:a2"}, "created_at": "2026-01-01T00:00:00Z"}
+        ]}"#).unwrap();
+        old.migrate();
+        let claude = AgentKind::ClaudeCode;
+        assert_eq!(old.default_account(&claude).map(|a| a.id.as_str()), Some("e1"));
+        assert_eq!(old.api_for(&claude, None, Some("sonnet")).map(|(a, _)| a.id.as_str()), Some("e1"));
+        assert!(old.api_for(&claude, Some("a1"), None).is_none(), "a sign-in picked for the chat runs on it");
+        let codex = AgentKind::Codex;
+        assert!(matches!(old.default_account(&codex).map(|a| &a.auth), Some(AccountAuth::SystemLogin)));
+        assert!(old.api_for(&codex, None, Some("gpt-5")).is_none());
+        assert_eq!(old.api_for(&codex, None, Some("llama")).map(|(a, x)| (a.id.as_str(), x.url())), Some(("e2", "http://localhost:8000/v1".to_string())));
+        let pi = old.account("a2").unwrap();
+        assert_eq!((api(pi).api, api(pi).env_var.as_deref(), api(pi).secret_ref.as_deref()), (ApiKind::OpenAi, Some("OPENAI_API_KEY"), Some("account:a2")));
+        let saved = serde_json::to_string(&old).unwrap();
+        assert!(!saved.contains("\"endpoints\"") && !saved.contains("api_key") && saved.contains("\"account\":\"e2\""), "{saved}");
+    }
+
+    #[test]
+    fn variables_name_their_api() {
+        assert_eq!(
+            ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "CURSOR_API_KEY"].map(ApiKind::for_variable),
+            [ApiKind::Anthropic, ApiKind::OpenAi, ApiKind::OpenRouter, ApiKind::Gemini, ApiKind::Service]
+        );
     }
 }

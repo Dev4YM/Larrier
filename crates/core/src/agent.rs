@@ -810,9 +810,9 @@ static CATALOG: [AgentSpec; 17] = [
     },
     AgentSpec {
         kind: AgentKind::Chat,
-        name: "Chat",
+        name: "Larrier Chat",
         vendor: "Larrier",
-        tagline: "Chat with any model through your own API keys",
+        tagline: "Larrier's own chat: any model, on your API accounts",
         binaries: &[],
         install: &[],
         homepage: "https://github.com/Dev4YM/Larrier",

@@ -157,7 +157,8 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
         });
     }
     for c in ac.added_models() {
-        let endpoint = c.endpoint.as_deref().and_then(|e| ac.endpoint(e)).map(|e| e.name.clone());
+        // The API account that serves it, by name.
+        let endpoint = c.account.as_deref().and_then(|id| app.config.read().account(id).map(|a| a.label.clone()));
         match out.iter_mut().find(|x| x.id == c.id) {
             Some(x) => {
                 x.added = true;

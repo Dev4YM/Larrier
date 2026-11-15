@@ -1,5 +1,5 @@
 //! Larrier core: the unified session format (LSF), the agent catalog,
-//! configuration (accounts, providers, workspaces) and the on-disk store.
+//! configuration (harness accounts, workspaces) and the on-disk store.
 
 pub mod agent;
 pub mod automation;
@@ -10,7 +10,7 @@ pub mod secrets;
 pub mod store;
 
 pub use agent::{AgentKind, AgentSpec, ModeGroup, ModeOption, ModeSelection, Protocol};
-pub use config::{Account, AccountAuth, AgentEndpoint, BusySend, ButtonCorners, Config, CustomModel, Density, EndpointKind, Profile, Provider, ProviderKind, RunMode, Settings, SidebarGroup, SidebarSort, TextSize, Theme, UpdateChannel, UpdateMode, Workspace};
+pub use config::{Account, AccountAuth, AgentEndpoint, ApiAccount, ApiKind, BusySend, ButtonCorners, Config, CustomModel, Density, EndpointKind, Profile, Provider, ProviderKind, RunMode, Settings, SidebarGroup, SidebarSort, TextSize, Theme, UpdateChannel, UpdateMode, Workspace};
 pub use lsf::Environment;
 pub use lsf::{
     FileDiff, Message, NativeLink, Origin, Part, PlanEntry, PlanStatus, Role, Session, SessionStatus, SessionSummary,

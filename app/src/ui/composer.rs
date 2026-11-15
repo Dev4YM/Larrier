@@ -15,11 +15,21 @@ use crate::icons::{Icon, I};
 use crate::logos::{agent_logo, model_logo, Logo};
 use crate::state::{use_app, App, SettingsTab};
 
-/// Model choices of the Chat agent (provider models) and custom agents.
+/// Model choices of Larrier Chat (each API account's models, as
+/// `account/model`) and custom agents.
 fn listed_models(app: &App, agent: &AgentKind) -> Option<Vec<String>> {
     let cfg = app.config.read();
     if agent.spec().protocol == Protocol::HttpChat {
-        return Some(cfg.providers.iter().filter(|p| p.enabled).flat_map(|p| p.models.iter().map(move |m| format!("{}/{}", p.id, m))).collect());
+        return Some(
+            cfg.accounts_for(agent)
+                .into_iter()
+                .filter_map(|a| match &a.auth {
+                    larrier_core::AccountAuth::Api(api) => Some(api.models.iter().map(move |m| format!("{}/{}", a.id, m))),
+                    _ => None,
+                })
+                .flatten()
+                .collect(),
+        );
     }
     match agent {
         AgentKind::Custom(id) => Some(cfg.custom_agent(id).map(|c| c.models.clone()).unwrap_or_default()),
@@ -1329,7 +1339,7 @@ fn pickable_agents(app: &App, current: &AgentKind) -> Vec<(AgentKind, String, St
         let det = detected.iter().find(|d| d.kind == spec.kind);
         let api = spec.binaries.is_empty();
         let installed = api || det.map(|d| d.installed()).unwrap_or(false);
-        let usable = if spec.protocol == Protocol::HttpChat { cfg.providers.iter().any(|p| p.enabled) } else { installed };
+        let usable = if spec.protocol == Protocol::HttpChat { !cfg.accounts_for(&spec.kind).is_empty() } else { installed };
         if !(cfg.agent(&spec.kind).enabled && usable) && spec.kind != *current {
             continue;
         }
@@ -1538,10 +1548,11 @@ fn ModelPicker(
                             span { class: "nm", "{cur_name}" }
                             if let Some((_, _, sub)) = cur_meta.clone() { span { class: "sub", "{sub}" } }
                         }
-                        // The logins it can run as (Settings → Accounts).
+                        // The accounts it can run as (Settings → Harnesses). Larrier
+                        // Chat's model already names its account.
                         {
                             let cfg = app.config.read();
-                            let accounts: Vec<larrier_core::Account> = if cur == agent { cfg.accounts_for(&cur).into_iter().cloned().collect() } else { Vec::new() };
+                            let accounts: Vec<larrier_core::Account> = if cur == agent && cur != AgentKind::Chat { cfg.accounts_for(&cur).into_iter().cloned().collect() } else { Vec::new() };
                             let using = account.clone().or_else(|| cfg.default_account(&cur).map(|a| a.id.clone()));
                             rsx! {
                                 if accounts.len() > 1 {
@@ -1556,7 +1567,7 @@ fn ModelPicker(
                                                 rsx! {
                                                     button { key: "{a.id}", class: if on { "mp-acct on" } else if ok { "mp-acct" } else { "mp-acct off" }, title: "{tip}",
                                                         onclick: move |e| { e.stop_propagation(); onaccount.call(id.clone()); },
-                                                        Icon { i: match a.auth { larrier_core::AccountAuth::ApiKey { .. } => I::Key, larrier_core::AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 12 }
+                                                        Icon { i: match a.auth { larrier_core::AccountAuth::Api(_) | larrier_core::AccountAuth::ApiKey { .. } => I::Key, larrier_core::AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 12 }
                                                         span { "{a.label}" }
                                                     }
                                                 }

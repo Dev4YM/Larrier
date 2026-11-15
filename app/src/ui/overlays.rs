@@ -1,7 +1,7 @@
 //! Command palette, context menu, modals and toasts.
 
 use dioxus::prelude::*;
-use larrier_core::{lsf::new_id, Account, AccountAuth, AgentKind};
+use larrier_core::{lsf::new_id, Account, AccountAuth, AgentKind, ApiAccount, ApiKind};
 use larrier_formats::ExportFormat;
 
 use super::{AgentGlyph, Kbd};
@@ -27,9 +27,7 @@ const ACTIONS: &[(&str, &str, I, &[&str])] = &[
     ("import", "Import Sessions from All Agents", I::Download, &["Ctrl", "Shift", "I"]),
     ("import-file", "Import File (LSF, ChatGPT, Claude.ai)…", I::Upload, &[]),
     ("theme", "Toggle Light / Dark Theme", I::Moon, &[]),
-    ("agents", "Manage Agents", I::Bot, &[]),
-    ("accounts", "Manage Accounts", I::User, &[]),
-    ("models", "Models & API Keys", I::Key, &[]),
+    ("harnesses", "Harnesses, Accounts & API Keys", I::Bot, &[]),
     ("workspace", "Open Folder as Workspace…", I::FolderOpen, &[]),
     ("detect", "Re-detect Installed Agents", I::Refresh, &[]),
 ];
@@ -64,9 +62,7 @@ fn run_action(mut app: App, a: &str) {
             app.update_config(|c| c.settings.theme = if dark { larrier_core::Theme::Light } else { larrier_core::Theme::Dark });
             app.apply_theme();
         }
-        "agents" => app.open_settings(SettingsTab::Agents),
-        "accounts" => app.open_settings(SettingsTab::Accounts),
-        "models" => app.open_settings(SettingsTab::Models),
+        "agents" | "accounts" | "models" | "harnesses" => app.open_models(None),
         "workspace" => app.pick_workspace(true),
         "detect" => {
             app.detect_agents();
@@ -477,7 +473,10 @@ enum AuthKind {
     Dir,
     /// A folder the agent already signs in from (another account's).
     Existing,
+    /// A key the agent reads from one of its variables.
     Key,
+    /// An API Larrier points the harness at (Larrier Chat speaks it itself).
+    Api,
 }
 
 /// What marks an agent's own folder: its sign-in file, and where its
@@ -532,7 +531,26 @@ fn AddAccountModal(kind: AgentKind) -> Element {
     let mut app = use_app();
     let spec = kind.spec();
     let mut label = use_signal(|| String::new());
-    let mut auth = use_signal(|| if spec.home_env.is_some() { AuthKind::Dir } else if !spec.key_env.is_empty() { AuthKind::Key } else { AuthKind::System });
+    let chat = kind == AgentKind::Chat;
+    let kinds = larrier_agents::request::api_kinds(&kind);
+    let can_api = !kinds.is_empty();
+    let mut auth = use_signal(|| {
+        if chat {
+            AuthKind::Api
+        } else if spec.home_env.is_some() {
+            AuthKind::Dir
+        } else if can_api {
+            AuthKind::Api
+        } else if !spec.key_env.is_empty() {
+            AuthKind::Key
+        } else {
+            AuthKind::System
+        }
+    });
+    let first_api = kinds.first().copied().unwrap_or(ApiKind::OpenAiCompatible);
+    let mut api_kind = use_signal(|| first_api);
+    let mut url = use_signal(|| first_api.default_url().to_string());
+    let mut models = use_signal(|| first_api.suggested_models().join(", "));
     let mut key = use_signal(String::new);
     let mut env_var = use_signal(|| spec.key_env.first().map(|s| s.to_string()).unwrap_or_default());
     // An existing folder: typed, picked, or one of those found at home.
@@ -548,7 +566,12 @@ fn AddAccountModal(kind: AgentKind) -> Element {
     let has_folders = folder_marks(&kind).is_some();
     let k2 = kind.clone();
     let save = move |_| {
-        let fallback = if auth() == AuthKind::Existing && !folder_name().is_empty() { folder_name() } else { format!("{} account", k2.display_name()) };
+        let fallback = match auth() {
+            AuthKind::Existing if !folder_name().is_empty() => folder_name(),
+            AuthKind::Api => api_kind().label().to_string(),
+            AuthKind::Key => format!("{} API key", k2.display_name()),
+            _ => format!("{} account", k2.display_name()),
+        };
         let name = if label().trim().is_empty() { fallback } else { label() };
         let id = new_id();
         let mut needs_login = matches!(auth(), AuthKind::Dir);
@@ -576,16 +599,37 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                     app.toast_err(format!("Could not store key: {e}"));
                     return;
                 }
-                AccountAuth::ApiKey { env_var: env_var(), secret_ref: r }
+                let var = env_var();
+                AccountAuth::Api(ApiAccount { api: ApiKind::for_variable(&var), base_url: None, secret_ref: Some(r), env_var: Some(var), models: Vec::new() })
+            }
+            AuthKind::Api => {
+                let api = api_kind();
+                let mut secret_ref = None;
+                if api.needs_key() {
+                    let r = format!("account:{id}");
+                    if let Err(e) = larrier_core::secrets::set(&r, key().trim()) {
+                        app.toast_err(format!("Could not store key: {e}"));
+                        return;
+                    }
+                    secret_ref = Some(r);
+                }
+                let u = url().trim().trim_end_matches('/').to_string();
+                let base_url = (!u.is_empty() && u != api.default_url()).then_some(u);
+                let list = if k2 == AgentKind::Chat {
+                    models().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                } else {
+                    Vec::new()
+                };
+                AccountAuth::Api(ApiAccount { api, base_url, secret_ref, env_var: None, models: list })
             }
         };
         let mut acc = Account::new(k2.clone(), name, a.clone());
         acc.id = id;
         let first = app.config.read().accounts_for(&k2).is_empty();
-        // Another login added first keeps the agent on the one it ran with:
+        // An agent's first added account keeps it on what it ran with:
         // that stays, as an account of its own, the default; the new one
-        // can be made default.
-        let keep_current = first && matches!(auth(), AuthKind::Dir | AuthKind::Existing);
+        // can be made default. (Larrier Chat had nothing to run on.)
+        let keep_current = first && k2 != AgentKind::Chat && auth() != AuthKind::System;
         acc.is_default = first && !keep_current;
         app.update_config(|c| {
             if keep_current {
@@ -600,6 +644,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
             // Sign in inside the account's folder.
             AccountAuth::ConfigDir { .. } if needs_login => app.sign_in(&acc),
             AccountAuth::ConfigDir { .. } => app.toast("Account added · bringing in its sessions"),
+            _ if keep_current => app.toast("Account added · make it the default to run new chats on it"),
             _ => app.toast("Account added"),
         }
     };
@@ -609,18 +654,54 @@ fn AddAccountModal(kind: AgentKind) -> Element {
             div { class: "kv",
                 span { class: "k", "Name" }
                 input { class: "input full", placeholder: "Work, Personal, Team…", value: "{label}", oninput: move |e| label.set(e.value()) }
-                span { class: "k", "Sign-in" }
-                div { class: "seg",
-                    if spec.home_env.is_some() {
-                        button { class: if auth() == AuthKind::Dir { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Dir), "Separate login" }
+                if !chat {
+                    span { class: "k", "Runs as" }
+                    div { class: "seg",
+                        if spec.home_env.is_some() {
+                            button { class: if auth() == AuthKind::Dir { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Dir), "Separate sign-in" }
+                        }
+                        if spec.home_env.is_some() && has_folders {
+                            button { class: if auth() == AuthKind::Existing { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Existing), "Existing folder" }
+                        }
+                        if can_api {
+                            button { class: if auth() == AuthKind::Api { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Api), "API" }
+                        } else if !spec.key_env.is_empty() {
+                            button { class: if auth() == AuthKind::Key { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Key), "API key" }
+                        }
+                        button { class: if auth() == AuthKind::System { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::System), "Current sign-in" }
                     }
-                    if spec.home_env.is_some() && has_folders {
-                        button { class: if auth() == AuthKind::Existing { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Existing), "Existing folder" }
+                }
+                if auth() == AuthKind::Api {
+                    if kinds.len() > 1 {
+                        span { class: "k", "API" }
+                        super::Select {
+                            value: api_kind().id().to_string(),
+                            options: kinds.iter().map(|k| (k.id().to_string(), k.label().to_string())).collect::<Vec<_>>(),
+                            onchange: move |v: String| {
+                                if let Some(k) = ApiKind::from_id(&v) {
+                                    // Follow the API's own address and models unless typed over.
+                                    let old = api_kind();
+                                    if url.read().trim().is_empty() || url.read().as_str() == old.default_url() {
+                                        url.set(k.default_url().to_string());
+                                    }
+                                    if models.read().trim().is_empty() || *models.read() == old.suggested_models().join(", ") {
+                                        models.set(k.suggested_models().join(", "));
+                                    }
+                                    api_kind.set(k);
+                                }
+                            },
+                        }
                     }
-                    if !spec.key_env.is_empty() {
-                        button { class: if auth() == AuthKind::Key { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::Key), "API key" }
+                    span { class: "k", "Address" }
+                    input { class: "input full", placeholder: if api_kind().default_url().is_empty() { "https://…/v1" } else { api_kind().default_url() }, value: "{url}", spellcheck: "false", oninput: move |e| url.set(e.value()) }
+                    if api_kind().needs_key() {
+                        span { class: "k", "API key" }
+                        input { class: "input full", r#type: "password", placeholder: "Paste the key", value: "{key}", oninput: move |e| key.set(e.value()) }
                     }
-                    button { class: if auth() == AuthKind::System { "on" } else { "" }, onclick: move |_| auth.set(AuthKind::System), "Current login" }
+                    if chat {
+                        span { class: "k", "Models" }
+                        input { class: "input full", placeholder: "Model ids, comma separated", value: "{models}", spellcheck: "false", oninput: move |e| models.set(e.value()) }
+                    }
                 }
                 if auth() == AuthKind::Key {
                     span { class: "k", "Variable" }
@@ -684,12 +765,18 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                     }
                 },
                 AuthKind::Key => rsx! { div { "The key is stored in your OS keychain and passed to {spec.name} as an environment variable only when this account runs." } },
-                AuthKind::System => rsx! { div { "Uses whatever {spec.name} is currently signed into on this machine." } },
+                AuthKind::Api if chat => rsx! { div { "Larrier Chat sends your messages to this API with this key. The key stays in your OS keychain." } },
+                AuthKind::Api => rsx! { div { "When a chat runs on this account, Larrier points {spec.name} at this API for that run and hands it the key from your OS keychain. {spec.name}'s own settings aren't changed." } },
+                AuthKind::System => rsx! { div { "Uses whatever {spec.name} is currently signed into on this computer." } },
             }
         }
         div { class: "modal-foot",
             button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
-            button { class: "primary-btn", disabled: (auth() == AuthKind::Key && key().trim().is_empty()) || (auth() == AuthKind::Existing && signed_in(&kind, &folder()).is_none()), onclick: save, "Add account" }
+            button { class: "primary-btn",
+                disabled: (auth() == AuthKind::Key && key().trim().is_empty())
+                    || (auth() == AuthKind::Existing && signed_in(&kind, &folder()).is_none())
+                    || (auth() == AuthKind::Api && ((api_kind().needs_key() && key().trim().is_empty()) || (url().trim().is_empty() && api_kind().default_url().is_empty()) || (chat && models().trim().is_empty()))),
+                onclick: save, "Add account" }
         }
     }
 }

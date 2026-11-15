@@ -9,7 +9,7 @@
 
 use base64::Engine;
 use futures::StreamExt;
-use larrier_core::{lsf::MediaSource, Message, Part, ProviderKind, Role, Usage};
+use larrier_core::{lsf::MediaSource, ApiKind, Message, Part, Role, Usage};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -22,7 +22,7 @@ Answer clearly; use Markdown for structure and fenced code blocks for code.";
 
 pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
     let Some(target) = req.chat.clone() else {
-        sink.error("No chat provider selected. Add an API key in Settings → Models.");
+        sink.error("Larrier Chat has no API account. Add one in Settings → Harnesses → Larrier Chat.");
         sink.done(false, Some("error".into()));
         return;
     };
@@ -136,12 +136,50 @@ pub fn history_turns(history: &[Message]) -> Vec<Turn> {
     out
 }
 
+/// Asks an API for its model list with a key, the way a chat would reach it:
+/// the ids it offers, or why it refused. Only when the user asks (Settings →
+/// Harnesses → Check); nothing is sent otherwise.
+pub async fn check_api(kind: ApiKind, base_url: &str, key: Option<&str>) -> Result<Vec<String>, String> {
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20)).build().map_err(|e| e.to_string())?;
+    let base = base_url.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("It has no address yet.".into());
+    }
+    let key = key.unwrap_or_default();
+    let rb = match kind {
+        ApiKind::Anthropic => {
+            let url = if base.ends_with("/v1") { format!("{base}/models") } else { format!("{base}/v1/models") };
+            client.get(url).header("x-api-key", key).header("anthropic-version", "2023-06-01")
+        }
+        ApiKind::Gemini => client.get(format!("{base}/models")).header("x-goog-api-key", key),
+        _ => {
+            let rb = client.get(format!("{base}/models"));
+            if key.is_empty() { rb } else { rb.bearer_auth(key) }
+        }
+    };
+    let resp = rb.send().await.map_err(|e| format!("Couldn't reach it: {e}"))?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    if !status.is_success() {
+        let msg = v["error"]["message"].as_str().or_else(|| v["message"].as_str()).map(str::to_string).unwrap_or_else(|| body.chars().take(200).collect());
+        return Err(format!("{status}: {msg}"));
+    }
+    // OpenAI-style `data[].id`, Gemini's `models[].name` (`models/<id>`).
+    let list = v["data"].as_array().or_else(|| v["models"].as_array()).cloned().unwrap_or_default();
+    Ok(list
+        .iter()
+        .filter_map(|m| m["id"].as_str().or_else(|| m["name"].as_str()))
+        .map(|id| id.trim_start_matches("models/").to_string())
+        .collect())
+}
+
 async fn stream_chat(target: &ChatTarget, turns: &[Turn], sink: &EventSink) -> Result<Option<Usage>, String> {
     let client = reqwest::Client::builder().build().map_err(|e| e.to_string())?;
     let base = target.base_url.trim_end_matches('/');
     let key = target.api_key.clone().unwrap_or_default();
     let (rb, mut state) = match target.kind {
-        ProviderKind::Anthropic => {
+        ApiKind::Anthropic => {
             let url = if base.ends_with("/v1") { format!("{base}/messages") } else { format!("{base}/v1/messages") };
             let body = anthropic_body(&target.model, turns);
             (
@@ -149,17 +187,17 @@ async fn stream_chat(target: &ChatTarget, turns: &[Turn], sink: &EventSink) -> R
                 Decoder::Anthropic(Usage::default()),
             )
         }
-        ProviderKind::Gemini => {
+        ApiKind::Gemini => {
             let url = format!("{base}/models/{}:streamGenerateContent?alt=sse", target.model);
             (client.post(url).header("x-goog-api-key", key).json(&gemini_body(turns)), Decoder::Gemini(None))
         }
-        ProviderKind::OpenAi | ProviderKind::OpenRouter | ProviderKind::Ollama | ProviderKind::OpenAiCompatible => {
+        ApiKind::OpenAi | ApiKind::OpenRouter | ApiKind::Ollama | ApiKind::OpenAiCompatible | ApiKind::Service => {
             let url = format!("{base}/chat/completions");
-            let mut rb = client.post(url).json(&openai_body(&target.model, turns, target.kind != ProviderKind::Ollama));
+            let mut rb = client.post(url).json(&openai_body(&target.model, turns, target.kind != ApiKind::Ollama));
             if !key.is_empty() {
                 rb = rb.bearer_auth(key);
             }
-            if target.kind == ProviderKind::OpenRouter {
+            if target.kind == ApiKind::OpenRouter {
                 rb = rb.header("HTTP-Referer", "https://github.com/Dev4YM/Larrier").header("X-Title", "Larrier");
             }
             (rb, Decoder::OpenAi(None))

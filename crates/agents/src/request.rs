@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use larrier_core::{
-    config::CustomAgent, secrets, Account, AccountAuth, AgentKind, Config, EndpointKind, Message, Part, Protocol, ProviderKind,
-    ModeSelection, RunMode, Session,
+    config::CustomAgent, secrets, Account, AccountAuth, AgentKind, ApiKind, Config, Message, Part, Protocol, ModeSelection,
+    RunMode, Session,
 };
 
 use crate::detect;
@@ -166,7 +166,7 @@ impl Launch {
 
 #[derive(Clone, Debug)]
 pub struct ChatTarget {
-    pub kind: ProviderKind,
+    pub kind: ApiKind,
     pub base_url: String,
     pub api_key: Option<String>,
     pub model: String,
@@ -182,6 +182,12 @@ pub fn account_env(agent: &AgentKind, account: &Account) -> Vec<(String, String)
             Some(var) => vec![(var.to_string(), path.clone())],
             None => Vec::new(),
         },
+        // A key the harness reads from a variable. An API Larrier points the
+        // harness at itself goes through `model_launch`.
+        AccountAuth::Api(api) => match (&api.env_var, api.secret_ref.as_deref().and_then(secrets::get)) {
+            (Some(var), Some(key)) => vec![(var.clone(), key)],
+            _ => Vec::new(),
+        },
         AccountAuth::ApiKey { env_var, secret_ref } => {
             secrets::get(secret_ref).map(|v| vec![(env_var.clone(), v)]).unwrap_or_default()
         }
@@ -193,8 +199,7 @@ pub fn account_env(agent: &AgentKind, account: &Account) -> Vec<(String, String)
 fn agent_env(cfg: &Config, agent: &AgentKind, account_id: Option<&str>) -> Vec<(String, String)> {
     let ac = cfg.agent(agent);
     let mut env: Vec<(String, String)> = ac.env.iter().map(|(k, v)| (k.clone(), secrets::resolve(v))).collect();
-    let account = account_id.and_then(|id| cfg.account(id)).or_else(|| cfg.default_account(agent));
-    if let Some(acc) = account {
+    if let Some(acc) = cfg.account_for(agent, account_id) {
         env.extend(account_env(agent, acc));
     }
     env
@@ -538,20 +543,31 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         Protocol::Acp => (resolve_acp_launch(cfg, agent, session.account_id.as_deref())?, None),
         _ => (resolve_launch(cfg, agent, session.account_id.as_deref())?, None),
     };
-    // Effort and the user's own endpoint ride in front of their extra
-    // arguments; the endpoint's key goes in the environment (which also
-    // reaches an agent over ACP, as OpenCode's endpoint config does).
+    // Effort and the account's API ride in front of the user's extra
+    // arguments; its key goes in the environment (which also reaches an
+    // agent over ACP, as OpenCode's provider config does).
     let mut model = model;
-    if protocol == Protocol::Acp && !matches!(agent, AgentKind::Custom(_)) {
-        if let Ok(ml) = model_launch(agent, &ac, model.as_deref(), None) {
-            if ml.model.is_some() {
-                model = ml.model;
-            }
-            launch.env.extend(ml.env);
+    let account = session.account_id.as_deref();
+    if protocol != Protocol::HttpChat {
+        if let Some(why) = missing_key(cfg, agent, account, model.as_deref()) {
+            return Err(anyhow!(why));
         }
     }
+    if protocol == Protocol::Acp && !matches!(agent, AgentKind::Custom(_)) {
+        let ml = model_launch(cfg, agent, account, model.as_deref(), None)?;
+        if !ml.args.is_empty() {
+            let name = agent.spec().name;
+            return Err(anyhow!(
+                "{name} can't run on this API account over the Agent Client Protocol. Switch its connection to Native in Settings → Harnesses → {name}, or pick another account."
+            ));
+        }
+        if ml.model.is_some() {
+            model = ml.model;
+        }
+        launch.env.extend(ml.env);
+    }
     if !matches!(protocol, Protocol::HttpChat | Protocol::Acp) {
-        let ml = model_launch(agent, &ac, model.as_deref(), effort.as_deref())?;
+        let ml = model_launch(cfg, agent, account, model.as_deref(), effort.as_deref())?;
         if ml.model.is_some() {
             model = ml.model;
         }
@@ -624,20 +640,27 @@ pub fn takes_effort(agent: &AgentKind) -> bool {
     matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Droid | AgentKind::Hermes | AgentKind::OpenCode)
 }
 
-/// The kinds of endpoint an agent can be pointed at when it starts.
-pub fn endpoint_kinds(agent: &AgentKind) -> &'static [EndpointKind] {
+/// The APIs a harness can be pointed at when it starts (Larrier Chat
+/// speaks them itself). Other harnesses take an API key only through the
+/// variables they read (`AgentSpec::key_env`).
+pub fn api_kinds(agent: &AgentKind) -> &'static [ApiKind] {
     match agent {
-        AgentKind::ClaudeCode => &[EndpointKind::Anthropic],
-        AgentKind::Codex => &[EndpointKind::OpenAi, EndpointKind::OpenAiCompatible],
-        AgentKind::OpenCode | AgentKind::Droid | AgentKind::Hermes => &[EndpointKind::Anthropic, EndpointKind::OpenAi, EndpointKind::OpenAiCompatible],
+        AgentKind::Chat => &[ApiKind::Anthropic, ApiKind::OpenAi, ApiKind::Gemini, ApiKind::OpenRouter, ApiKind::Ollama, ApiKind::OpenAiCompatible],
+        AgentKind::ClaudeCode => &[ApiKind::Anthropic],
+        AgentKind::Codex => &[ApiKind::OpenAi, ApiKind::OpenRouter, ApiKind::Ollama, ApiKind::OpenAiCompatible],
+        AgentKind::OpenCode | AgentKind::Droid | AgentKind::Hermes => {
+            &[ApiKind::Anthropic, ApiKind::OpenAi, ApiKind::OpenRouter, ApiKind::Ollama, ApiKind::OpenAiCompatible]
+        }
         _ => &[],
     }
 }
 
-/// Whether an endpoint can carry every model of the agent (rather than only
-/// the models added for it).
-pub fn endpoint_for_all(agent: &AgentKind) -> bool {
-    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Hermes)
+/// Why a turn can't start on its API account: the key it needs isn't in
+/// the keychain (removed, or never saved).
+pub fn missing_key(cfg: &Config, agent: &AgentKind, account: Option<&str>, model: Option<&str>) -> Option<String> {
+    let (acc, api) = cfg.api_for(agent, account, model)?;
+    let has = api.secret_ref.as_deref().and_then(secrets::get).is_some_and(|k| !k.trim().is_empty());
+    (api.api.needs_key() && !has).then(|| format!("{} has no API key saved. Add it in Settings → Harnesses → {}.", acc.label, agent.display_name()))
 }
 
 /// A name usable as a provider id and environment variable suffix.
@@ -647,7 +670,8 @@ fn slug(id: &str) -> String {
     if s.is_empty() { "endpoint".into() } else { s }
 }
 
-pub fn model_launch(agent: &AgentKind, ac: &larrier_core::config::AgentConfig, model: Option<&str>, effort: Option<&str>) -> Result<ModelLaunch> {
+pub fn model_launch(cfg: &Config, agent: &AgentKind, account: Option<&str>, model: Option<&str>, effort: Option<&str>) -> Result<ModelLaunch> {
+    let ac = cfg.agent(agent);
     let mut ml = ModelLaunch::default();
     if let Some(e) = effort.filter(|_| takes_effort(agent)) {
         match agent {
@@ -659,18 +683,24 @@ pub fn model_launch(agent: &AgentKind, ac: &larrier_core::config::AgentConfig, m
             _ => {}
         }
     }
-    let Some(ep) = ac.endpoint_for(model) else { return Ok(ml) };
-    if !endpoint_kinds(agent).contains(&ep.kind) {
-        return Err(anyhow!("{} can't use a {} endpoint ({}).", agent.spec().name, ep.kind.label(), ep.name));
+    // An API account Larrier points the agent at (one whose key the agent
+    // reads from a variable is in its environment already).
+    let Some((acc, api)) = cfg.api_for(agent, account, model).filter(|(_, a)| a.env_var.is_none()) else { return Ok(ml) };
+    let name = acc.label.as_str();
+    if !api_kinds(agent).contains(&api.api) {
+        return Err(anyhow!("{} can't run on a {} account ({name}).", agent.spec().name, api.api.label()));
     }
-    let key = ep.secret_ref.as_deref().and_then(secrets::get).unwrap_or_default();
-    let url = ep.base_url.trim().trim_end_matches('/').to_string();
-    let pid = format!("larrier-{}", slug(&ep.id));
-    let key_var = format!("LARRIER_KEY_{}", slug(&ep.id).replace('-', "_").to_ascii_uppercase());
-    let wire_npm = match ep.kind {
-        EndpointKind::Anthropic => ("anthropic", "@ai-sdk/anthropic"),
-        EndpointKind::OpenAi => ("openai", "@ai-sdk/openai"),
-        EndpointKind::OpenAiCompatible => ("generic-chat-completion-api", "@ai-sdk/openai-compatible"),
+    let key = api.secret_ref.as_deref().and_then(secrets::get).unwrap_or_default();
+    let url = api.url().trim().trim_end_matches('/').to_string();
+    if url.is_empty() {
+        return Err(anyhow!("{name} has no address. Add it in Settings → Harnesses → {}.", agent.display_name()));
+    }
+    let pid = format!("larrier-{}", slug(&acc.id));
+    let key_var = format!("LARRIER_KEY_{}", slug(&acc.id).replace('-', "_").to_ascii_uppercase());
+    let wire_npm = match api.api {
+        ApiKind::Anthropic => ("anthropic", "@ai-sdk/anthropic"),
+        ApiKind::OpenAi => ("openai", "@ai-sdk/openai"),
+        _ => ("generic-chat-completion-api", "@ai-sdk/openai-compatible"),
     };
     match agent {
         AgentKind::ClaudeCode => {
@@ -682,8 +712,8 @@ pub fn model_launch(agent: &AgentKind, ac: &larrier_core::config::AgentConfig, m
             }
         }
         AgentKind::Codex => {
-            let wire = if ep.kind == EndpointKind::OpenAi { "responses" } else { "chat" };
-            for (k, v) in [("name", ep.name.as_str()), ("base_url", url.as_str()), ("env_key", key_var.as_str()), ("wire_api", wire)] {
+            let wire = if api.api == ApiKind::OpenAi { "responses" } else { "chat" };
+            for (k, v) in [("name", name), ("base_url", url.as_str()), ("env_key", key_var.as_str()), ("wire_api", wire)] {
                 ml.args.extend(["-c".into(), format!("model_providers.{pid}.{k}={}", toml_str(v))]);
             }
             ml.args.extend(["-c".into(), format!("model_provider={}", toml_str(&pid))]);
@@ -693,7 +723,7 @@ pub fn model_launch(agent: &AgentKind, ac: &larrier_core::config::AgentConfig, m
             // A provider of its own, added for this run only.
             let id = model.unwrap_or_default();
             let mut provider = serde_json::json!({
-                "name": ep.name,
+                "name": name,
                 "npm": wire_npm.1,
                 "options": { "baseURL": url, "apiKey": format!("{{env:{key_var}}}") },
                 "models": {},
@@ -708,7 +738,7 @@ pub fn model_launch(agent: &AgentKind, ac: &larrier_core::config::AgentConfig, m
         }
         AgentKind::Droid => {
             // Droid merges a runtime settings file into its own for this run.
-            let id = model.ok_or_else(|| anyhow!("Pick a model for {} first.", ep.name))?;
+            let id = model.ok_or_else(|| anyhow!("Pick a model for {name} first."))?;
             let name = ac.added_models().into_iter().find(|c| c.id == id).and_then(|c| c.name).unwrap_or_else(|| id.to_string());
             let custom_id = format!("custom:{pid}-{}", slug(id));
             let settings = serde_json::json!({ "customModels": [{
@@ -722,8 +752,8 @@ pub fn model_launch(agent: &AgentKind, ac: &larrier_core::config::AgentConfig, m
             ml.model = Some(custom_id);
         }
         AgentKind::Hermes => {
-            let (provider, key_env, url_env) = match ep.kind {
-                EndpointKind::Anthropic => ("anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"),
+            let (provider, key_env, url_env) = match api.api {
+                ApiKind::Anthropic => ("anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"),
                 _ => ("openai-api", "OPENAI_API_KEY", "OPENAI_BASE_URL"),
             };
             ml.args.extend(["--provider".into(), provider.into()]);
@@ -740,30 +770,33 @@ fn toml_str(v: &str) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| format!("\"{v}\""))
 }
 
-/// For the built-in Chat agent, `session.model` is `provider_id/model`.
+/// For Larrier Chat, `session.model` is `account_id/model`; a model
+/// without an account runs on the chat's account.
 pub fn resolve_chat(cfg: &Config, session: &Session) -> Result<ChatTarget> {
     let raw = session.model.clone().unwrap_or_default();
-    let (pid, model) = match raw.split_once('/') {
-        Some((p, m)) if cfg.provider(p).is_some() => (p.to_string(), m.to_string()),
-        _ => {
-            let p = cfg
-                .providers
-                .iter()
-                .find(|p| p.enabled)
-                .ok_or_else(|| anyhow!("No chat provider is enabled. Add an API key in Settings → Models."))?;
-            let m = if raw.is_empty() { p.default_model.clone().or(p.models.first().cloned()).unwrap_or_default() } else { raw.clone() };
-            (p.id.clone(), m)
+    let chat = AgentKind::Chat;
+    let named = raw.split_once('/').and_then(|(id, m)| cfg.account(id).filter(|a| a.agent == chat).map(|a| (a, m.to_string())));
+    let (acc, model) = match named {
+        Some(x) => x,
+        None => {
+            let acc = cfg
+                .account_for(&chat, session.account_id.as_deref())
+                .ok_or_else(|| anyhow!("Larrier Chat has no API account yet. Add one in Settings → Harnesses → Larrier Chat."))?;
+            (acc, raw.clone())
         }
     };
-    let p = cfg.provider(&pid).ok_or_else(|| anyhow!("provider {pid} not found"))?;
-    let api_key = p.secret_ref.as_deref().and_then(secrets::get);
-    if p.kind.needs_key() && api_key.is_none() {
-        return Err(anyhow!("{} has no API key. Add one in Settings → Models.", p.name));
+    let AccountAuth::Api(api) = &acc.auth else {
+        return Err(anyhow!("{} isn't an API account. Pick another in Settings → Harnesses → Larrier Chat.", acc.label));
+    };
+    let model = if model.trim().is_empty() { api.models.first().cloned().unwrap_or_default() } else { model };
+    let api_key = api.secret_ref.as_deref().and_then(secrets::get).filter(|k| !k.trim().is_empty());
+    if api.api.needs_key() && api_key.is_none() {
+        return Err(anyhow!("{} has no API key saved. Add it in Settings → Harnesses → Larrier Chat.", acc.label));
     }
     if model.trim().is_empty() {
-        return Err(anyhow!("Pick a model for {} first.", p.name));
+        return Err(anyhow!("{} has no models yet. Add one in Settings → Harnesses → Larrier Chat.", acc.label));
     }
-    Ok(ChatTarget { kind: p.kind, base_url: p.base_url.clone(), api_key, model, provider_name: p.name.clone() })
+    Ok(ChatTarget { kind: api.api, base_url: api.url(), api_key, model, provider_name: acc.label.clone() })
 }
 
 #[cfg(test)]
@@ -831,14 +864,27 @@ mod tests {
         assert!(args[0].ends_with("index.js"));
     }
 
-    fn endpoint(kind: EndpointKind, url: &str, all: bool) -> larrier_core::AgentEndpoint {
-        larrier_core::AgentEndpoint { id: "ep1".into(), name: "My gateway".into(), kind, base_url: url.into(), secret_ref: None, enabled: true, use_for_all: all }
+    /// A config whose `agent` has one API account ("ep1"), its default when
+    /// `all`, else serving only the models added with it.
+    fn with_api(agent: AgentKind, api: ApiKind, url: &str, all: bool) -> Config {
+        let mut cfg = Config::default();
+        let auth = AccountAuth::Api(larrier_core::ApiAccount { api, base_url: Some(url.into()), secret_ref: None, env_var: None, models: Vec::new() });
+        let mut acc = Account::new(agent.clone(), "My gateway", auth);
+        acc.id = "ep1".into();
+        if !all {
+            let mut own = Account::new(agent, "Current sign-in", AccountAuth::SystemLogin);
+            own.is_default = true;
+            cfg.accounts.push(own);
+        }
+        acc.is_default = all;
+        cfg.accounts.push(acc);
+        cfg
     }
 
     #[test]
     fn effort_reaches_each_cli_its_own_way() {
-        let ac = larrier_core::config::AgentConfig::new(AgentKind::ClaudeCode);
-        let args = |a: AgentKind| model_launch(&a, &ac, Some("m"), Some("high")).unwrap().args;
+        let cfg = Config::default();
+        let args = |a: AgentKind| model_launch(&cfg, &a, None, Some("m"), Some("high")).unwrap().args;
         assert_eq!(args(AgentKind::ClaudeCode), ["--effort", "high"]);
         assert_eq!(args(AgentKind::Codex), ["-c", "model_reasoning_effort=\"high\""]);
         assert_eq!(args(AgentKind::Droid), ["-r", "high"]);
@@ -850,28 +896,25 @@ mod tests {
     #[test]
     fn endpoints_apply_per_agent() {
         // Claude Code on a gateway for every model: base URL and a bearer token.
-        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::ClaudeCode);
-        ac.endpoints.push(endpoint(EndpointKind::Anthropic, "https://gw.example.com/", true));
-        let ml = model_launch(&AgentKind::ClaudeCode, &ac, Some("opus"), None).unwrap();
+        let cfg = with_api(AgentKind::ClaudeCode, ApiKind::Anthropic, "https://gw.example.com/", true);
+        let ml = model_launch(&cfg, &AgentKind::ClaudeCode, None, Some("opus"), None).unwrap();
         assert_eq!(ml.env, vec![("ANTHROPIC_BASE_URL".to_string(), "https://gw.example.com".to_string())]);
         assert!(ml.model.is_none());
 
         // Codex: a provider of its own through config overrides.
-        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::Codex);
-        ac.endpoints.push(endpoint(EndpointKind::OpenAiCompatible, "https://openrouter.ai/api/v1", false));
-        ac.custom_models.push(larrier_core::CustomModel { id: "z-ai/glm-5.2".into(), name: None, endpoint: Some("ep1".into()) });
-        assert_eq!(model_launch(&AgentKind::Codex, &ac, Some("gpt-6.1-sol"), None).unwrap(), ModelLaunch::default());
-        let ml = model_launch(&AgentKind::Codex, &ac, Some("z-ai/glm-5.2"), None).unwrap();
+        let mut cfg = with_api(AgentKind::Codex, ApiKind::OpenAiCompatible, "https://openrouter.ai/api/v1", false);
+        cfg.agent_mut(&AgentKind::Codex).custom_models.push(larrier_core::CustomModel { id: "z-ai/glm-5.2".into(), name: None, account: Some("ep1".into()) });
+        assert_eq!(model_launch(&cfg, &AgentKind::Codex, None, Some("gpt-6.1-sol"), None).unwrap(), ModelLaunch::default());
+        let ml = model_launch(&cfg, &AgentKind::Codex, None, Some("z-ai/glm-5.2"), None).unwrap();
         assert!(ml.args.contains(&"model_providers.larrier-ep1.base_url=\"https://openrouter.ai/api/v1\"".to_string()));
         assert!(ml.args.contains(&"model_providers.larrier-ep1.wire_api=\"chat\"".to_string()));
         assert_eq!(ml.args.last().unwrap(), "model_provider=\"larrier-ep1\"");
         assert_eq!(ml.env[0].0, "LARRIER_KEY_EP1");
 
         // OpenCode: an inline provider, and the model under it.
-        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::OpenCode);
-        ac.endpoints.push(endpoint(EndpointKind::Anthropic, "https://api.anthropic.com", false));
-        ac.custom_models.push(larrier_core::CustomModel { id: "claude-opus-5-5".into(), name: Some("Opus".into()), endpoint: Some("ep1".into()) });
-        let ml = model_launch(&AgentKind::OpenCode, &ac, Some("claude-opus-5-5"), None).unwrap();
+        let mut cfg = with_api(AgentKind::OpenCode, ApiKind::Anthropic, "https://api.anthropic.com", false);
+        cfg.agent_mut(&AgentKind::OpenCode).custom_models.push(larrier_core::CustomModel { id: "claude-opus-5-5".into(), name: Some("Opus".into()), account: Some("ep1".into()) });
+        let ml = model_launch(&cfg, &AgentKind::OpenCode, None, Some("claude-opus-5-5"), None).unwrap();
         assert_eq!(ml.model.as_deref(), Some("larrier-ep1/claude-opus-5-5"));
         let cfg: serde_json::Value = serde_json::from_str(&ml.env[0].1).unwrap();
         assert_eq!(cfg["provider"]["larrier-ep1"]["npm"], "@ai-sdk/anthropic");
@@ -879,9 +922,30 @@ mod tests {
         assert_eq!(cfg["provider"]["larrier-ep1"]["models"]["claude-opus-5-5"]["name"], "Opus");
 
         // Cursor can't take one.
-        let mut ac = larrier_core::config::AgentConfig::new(AgentKind::Cursor);
-        ac.endpoints.push(endpoint(EndpointKind::OpenAi, "https://api.openai.com/v1", true));
-        assert!(model_launch(&AgentKind::Cursor, &ac, Some("gpt-5.6-sol-high"), None).is_err());
+        let cfg = with_api(AgentKind::Cursor, ApiKind::OpenAi, "https://api.openai.com/v1", true);
+        assert!(model_launch(&cfg, &AgentKind::Cursor, None, Some("gpt-5.6-sol-high"), None).is_err());
+
+        // A sign-in picked for the chat runs on the agent's own service.
+        let cfg = with_api(AgentKind::ClaudeCode, ApiKind::Anthropic, "https://gw.example.com/", false);
+        let own = cfg.default_account(&AgentKind::ClaudeCode).unwrap().id.clone();
+        assert_eq!(model_launch(&cfg, &AgentKind::ClaudeCode, Some(&own), Some("opus"), None).unwrap(), ModelLaunch::default());
+        // The API account picked for the chat carries every model.
+        assert!(model_launch(&cfg, &AgentKind::ClaudeCode, Some("ep1"), Some("opus"), None).unwrap().env.iter().any(|(k, _)| k == "ANTHROPIC_BASE_URL"));
+    }
+
+    #[test]
+    fn chat_runs_on_its_account() {
+        let mut cfg = Config::default();
+        assert!(resolve_chat(&cfg, &Session::new(AgentKind::Chat, None)).unwrap_err().to_string().contains("no API account"));
+        let auth = AccountAuth::Api(larrier_core::ApiAccount { api: ApiKind::Ollama, base_url: None, secret_ref: None, env_var: None, models: vec!["llama3.1".into()] });
+        let mut acc = Account::new(AgentKind::Chat, "Local", auth);
+        acc.id = "local".into();
+        cfg.accounts.push(acc);
+        let mut s = Session::new(AgentKind::Chat, None);
+        let t = resolve_chat(&cfg, &s).unwrap();
+        assert_eq!((t.kind, t.base_url.as_str(), t.model.as_str(), t.provider_name.as_str()), (ApiKind::Ollama, "http://localhost:11434/v1", "llama3.1", "Local"));
+        s.model = Some("local/qwen2.5-coder".into());
+        assert_eq!(resolve_chat(&cfg, &s).unwrap().model, "qwen2.5-coder");
     }
 
     #[test]

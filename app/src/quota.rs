@@ -78,12 +78,12 @@ pub fn fetch_all(cfg: &Config, agents: &[AgentKind], force: bool) -> Vec<Quota> 
     for kind in agents {
         let accounts = cfg.accounts_for(kind);
         if accounts.is_empty() {
-            jobs.push((kind.clone(), None, "Default login".into(), None, false));
+            jobs.push((kind.clone(), None, "Current sign-in".into(), None, false));
         }
         for a in accounts {
             let (dir, api) = match &a.auth {
                 AccountAuth::ConfigDir { path } => (Some(PathBuf::from(path)), false),
-                AccountAuth::ApiKey { .. } | AccountAuth::Env { .. } => (None, true),
+                AccountAuth::Api(_) | AccountAuth::ApiKey { .. } | AccountAuth::Env { .. } => (None, true),
                 AccountAuth::SystemLogin => (None, false),
             };
             let label = if a.label.trim().is_empty() { a.auth.label().to_string() } else { a.label.clone() };

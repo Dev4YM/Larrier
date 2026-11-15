@@ -1046,6 +1046,7 @@ impl Session {
             agent: self.agent.clone(),
             origin: self.origin.agent.clone(),
             model: self.model.clone(),
+            account_id: self.account_id.clone(),
             status: self.status,
             workspace: self.workspace.clone(),
             environment: self.environment.label().to_string(),
@@ -1336,6 +1337,9 @@ pub struct SessionSummary {
     /// agent's own app added (for "recent activity" ordering).
     #[serde(default)]
     pub active_at: Option<DateTime<Utc>>,
+    /// The account it runs as, when it picked one (else its harness's default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
 }
 
 impl SessionSummary {

@@ -68,7 +68,7 @@ them into one window:
 | Pi | Yes | Yes | Yes |
 | Hermes Agent | Yes, live approvals | Yes | Context handoff |
 | Droid | Yes | Yes | Context handoff |
-| Goose, Amp, Copilot CLI, Qwen Code, Kimi, Aider | Yes | — | Context handoff |
+| Goose, Amp, Copilot CLI, Qwen Code, Kimi, Aider, Grok Build | Yes | — | Context handoff |
 | Any [Agent Client Protocol](https://agentclientprotocol.com) agent | Yes | — | Context handoff |
 | Larrier Chat: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, any OpenAI-compatible endpoint | Yes | — | Full history |
 | ChatGPT and claude.ai exports | — | Yes | — |

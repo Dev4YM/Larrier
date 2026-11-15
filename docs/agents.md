@@ -25,12 +25,18 @@ agent needs to resume.
 | Qwen Code | `qwen` | stream-json, or ACP | With ACP |
 | Kimi | `kimi` | ACP (`kimi acp`) | Yes |
 | Aider | `aider` | plain text | — |
+| Grok Build | `grok` | ACP (`grok agent stdio`) | Depends on Grok |
 | Custom | any command | ACP or one of the stream protocols above | Depends |
 | Larrier Chat | — | HTTP: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, OpenAI-compatible | — |
 
-Agents with an ACP mode can be switched to it in **Settings → Harnesses →
-‹agent› → Running**. Where an agent can't ask while Larrier runs it, Larrier
-says what it refused and lets you change the permission mode.
+**Settings → Harnesses → ‹agent› → How it runs** shows the ways Larrier can
+run each agent, with the exact command and what each can do, and marks the
+one its maker documents for an app like Larrier: Claude Code's CLI with
+streaming JSON (the channel the Claude Agent SDK uses for approvals) or the
+Claude Agent SDK over ACP; Codex's app server or its ACP adapter; for most
+others their own headless mode or ACP, where they can ask. Where an agent
+can't ask while Larrier runs it, Larrier says what it refused and lets you
+change the permission mode.
 
 ## Modes and permissions
 
@@ -84,7 +90,7 @@ one its makers have published, read only from where they publish it:
 
 | Source | Agents |
 |---|---|
-| npm (`latest`) | Claude Code, Codex, OpenCode, Gemini CLI, Pi, Amp, Copilot CLI, Qwen Code |
+| npm (`latest`) | Claude Code, Codex, OpenCode, Gemini CLI, Pi, Amp, Copilot CLI, Qwen Code, Grok Build |
 | Official install script | Cursor Agent, Droid |
 | GitHub releases | Hermes Agent, Goose |
 | PyPI | Kimi, Aider |
@@ -96,7 +102,7 @@ button gets a dot.
 
 Updates use the agent's own updater where it has one (`claude update`,
 `codex update`, `cursor-agent update`, `opencode upgrade`, `hermes update`,
-`droid update`); otherwise npm (when npm installed it) or the official
+`droid update`, `grok update`); otherwise npm (when npm installed it) or the official
 installer again. Installs use the official installer for your system:
 PowerShell installers on Windows, the shell installers (`curl … | sh`) on
 macOS and Linux. Larrier shows the exact command first and its output as it

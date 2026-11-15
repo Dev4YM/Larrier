@@ -35,6 +35,9 @@ if ($Sandbox) {
 if ($DataDir) { $env:LARRIER_HOME = (Resolve-Path $DataDir).Path }
 if ($DevTools) { $env:LARRIER_DEVTOOLS_PORT = "$DevTools" }
 
+# The browser engine's bindings build with CMake and Ninja.
+. "$PSScriptRoot/ninja.ps1"
+
 $cargo = @('run', '-p', 'larrier-app')
 if ($Release) { $cargo += '--release' }
 if ($AppArgs) { $cargo += @('--') + $AppArgs }

@@ -14,6 +14,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot)
 
+# The browser engine's bindings build with CMake and Ninja.
+. "$PSScriptRoot/ninja.ps1"
+
 function Step([string] $name, [string[]] $cargo) {
     Write-Host "==> $name" -ForegroundColor Cyan
     & cargo @cargo

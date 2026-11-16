@@ -138,6 +138,13 @@ const PRESETS: &[Preset] = &[
         contrast: false,
     },
     Preset {
+        name: "OLED",
+        note: "White chat on soft gray, ink accent",
+        light: Base { win: "#efeff0", pane: "#ffffff", card: "#ffffff", card2: "#ffffff", selected: "#e3e3e6", chip: "#e6e6e9", chip2: "#dcdcdf", fg: "#111113", blue: "#2f6fdc", green: "#1e8a5a", red: "#d0364f", amber: "#b97d18" },
+        dark: Base { win: "#0b0b0c", pane: "#000000", card: "#0f0f10", card2: "#131314", selected: "#1c1c1e", chip: "#1f1f21", chip2: "#29292c", fg: "#f2f2f3", blue: "#6ea8fe", green: "#4ec98f", red: "#f2718a", amber: "#e2a93b" },
+        contrast: false,
+    },
+    Preset {
         name: "Graphite",
         note: "Cool slate grays",
         light: Base { win: "#eef0f3", pane: "#f6f7f9", card: "#fbfbfc", card2: "#ffffff", selected: "#e2e5ea", chip: "#dfe2e7", chip2: "#d6dae0", fg: "#1c2026", blue: "#3d6fd1", green: "#23885f", red: "#c93a52", amber: "#b5801f" },

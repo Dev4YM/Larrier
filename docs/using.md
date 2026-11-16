@@ -102,11 +102,19 @@ onto the chat area:
   **Edit** shows its options (context size, reasoning effort, speed); the
   accounts the chat can run as sit above the models, and the gear at the
   bottom of the rail opens that harness's models in Settings.
-- `@` mentions files, folders, other chats, agents and the git diff. `/`
-  runs Larrier's commands and the agent's own commands and skills.
+- `@` opens on what you can mention: **Files** (browse the project's
+  folders, or add a whole folder), **Chats**, Claude Code's agents (to
+  **Run as** or as **Subagents**) and the **Git diff**. Typing searches all
+  of them at once. A kind opens in the same menu, with the way back at its
+  top (← or Backspace with nothing typed); → opens the highlighted one.
+- `/` lists what you can do: the modes, **Model** and **Reasoning** (each a
+  page of the menu), a new chat, fork, the agent's own **Commands**,
+  **Skills** and MCP prompts, and Larrier's commands with their `/name` at
+  the right. Typing searches them, models included.
+- `@` and `/` work wherever the cursor is, on any line of the message.
 - Paste or drop images and files. Ctrl+Shift+V pastes long text as text.
 - Messages sent while the agent works steer the running turn or wait in a
-  queue (Settings → General; Ctrl+Enter does the other). A queued message can be sent at once or taken back.
+  queue (Settings → Agents; Ctrl+Enter does the other). A queued message can be sent at once or taken back.
   The box goes back to one line once a message is sent. Typing fast,
   anywhere in the text, keeps the cursor where you type.
 - **Spelling** is checked with Hunspell, the engine Chrome's spelling is
@@ -205,14 +213,23 @@ each agent's own configuration and tagged with the agents that use it.
 ## Settings
 
 - **Profile:** your name, photo and a year of your AI work.
-- **General:** notifications, completion sound, tray icon, what sending
-  during a turn does (steer or queue), window restore.
+- **General:** startup (tips, window restore, importing sessions),
+  notifications, completion sound and the tray icon.
+- **Agents:** how agents run: the default agent, autonomy, starting new
+  ones in a worktree, sending (Ctrl+Enter, and steer or queue while one
+  works), the browser for agents, continuing interrupted agents, folding a
+  finished turn's steps and showing reasoning.
 - **Appearance:** themes, accent and per-token colors for light and dark,
   fonts (the interface is set in Inter, built into Larrier), **Text Size** (Small to Larger: every kind of text and its spacing
   move together), zoom, density, **Button Corners** (Balanced is a
   moderate scale; Solid squares it off, Rounded brings back pills and
   circles), sidebar side and **Reduce Motion** (motion is already short;
   this turns it off).
+  **Home Background** puts an image or GIF behind the new chat screen (never
+  in a chat), fading into the page: an effect (Dither, Grain or Vignette),
+  brightness, blur, opacity, how it fades, an overlay in the page's color and
+  **Composer Blur** (a frosted, see-through composer over the picture). **Save current** keeps it under
+  **Wallpapers** on this computer; click one to switch to it.
 - **Plan & Usage:** plan limits with reset times; tokens, cost, sessions
   and cache hits against the previous period; breakdowns by agent, model
   and project; an activity heatmap.

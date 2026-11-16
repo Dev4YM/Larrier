@@ -923,6 +923,9 @@ select.input { cursor: pointer; padding-right: 4px; }
 .ctab:hover { background: var(--hover); color: var(--fg); }
 .ctab.on { background: var(--chip); color: var(--fg); }
 .ctab.static { padding-right: 10px; }
+/* A tab with no close button (the only one) ends with the same room it
+   starts with, not the 4px kept beside a button. */
+.ctab:not(:has(> .x)) { padding-right: 10px; }
 .ctab .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .ctab.preview .t { font-style: italic; padding-right: 0.2em; }
 .ctab.unread .t { font-weight: 500; color: var(--fg); }

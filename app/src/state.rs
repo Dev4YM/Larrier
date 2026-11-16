@@ -366,6 +366,8 @@ pub struct Draft {
     pub permission: Option<String>,
     /// Reasoning effort; `None` follows the agent's default.
     pub effort: Option<String>,
+    /// Claude Code's fast mode.
+    pub fast: bool,
     pub account_id: Option<String>,
     /// The agent's own named agent the new chat runs as (Claude Code's
     /// `--agent`).
@@ -469,6 +471,7 @@ impl App {
             mode: None,
             permission: None,
             effort: None,
+            fast: false,
             account_id: None,
             run_as: None,
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
@@ -1776,6 +1779,7 @@ impl App {
         let mut s = Session::new(d.agent.clone(), ws.clone());
         s.model = d.model.clone();
         s.effort = d.effort.clone();
+        s.fast = d.fast && larrier_agents::request::takes_fast(&d.agent);
         s.mode = d.mode.clone();
         s.permission = d.permission.clone();
         s.account_id = d.account_id.clone();
@@ -2156,6 +2160,11 @@ impl App {
 
     pub fn set_session_effort(self, id: &str, effort: Option<String>) {
         self.update_session(id, |s| s.effort = effort);
+    }
+
+    /// Claude Code's fast mode for this chat (from its next turn).
+    pub fn set_session_fast(self, id: &str, fast: bool) {
+        self.update_session(id, |s| s.fast = fast);
     }
 
     pub fn set_session_mode(self, id: &str, mode: Option<String>) {

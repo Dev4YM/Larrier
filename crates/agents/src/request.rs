@@ -569,9 +569,18 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         launch.env.extend(ml.env);
     }
     if !matches!(protocol, Protocol::HttpChat | Protocol::Acp) {
-        let ml = model_launch(cfg, agent, account, model.as_deref(), effort.as_deref())?;
+        let mut ml = model_launch(cfg, agent, account, model.as_deref(), effort.as_deref())?;
         if ml.model.is_some() {
-            model = ml.model;
+            model = ml.model.clone();
+        }
+        // Fast: Claude Code's fast mode, Codex's priority tier; this
+        // session only.
+        if session.fast {
+            match agent {
+                AgentKind::ClaudeCode => ml.args.extend(["--settings".into(), r#"{"fastMode":true}"#.into()]),
+                AgentKind::Codex => ml.args.extend(["-c".into(), r#"service_tier="fast""#.into()]),
+                _ => {}
+            }
         }
         launch.extra_args.splice(0..0, ml.args);
         launch.env.extend(ml.env);
@@ -654,7 +663,13 @@ pub fn can_steer(agent: &AgentKind, cfg: &Config) -> bool {
 /// Whether an agent takes a reasoning effort on its command line (Cursor
 /// names a model per effort instead).
 pub fn takes_effort(agent: &AgentKind) -> bool {
-    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Droid | AgentKind::Hermes | AgentKind::OpenCode)
+    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Droid | AgentKind::Hermes | AgentKind::OpenCode | AgentKind::Pi)
+}
+
+/// Whether a chat's Fast switch reaches the agent as a launch setting
+/// (Cursor names a model per speed instead).
+pub fn takes_fast(agent: &AgentKind) -> bool {
+    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex)
 }
 
 /// The APIs a harness can be pointed at when it starts (Larrier Chat
@@ -697,6 +712,7 @@ pub fn model_launch(cfg: &Config, agent: &AgentKind, account: Option<&str>, mode
             AgentKind::Droid => ml.args.extend(["-r".into(), e.into()]),
             AgentKind::Hermes => ml.args.extend(["--reasoning".into(), e.into()]),
             AgentKind::OpenCode => ml.args.extend(["--variant".into(), e.into()]),
+            AgentKind::Pi => ml.args.extend(["--thinking".into(), e.into()]),
             _ => {}
         }
     }
@@ -907,6 +923,7 @@ mod tests {
         assert_eq!(args(AgentKind::Droid), ["-r", "high"]);
         assert_eq!(args(AgentKind::Hermes), ["--reasoning", "high"]);
         assert_eq!(args(AgentKind::OpenCode), ["--variant", "high"]);
+        assert_eq!(args(AgentKind::Pi), ["--thinking", "high"]);
         assert!(args(AgentKind::Cursor).is_empty());
     }
 

@@ -79,6 +79,10 @@ pub struct Session {
     /// follows the agent's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// Fast mode (Claude Code's: the same model, faster, at a higher
+    /// price) for the models that offer it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fast: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
     /// One of the agent's own named agents the chat runs as (Claude Code's
@@ -912,6 +916,7 @@ impl Session {
             mode: None,
             permission: None,
             effort: None,
+            fast: false,
             account_id: None,
             run_as: None,
             workspace,

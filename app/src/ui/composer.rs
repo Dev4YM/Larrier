@@ -102,7 +102,7 @@ fn plan_option(agent: &AgentKind) -> Option<&'static str> {
 /// Model and effort for the composer button ("Opus 5.5", "Extra high"):
 /// the session's picks, else the defaults — the agent's own when Larrier
 /// has none, so it reads what will really run.
-fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &Option<String>) -> (String, String) {
+fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &Option<String>, fast: bool) -> (String, String) {
     use crate::agent_models as am;
     if agent.spec().protocol == Protocol::HttpChat {
         let name = match model {
@@ -125,10 +125,21 @@ fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &
         }
     }
     extra.extend(r.effort.as_deref().map(larrier_agents::models::effort_label));
-    if r.fast {
+    if r.fast || (fast && offers_fast(app, agent, model.as_deref())) {
         extra.push("Fast".into());
     }
     (name, extra.join(" · "))
+}
+
+/// Whether the model a chat runs offers a Fast switch of the chat's own
+/// (Claude Code's fast mode, Codex's priority tier).
+fn offers_fast(app: &App, agent: &AgentKind, model: Option<&str>) -> bool {
+    if !larrier_agents::request::takes_fast(agent) {
+        return false;
+    }
+    let r = crate::agent_models::resolve(app, agent, model, None);
+    let Some(id) = r.family.or(r.model) else { return false };
+    crate::agent_models::choices(app, agent).into_iter().find(|c| c.id == id).is_some_and(|c| c.fast)
 }
 
 /// How a model choice reads in the picker: (label, note, "1M · $4 / $20",
@@ -197,6 +208,7 @@ struct SessInfo {
     mode: Option<String>,
     permission: Option<String>,
     effort: Option<String>,
+    fast: bool,
     worktree: bool,
     /// The worktree it runs in, when that was there before the chat.
     existing: Option<String>,
@@ -414,6 +426,7 @@ pub fn Composer(
             mode: s.mode.clone(),
             permission: s.permission.clone(),
             effort: s.effort.clone(),
+            fast: s.fast,
             worktree: matches!(s.environment, larrier_core::Environment::Worktree { .. }),
             existing: match &s.environment {
                 larrier_core::Environment::Worktree { path, branch, .. } if !branch.starts_with("larrier/") => Some(path.clone()),
@@ -470,6 +483,11 @@ pub fn Composer(
     let effort = match &session_id {
         Some(_) => sess.read().as_ref().and_then(|s| s.effort.clone()),
         None => app.draft.read().effort.clone(),
+    };
+    // Claude Code's fast mode, kept with the chat (or the new chat's draft).
+    let fast = match &session_id {
+        Some(_) => sess.read().as_ref().is_some_and(|s| s.fast),
+        None => app.draft.read().fast,
     };
     // One of the agent's own agents the chat runs as (Claude Code's
     // `--agent`), chosen from @ before the first message.
@@ -563,7 +581,7 @@ pub fn Composer(
     });
     // The harness's logo: "Cursor Agent · Opus 5.5" is Cursor, whoever made the model.
     let model_logo_svg = agent_logo(&agent);
-    let (model_text, effort_text) = model_display(&app, &agent, &model, &effort);
+    let (model_text, effort_text) = model_display(&app, &agent, &model, &effort, fast);
 
     // "@" mentions and "/" commands: one menu for the token typed just
     // before the caret, keyboard navigable, its pages opened in place.
@@ -666,6 +684,8 @@ pub fn Composer(
             None => (None, Vec::new()),
         };
         let fit = |e: Option<String>| e.filter(|e| keep_effort.contains(e));
+        // Fast stays on only where the new model has it.
+        let keep_fast = offers_fast(&app, &k, m.as_deref());
         match &sid {
             Some(id) => {
                 let current = app.peek_session(id, |s| s.agent.clone());
@@ -673,8 +693,11 @@ pub fn Composer(
                     app.port(id, k);
                 }
                 let e = app.peek_session(id, |s| s.effort.clone()).flatten();
-                app.set_session_model(id, m);
+                app.set_session_model(id, m.clone());
                 app.set_session_effort(id, fit(e));
+                if !keep_fast {
+                    app.set_session_fast(id, false);
+                }
             }
             None => {
                 let mut d = app.draft.write();
@@ -682,6 +705,9 @@ pub fn Composer(
                     d.mode = None;
                     d.permission = None;
                     d.account_id = None;
+                }
+                if !keep_fast {
+                    d.fast = false;
                 }
                 d.agent = k;
                 d.model = m;
@@ -738,12 +764,16 @@ pub fn Composer(
         let (m, e) = crate::agent_models::compose_with(&app, &agent, &family, e.as_deref(), fast, now.context.as_deref());
         // Picking the agent's own default model and effort keeps following it.
         let model_changed = Some(m.as_str()) != now.model.as_deref() || model.is_some();
+        let claude = larrier_agents::request::takes_fast(&agent);
         match &sid {
             Some(id) => {
                 if model_changed {
                     app.set_session_model(id, Some(m));
                 }
                 app.set_session_effort(id, e);
+                if claude {
+                    app.set_session_fast(id, fast);
+                }
             }
             None => {
                 let mut d = app.draft.write();
@@ -751,6 +781,9 @@ pub fn Composer(
                     d.model = Some(m);
                 }
                 d.effort = e;
+                if claude {
+                    d.fast = fast;
+                }
             }
         }
     };
@@ -1039,6 +1072,7 @@ pub fn Composer(
             agent: agent.clone(),
             model: model.clone(),
             effort: effort.clone(),
+            fast,
             account: match &session_id {
                 Some(_) => sess.read().as_ref().and_then(|s| s.account.clone()),
                 None => app.draft.read().account_id.clone(),
@@ -1678,6 +1712,8 @@ fn ModelPicker(
     agent: AgentKind,
     model: Option<String>,
     effort: Option<String>,
+    /// Claude Code's fast mode is on for the chat.
+    fast: bool,
     /// The account the chat runs as (None: the agent's default).
     account: Option<String>,
     onpick: EventHandler<(AgentKind, Option<String>)>,
@@ -1750,7 +1786,7 @@ fn ModelPicker(
     let cur_name = cur_meta.as_ref().map(|m| m.1.clone()).unwrap_or_else(|| cur.display_name().to_string());
     // The model in use and its effort and speed (its Edit menu checks them).
     let family = now.family.clone().or(now.model.clone());
-    let (cur_effort, cur_fast, cur_context) = (now.effort.clone(), now.fast, now.context.clone());
+    let (cur_effort, cur_fast, cur_context) = (now.effort.clone(), now.fast || fast, now.context.clone());
     let cur_choices = crate::agent_models::choices(&app, &cur);
     let editable = |id: &Option<String>| -> bool {
         id.as_ref().and_then(|id| cur_choices.iter().find(|c| &c.id == id)).is_some_and(|c| !c.efforts.is_empty() || c.fast || c.context.is_some() || c.params.is_some())
@@ -2045,6 +2081,7 @@ fn ModelPicker(
                                         let pick = pick.clone();
                                         rsx! {
                                             button { key: "{e}", class: if on { "menu-item checked" } else { "menu-item" },
+                                                title: larrier_agents::models::effort_note(&e).unwrap_or_default(),
                                                 onclick: move |_| pick(Some(e2.clone()), sel_fast),
                                                 span { {larrier_agents::models::effort_label(&e)} }
                                                 span { class: "check", style: if on { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }

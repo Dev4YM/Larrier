@@ -12,13 +12,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Reasoning efforts in order, as agents spell them.
-pub const EFFORT_ORDER: &[&str] = &["none", "off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+pub const EFFORT_ORDER: &[&str] = &["none", "off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode"];
 
 /// "Extra high" for `xhigh`, and so on.
 pub fn effort_label(e: &str) -> String {
     match e {
         "xhigh" | "extra-high" | "extra_high" => "Extra high".into(),
         "max" => "Max".into(),
+        "ultracode" => "Ultracode".into(),
         "none" => "None".into(),
         "off" => "Off".into(),
         _ => {
@@ -26,6 +27,22 @@ pub fn effort_label(e: &str) -> String {
             c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
         }
     }
+}
+
+/// What an effort does beyond thinking harder, for its tooltip.
+pub fn effort_note(e: &str) -> Option<&'static str> {
+    match e {
+        "ultracode" => Some("Extra high effort, and Claude Code runs big tasks as workflows of many agents in the background. Uses much more of your plan."),
+        "ultra" => Some("The most effort, handing work to subagents on its own. Uses much more of your plan."),
+        _ => None,
+    }
+}
+
+/// Claude Code's fast mode: the models it offers it on (Opus 4.8's ends
+/// on 2026-11-30, so it isn't offered).
+pub fn claude_has_fast(id: &str) -> bool {
+    let id = id.trim_end_matches("[1m]");
+    ["claude-fable-5-2", "claude-opus-5-5", "claude-opus-5"].iter().any(|m| id == *m || id.strip_prefix(m).is_some_and(|r| r.starts_with("-2")))
 }
 
 fn effort_rank(e: &str) -> usize {
@@ -170,6 +187,10 @@ pub struct AgentModel {
     /// (Cursor's `grok-4.7[context=500k,reasoning_effort=high,fast=false]`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<ModelParams>,
+    /// Claude Code's fast mode is offered on it (a session switch, not a
+    /// variant of its own).
+    #[serde(default)]
+    pub fast_mode: bool,
 }
 
 /// A model's parameters as its agent names them (Cursor's app lists them).
@@ -239,7 +260,7 @@ impl AgentModel {
     }
 
     pub fn has_fast(&self) -> bool {
-        self.variants.iter().any(|v| v.fast)
+        self.fast_mode || self.variants.iter().any(|v| v.fast)
     }
 }
 
@@ -577,6 +598,11 @@ pub fn parse_claude_models(init: &Value) -> Vec<AgentModel> {
         let mut m = AgentModel::new(id, str_of(x, &["displayName"]).unwrap_or(id));
         m.description = str_of(x, &["description"]).map(str::to_string);
         m.efforts = x["supportedEffortLevels"].as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        // Ultracode (`--effort ultracode`) comes with Extra high.
+        if m.efforts.iter().any(|e| e == "xhigh") {
+            m.efforts.push("ultracode".into());
+        }
+        m.fast_mode = claude_has_fast(&resolved);
         m.listed = true;
         m.context = larrier_core::models::lookup(&resolved).and_then(|i| i.context);
         if id == "default" {
@@ -596,7 +622,7 @@ pub fn parse_claude_models(init: &Value) -> Vec<AgentModel> {
     out
 }
 
-const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultracode"];
 
 #[cfg(test)]
 mod param_tests {
@@ -673,6 +699,7 @@ fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
         am.description = Some(format!("Latest · {}", models::display_name(&target)));
         am.efforts = if alias == "haiku" { Vec::new() } else { efforts.clone() };
         am.default_effort = effort_for(alias).filter(|_| !am.efforts.is_empty());
+        am.fast_mode = claude_has_fast(&target);
         am.featured = allowed.is_empty() || allowed.iter().any(|a| a == alias);
         am.group = Some("Aliases".into());
         m.models.push(am);
@@ -680,6 +707,7 @@ fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
     for info in models::all().into_iter().filter(|i| catalog && i.vendor == Vendor::Anthropic && i.source == Source::Official && matches!(i.status, ModelStatus::Active | ModelStatus::Legacy)) {
         let mut am = AgentModel::new(info.id.clone(), info.name.clone());
         am.efforts = if info.id.contains("haiku") { Vec::new() } else { efforts.clone() };
+        am.fast_mode = claude_has_fast(&info.id);
         am.default_effort = s.get("modelSettings").and_then(|ms| ms.get(&info.id)).and_then(|x| str_of(x, &["effortLevel"])).map(str::to_string);
         am.featured = allowed.iter().any(|a| models::normalize(a) == info.id) || m.default_model.as_deref() == Some(info.id.as_str());
         am.context = info.context;
@@ -739,6 +767,8 @@ fn codex(dir: &Path) -> AgentModels {
             am.description = str_of(&x, &["description"]).map(str::to_string);
             am.efforts = x.get("supported_reasoning_levels").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|e| str_of(e, &["effort"]).map(str::to_string)).collect()).unwrap_or_default();
             am.default_effort = str_of(&x, &["default_reasoning_level"]).map(str::to_string);
+            // Fast (priority processing): `-c service_tier="fast"`.
+            am.fast_mode = x.get("additional_speed_tiers").and_then(|v| v.as_array()).is_some_and(|a| a.iter().any(|t| t.as_str() == Some("fast")));
             am.featured = str_of(&x, &["visibility"]) != Some("hide");
             am.listed = true;
             am.group = Some("OpenAI".into());
@@ -1268,6 +1298,9 @@ fn pi_dir() -> PathBuf {
     larrier_formats::util::env_dir("PI_CODING_AGENT_DIR").unwrap_or_else(|| larrier_formats::util::home().join(".pi").join("agent"))
 }
 
+/// Pi's `--thinking` levels; it lowers one to what the model supports.
+const PI_THINKING: &[&str] = &["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 fn pi(dir: &Path) -> AgentModels {
     let mut m = AgentModels::default();
     let path = dir.join("settings.json");
@@ -1284,7 +1317,8 @@ fn pi(dir: &Path) -> AgentModels {
             let ids: Vec<String> = p.get("models").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| str_of(x, &["id"]).map(|id| format!("{pid}/{id}"))).collect()).unwrap_or_default();
             m.providers.push(NativeProvider { name: pid.clone(), base_url: str_of(&p, &["baseUrl"]).map(str::to_string), has_key: str_of(&p, &["apiKey"]).is_some(), active: None, models: ids.clone() });
             for id in ids {
-                m.models.push(AgentModel { featured: true, custom: true, group: Some(pid.clone()), ..AgentModel::new(id.clone(), larrier_core::models::display_name(&id)) });
+                let efforts = PI_THINKING.iter().map(|e| e.to_string()).collect();
+                m.models.push(AgentModel { featured: true, custom: true, efforts, group: Some(pid.clone()), ..AgentModel::new(id.clone(), larrier_core::models::display_name(&id)) });
             }
         }
     }
@@ -1414,7 +1448,9 @@ mod tests {
         assert_eq!(latest, [("opus", "Opus 5.5"), ("fable", "Fable 5.1"), ("sonnet", "Sonnet 5.5"), ("haiku", "Haiku 5.5")]);
         let opus = listed.iter().find(|m| m.id == "opus").unwrap();
         assert_eq!(opus.aliases, ["claude-opus-5-5"]);
-        assert_eq!(opus.efforts, ["low", "medium", "high", "xhigh", "max"]);
+        assert_eq!(opus.efforts, ["low", "medium", "high", "xhigh", "max", "ultracode"]);
+        assert!(opus.has_fast(), "Opus 5.5 goes fast");
+        assert!(!listed.iter().find(|m| m.id == "sonnet").unwrap().has_fast(), "Sonnet doesn't");
         let older: Vec<&str> = listed.iter().filter(|m| m.group.as_deref() == Some("Older models")).map(|m| m.name.as_str()).collect();
         assert!(older.contains(&"Opus 4.8") && older.contains(&"Haiku 4.5"), "{older:?}");
         assert!(listed.iter().any(|m| m.default && m.aliases == ["claude-opus-5-5"]));

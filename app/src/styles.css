@@ -1290,7 +1290,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .md pre code { font-size: var(--fs-code, 12px); line-height: var(--lh-code, 19px); }
 .app .user-card { font-size: var(--fs-prompt, 14px); line-height: var(--lh-prompt, 22px); }
 .composer textarea, .composer-row textarea { font-size: var(--fs-composer, 14px); line-height: var(--lh-composer, 20px); }
-.step { font-size: var(--fs-steps, 13px); line-height: var(--lh-steps, 16px); }
+.step { font-size: var(--fs-steps, 13px); line-height: var(--lh-steps, 20px); }
 .step .dur { font-size: calc(var(--fs-steps, 13px) - 2px); }
 .tool-card-head { font-size: var(--fs-tool, 12px); line-height: var(--lh-tool, 16px); }
 .tool-card pre { font-size: var(--fs-out, 11px); line-height: var(--lh-out, 17px); }
@@ -1353,7 +1353,7 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .ask-opt.multi .ask-box { border-radius: var(--r-sm); }
 .ask-opt.on .ask-box { background: var(--accent-c, var(--blue)); border-color: var(--accent-c, var(--blue)); }
 .ask-lbl { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ask-lbl .l { line-height: calc(var(--lh-steps, 16px) + 2px); word-break: break-word; }
+.ask-lbl .l { line-height: var(--lh-steps, 20px); word-break: break-word; }
 .ask-lbl .d { font-size: var(--fs-note, 12px); line-height: calc(var(--lh-note, 19px) - 2px); color: var(--fg-3); word-break: break-word; }
 .ask-other { margin: 2px 0 0 0; height: 32px; padding: 0 10px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--card-2); color: var(--fg); font: inherit; font-size: var(--ui-md); outline: none; }
 .ask-other:focus { border-color: var(--accent-c, var(--blue)); }
@@ -1610,7 +1610,14 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
    steps, thinking, the "planning" row, notices and tool cards. A step's
    hover highlight reaches out past the edge instead of pushing it in. */
 .turn .step, .sub-layer .step { padding-left: 6px; padding-right: 6px; margin-left: -6px; }
-.thinking-row { padding: 4px 0; }
+.thinking-row { padding: 4px 0; font-size: var(--fs-steps, 13px); line-height: var(--lh-steps, 20px); }
+/* The trace's rhythm. Steps are 28 px rows that touch, so their hover
+   highlights tile, whichever message each came in; a sentence between
+   them gets clearly more air than a step does, and a card a little, so a
+   turn reads as runs of steps broken by what the agent says. */
+.trace .a-block { margin: 0; }
+.trace .a-text { padding-top: 10px; padding-bottom: 10px; }
+.trace .tool-card { margin: 6px 0 8px; }
 .turn .notice { margin-left: 0; margin-right: 0; }
 .turn .a-text { padding-left: 0; padding-right: 0; }
 /* And the reply sits where the prompt's text does, inside its card's

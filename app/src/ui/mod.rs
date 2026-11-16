@@ -1423,8 +1423,10 @@ impl TypeScale {
                 ("fs-composer", b),
                 ("lh-composer", lh(b, 1.43, 0.0)),
                 // Tool steps, and the heads of tool cards a size below them.
+                // Steps get room to breathe: 13 px text on 20 px lines makes
+                // 28 px rows.
                 ("fs-steps", steps),
-                ("lh-steps", lh(steps, 1.25, 16.0)),
+                ("lh-steps", lh(steps, if compact { 1.38 } else { 1.54 }, 16.0)),
                 ("fs-tool", steps - 1.0),
                 ("lh-tool", lh(steps - 1.0, 1.33, 16.0)),
                 // Code blocks, tool output and diffs.
@@ -2255,7 +2257,7 @@ mod tests {
     fn default_text_keeps_its_sizes() {
         let s = scale(TextSize::Default, Density::Comfortable);
         let got: Vec<f64> = ["fs", "lh", "fs-prompt", "lh-prompt", "fs-composer", "lh-composer", "fs-steps", "lh-steps", "fs-tool", "lh-tool", "fs-code", "fs-side", "fs-term"].iter().map(|v| s.get(v)).collect();
-        assert_eq!(got, [14.0, 24.0, 14.0, 22.0, 14.0, 20.0, 13.0, 16.0, 12.0, 16.0, 12.0, 13.0, 13.0]);
+        assert_eq!(got, [14.0, 24.0, 14.0, 22.0, 14.0, 20.0, 13.0, 20.0, 12.0, 16.0, 12.0, 13.0, 13.0]);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::sync::{Mutex, OnceLock};
 
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
-use larrier_agents::harness::{HarnessItem, ItemKind};
+use larrier_agents::harness::HarnessItem;
 use larrier_core::{lsf::short_path, AgentKind, BusySend, Part, Protocol};
 
 use super::mentions::MentionChip;
@@ -14,6 +14,9 @@ use super::{Dropdown, MenuItem};
 use crate::icons::{Icon, I};
 use crate::logos::{agent_logo, model_logo, Logo};
 use crate::state::{use_app, App, SettingsTab};
+
+mod insert_menu;
+use insert_menu::{Level, Sugg, SuggAct};
 
 /// Model choices of Larrier Chat (each API account's models, as
 /// `account/model`) and custom agents.
@@ -261,6 +264,13 @@ pub fn Composer(
     let tip_idx = use_hook(|| (chrono::Utc::now().timestamp() as usize) % TIPS.len());
     let mut hl = use_signal(|| 0usize);
     let mut dismissed = use_signal(|| None::<String>);
+    // Where the caret is, as how many characters follow it: typing and
+    // deleting before it don't change that, so the @ and / menu follows the
+    // text before the caret without waiting for the box to report it.
+    let mut after = use_signal(|| 0usize);
+    // The pages opened in the @ / / menu, for the token they were opened from.
+    let menu_stack = use_signal(Vec::<Level>::new);
+    let menu_key = use_signal(|| None::<(char, usize)>);
     let mut dragging = use_signal(|| false);
     let mut overflow = use_signal(|| false);
     // Only the newest width measurement counts (older ones can land late).
@@ -555,15 +565,45 @@ pub fn Composer(
     let model_logo_svg = agent_logo(&agent);
     let (model_text, effort_text) = model_display(&app, &agent, &model, &effort);
 
-    // "@" mentions and "/" commands: one suggestion list, keyboard navigable.
+    // "@" mentions and "/" commands: one menu for the token typed just
+    // before the caret, keyboard navigable, its pages opened in place.
     let text_now = text.read().clone();
+    let caret = caret_at(&text_now, after());
     let is_dismissed = dismissed.read().as_deref() == Some(text_now.as_str());
-    let suggs: Vec<Sugg> = if is_dismissed {
-        Vec::new()
-    } else {
-        suggestions(&app, &text_now, file_index.read().as_deref().unwrap_or(&[]), home, &agent, session_id.as_deref(), fresh)
-    };
+    let tok = if is_dismissed { None } else { insert_menu::token(&text_now[..caret]) };
+    let menu_at = tok.as_ref().map(|(c, at, _)| (*c, *at));
+    let stack: Vec<Level> = if menu_at.is_some() && *menu_key.read() == menu_at { menu_stack.read().clone() } else { Vec::new() };
+    let page = tok.as_ref().map(|(c, _, q)| {
+        let fi = file_index.read();
+        let ctx = insert_menu::Ctx {
+            app: &app,
+            files: fi.as_deref().unwrap_or(&[]),
+            home,
+            agent: &agent,
+            current: session_id.as_deref(),
+            fresh,
+            model: model.as_deref(),
+            effort: effort.as_deref(),
+            plan: plan_id.is_some(),
+            in_plan,
+            mode_set: mode.is_some(),
+            has_ask: agent.spec().mode_groups.first().and_then(|g| g.find("ask")).is_some(),
+        };
+        insert_menu::page(&ctx, *c, q, &stack)
+    });
+    let menu_title = page.as_ref().and_then(|p| p.title.clone());
+    let menu_open = page.as_ref().is_some_and(|p| !p.items.is_empty() || p.title.is_some());
+    let suggs: Vec<Sugg> = page.map(|p| p.items).unwrap_or_default();
+    let q_empty = tok.as_ref().is_some_and(|(_, _, q)| q.is_empty());
     let hl_i = if suggs.is_empty() { 0 } else { hl().min(suggs.len() - 1) };
+    // A menu closed (its token gone) starts on its first page next time.
+    use_effect(use_reactive!(|menu_at| {
+        let (mut menu_key, mut menu_stack) = (menu_key, menu_stack);
+        if menu_at.is_none() && menu_key.peek().is_some() {
+            menu_key.set(None);
+            menu_stack.set(Vec::new());
+        }
+    }));
     let queued: Vec<crate::state::Queued> = session_id.as_ref().and_then(|id| app.queue.read().get(id).cloned()).unwrap_or_default();
     // What the agent is waiting on (a question, an approval, a plan), with
     // how many more wait behind it.
@@ -585,8 +625,6 @@ pub fn Composer(
     let agent_k: &'static larrier_core::AgentSpec = agent.spec();
     let run_slash = move |cmd: &str, sid: Option<String>| {
         let mut app = app;
-        let mut text = text;
-        text.set(String::new()); bump(put_gen);
         match cmd {
             "/plan" => if let Some(p) = plan_k { set_mode(Some(p.to_string()), sid) },
             "/agent" => set_mode(None, sid),
@@ -613,43 +651,6 @@ pub fn Composer(
             Some(id) => app.update_session(id, |s| s.run_as = name),
             None => app.draft.write().run_as = name,
         }
-    };
-    // Apply a suggestion: the typed `@…` / `/…` becomes an object in the
-    // text, or a Larrier command runs.
-    let apply = move |sg: Sugg, sid: Option<String>| {
-        let mut text = text;
-        let mentions = mentions;
-        // The text without the `@…` / `/…` being typed.
-        let typed_cut = |t: &str| t.rfind(|c: char| c.is_whitespace() || c == super::mentions::CLOSE).map(|i| i + t[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1)).unwrap_or(0);
-        let put = move |chip: MentionChip| {
-            let (mut text, mut mentions) = (text, mentions);
-            let t = text.read().clone();
-            let cut = typed_cut(&t);
-            let have = mentions.read().iter().find(|c| c.kind == chip.kind && c.value == chip.value).cloned();
-            let chip = have.unwrap_or_else(|| super::mentions::unique(&mentions.read(), chip));
-            text.set(format!("{}{} ", &t[..cut], chip.marked())); bump(put_gen);
-            // Objects whose tokens are gone from the text are dropped.
-            let now = text.read().clone();
-            mentions.write().retain(|c| now.contains(&c.marked()));
-            if !mentions.read().iter().any(|c| c.kind == chip.kind && c.value == chip.value) {
-                mentions.write().push(chip);
-            }
-        };
-        match sg.act {
-            SuggAct::Chip(chip) => put(chip),
-            SuggAct::Larrier(cmd) => run_slash(cmd, sid),
-            SuggAct::RunAs(name, kind) => {
-                // One agent to run as: picking another replaces it.
-                let old: Vec<MentionChip> = mentions.read().iter().filter(|c| c.kind == super::mentions::MentionKind::RunAs).cloned().collect();
-                for c in old {
-                    let t = text.read().replace(&format!("{} ", c.marked()), "").replace(&c.marked(), "");
-                    text.set(t); bump(put_gen);
-                }
-                put(MentionChip::run_as(&name, &kind));
-                set_run_as(Some(name), sid);
-            }
-        }
-        document::eval(&format!("setTimeout(() => {{ const el = document.getElementById('{input_id}'); if (el) {{ el.focus(); el.selectionStart = el.selectionEnd = el.value.length; }} }}, 10)"));
     };
     // Choose agent (+ model). On an existing session this ports it. Cursor
     // stores the model's default variant; an effort the new model doesn't
@@ -752,6 +753,117 @@ pub fn Composer(
                 d.effort = e;
             }
         }
+    };
+    // Apply a row of the @ / / menu: the token typed before the caret
+    // becomes an object in the text, a command runs, a model or effort is
+    // chosen, or a page of the menu opens.
+    let apply = move |sg: Sugg, sid: Option<String>| {
+        let (mut text, mentions) = (text, mentions);
+        let (mut menu_stack, mut menu_key, mut hl) = (menu_stack, menu_key, hl);
+        // The text, where the token starts and where the caret is.
+        let parts = move || {
+            let t = text.peek().clone();
+            let caret = caret_at(&t, *after.peek());
+            let cut = insert_menu::token(&t[..caret]).map(|(_, at, _)| at).unwrap_or(caret);
+            (t, cut, caret)
+        };
+        let put = move |chip: MentionChip| {
+            let (mut text, mut mentions) = (text, mentions);
+            let (t, cut, caret) = parts();
+            let rest = &t[caret..];
+            let sep = if rest.starts_with(char::is_whitespace) { "" } else { " " };
+            let have = mentions.read().iter().find(|c| c.kind == chip.kind && c.value == chip.value).cloned();
+            let chip = have.unwrap_or_else(|| super::mentions::unique(&mentions.read(), chip));
+            text.set(format!("{}{}{sep}{rest}", &t[..cut], chip.marked())); bump(put_gen);
+            // Objects whose tokens are gone from the text are dropped.
+            let now = text.read().clone();
+            mentions.write().retain(|c| now.contains(&c.marked()));
+            if !mentions.read().iter().any(|c| c.kind == chip.kind && c.value == chip.value) {
+                mentions.write().push(chip);
+            }
+        };
+        // The token goes: what it chose happens instead.
+        let drop_token = move || {
+            let mut text = text;
+            let (t, cut, caret) = parts();
+            let left = format!("{}{}", &t[..cut], &t[caret..]);
+            text.set(if left.trim().is_empty() { String::new() } else { left }); bump(put_gen);
+        };
+        // What the chat runs now (the menu may have changed it).
+        let sid_now = sid.clone();
+        let running = move || match &sid_now {
+            Some(id) => app.peek_session(id, |s| (s.agent.clone(), s.model.clone(), s.effort.clone())),
+            None => {
+                let d = app.draft.peek();
+                Some((d.agent.clone(), d.model.clone(), d.effort.clone()))
+            }
+        };
+        match sg.act {
+            SuggAct::Chip(chip) => put(chip),
+            SuggAct::Larrier(cmd) => {
+                drop_token();
+                run_slash(cmd, sid.clone());
+            }
+            SuggAct::RunAs(name, kind) => {
+                // One agent to run as: picking another replaces it.
+                let old: Vec<MentionChip> = mentions.read().iter().filter(|c| c.kind == super::mentions::MentionKind::RunAs).cloned().collect();
+                for c in old {
+                    let t = text.read().replace(&format!("{} ", c.marked()), "").replace(&c.marked(), "");
+                    text.set(t); bump(put_gen);
+                }
+                put(MentionChip::run_as(&name, &kind));
+                set_run_as(Some(name), sid.clone());
+            }
+            SuggAct::Open(level) => {
+                // The page opens in the same menu; what was typed to find
+                // it goes, so typing now searches the page.
+                let (t, cut, caret) = parts();
+                let trig = t[cut..].chars().next().unwrap_or('@');
+                text.set(format!("{}{trig}{}", &t[..cut], &t[caret..])); bump(put_gen);
+                let key = Some((trig, cut));
+                if *menu_key.peek() != key {
+                    menu_stack.set(Vec::new());
+                    menu_key.set(key);
+                }
+                menu_stack.write().push(level);
+                hl.set(0);
+            }
+            SuggAct::Model(id) => {
+                drop_token();
+                if let Some((agent, _, _)) = running() {
+                    choose(agent, id, sid.clone());
+                }
+            }
+            SuggAct::Effort(e) => {
+                drop_token();
+                if let Some((agent, m, cur)) = running() {
+                    let fast = crate::agent_models::resolve(&app, &agent, m.as_deref(), cur.as_deref()).fast;
+                    set_effort(e, fast, sid.clone());
+                }
+            }
+        }
+        // Back in the box, the caret where it was (after what went in).
+        document::eval(&format!(
+            "setTimeout(() => {{ const el = document.getElementById('{input_id}'); if (el) {{ el.focus(); const cps = [...el.value]; const p = cps.slice(0, Math.max(0, cps.length - {})).join('').length; el.selectionStart = el.selectionEnd = p; }} }}, 10)",
+            *after.peek()
+        ));
+    };
+    // One page back in the @ / / menu.
+    let menu_back = move || {
+        let (mut menu_stack, mut hl) = (menu_stack, hl);
+        menu_stack.write().pop();
+        hl.set(0);
+    };
+    // Read where the caret is (after keys and clicks that move it).
+    let sync_caret = move || {
+        spawn(async move {
+            let js = format!("const el = document.getElementById('{input_id}'); return el ? [...el.value.slice(el.selectionEnd)].length : 0;");
+            if let Ok(n) = document::eval(&js).join::<usize>().await {
+                if *after.peek() != n {
+                    after.set(n);
+                }
+            }
+        });
     };
     let do_send = move |sid: Option<String>, how: Option<BusySend>| {
         let mut app = app;
@@ -887,6 +999,7 @@ pub fn Composer(
     let sid_input = session_id.clone();
     let first_group = groups.first().cloned();
     let suggs_k = suggs.clone();
+    let back_k = !stack.is_empty() && q_empty;
     let sid_stop = session_id.clone();
 
     let workspaces = app.config.read().workspaces.clone();
@@ -1048,27 +1161,53 @@ pub fn Composer(
                     }
                 }
             }
-            if !suggs.is_empty() {
+            if menu_open {
                 div { class: "menu mention-menu in flip-up",
+                    // A page opened from the first: its way back on top.
+                    if let Some(t) = menu_title.clone() {
+                        button { class: "menu-item mm-back", title: "Back (\u{2190})",
+                            onmousedown: move |e| { e.prevent_default(); menu_back(); },
+                            span { class: "ic", Icon { i: I::ChevronLeft, size: 14 } }
+                            span { class: "ellipsis", "{t}" }
+                        }
+                        div { class: "menu-sep" }
+                    }
+                    if suggs.is_empty() {
+                        div { class: "menu-empty", "Nothing matches" }
+                    }
                     {
+                        // Headings only where results of several kinds mix.
+                        let heads = menu_title.is_none() && !q_empty;
                         let mut last_group = "";
                         rsx! {
                             for (i, sg) in suggs.iter().enumerate() {
                                 {
-                                    let show_head = sg.group != last_group;
+                                    let show_head = heads && sg.group != last_group;
                                     last_group = sg.group;
                                     let sg2 = sg.clone();
                                     let sid = session_id.clone();
+                                    let two = !sg.desc.is_empty();
+                                    let cls = format!("menu-item mm-row{}{}", if two { " two" } else { "" }, if i == hl_i { " hl" } else { "" });
                                     rsx! {
                                         if show_head { div { key: "h-{i}", class: "menu-label", "{sg.group}" } }
-                                        button { key: "{i}", class: if i == hl_i { "menu-item hl" } else { "menu-item" },
+                                        button { key: "{i}", class: "{cls}",
                                             onmouseenter: move |_| hl.set(i),
                                             onmousedown: move |e| { e.prevent_default(); apply(sg2.clone(), sid.clone()); },
                                             span { class: "ic",
                                                 if let Some(svg) = sg.logo { Logo { svg, size: 14 } } else { Icon { i: sg.icon, size: 14 } }
                                             }
-                                            span { class: "ellipsis", "{sg.label}" }
+                                            if two {
+                                                span { class: "mm-text",
+                                                    span { class: "t", "{sg.label}" }
+                                                    span { class: "d", "{sg.desc}" }
+                                                }
+                                            } else {
+                                                span { class: "ellipsis", "{sg.label}" }
+                                            }
                                             if !sg.sub.is_empty() { span { class: "sub", "{sg.sub}" } }
+                                            if !sg.cmd.is_empty() { span { class: "kb", "{sg.cmd}" } }
+                                            if sg.on { span { class: "check", Icon { i: I::Check, size: 13 } } }
+                                            if sg.opens() { span { class: "sub-arrow", Icon { i: I::ChevronRight, size: 13 } } }
                                         }
                                     }
                                 }
@@ -1221,12 +1360,16 @@ pub fn Composer(
                         // Before value: the box reads it when the value arrives.
                         "data-gen": "{put_gen}",
                         value: "{text}",
+                        onkeyup: move |_| sync_caret(),
+                        onclick: move |_| sync_caret(),
                         oninput: move |e| {
                             hl.set(0);
                             let v = e.value();
                             if v.is_empty() {
                                 overflow.set(false);
+                                after.set(0);
                             }
+                            sync_caret();
                             // Deleting the agent to run as runs the chat as the agent itself.
                             let gone = mentions.read().iter().any(|c| c.kind == super::mentions::MentionKind::RunAs && !v.contains(&c.marked()));
                             if gone {
@@ -1257,16 +1400,25 @@ pub fn Composer(
                             });
                         },
                         onkeydown: move |e| {
-                            if !suggs_k.is_empty() {
+                            if menu_open {
+                                let n = suggs_k.len();
                                 match e.key() {
-                                    Key::ArrowDown => { e.prevent_default(); hl.set((hl_i + 1) % suggs_k.len()); return; }
-                                    Key::ArrowUp => { e.prevent_default(); hl.set((hl_i + suggs_k.len() - 1) % suggs_k.len()); return; }
+                                    Key::ArrowDown if n > 0 => { e.prevent_default(); hl.set((hl_i + 1) % n); return; }
+                                    Key::ArrowUp if n > 0 => { e.prevent_default(); hl.set((hl_i + n - 1) % n); return; }
                                     Key::Escape => { e.prevent_default(); dismissed.set(Some(text.read().clone())); return; }
-                                    Key::Enter | Key::Tab if !e.modifiers().shift() => {
+                                    Key::Enter | Key::Tab if n > 0 && !e.modifiers().shift() => {
                                         e.prevent_default();
                                         apply(suggs_k[hl_i].clone(), sid_key.clone());
                                         return;
                                     }
+                                    // → opens the page a row leads to; ← (or
+                                    // deleting with nothing typed) goes back.
+                                    Key::ArrowRight if n > 0 && suggs_k[hl_i].opens() => {
+                                        e.prevent_default();
+                                        apply(suggs_k[hl_i].clone(), sid_key.clone());
+                                        return;
+                                    }
+                                    Key::ArrowLeft | Key::Backspace if back_k => { e.prevent_default(); menu_back(); return; }
                                     _ => {}
                                 }
                             }
@@ -2433,26 +2585,6 @@ fn EnvPicker(
     }
 }
 
-#[derive(Clone, PartialEq)]
-enum SuggAct {
-    /// Turn the token being typed into this object.
-    Chip(MentionChip),
-    /// Run a Larrier command.
-    Larrier(&'static str),
-    /// Run the new chat as this agent of the agent's own.
-    RunAs(String, AgentKind),
-}
-
-#[derive(Clone, PartialEq)]
-struct Sugg {
-    group: &'static str,
-    icon: I,
-    logo: Option<&'static str>,
-    label: String,
-    sub: String,
-    act: SuggAct,
-}
-
 static HARNESS: OnceLock<Mutex<Option<Vec<HarnessItem>>>> = OnceLock::new();
 
 /// Agent skills and commands (discovered once in the background).
@@ -2476,154 +2608,10 @@ fn harness_items(app: &App) -> Vec<HarnessItem> {
     Vec::new()
 }
 
-fn suggestions(app: &App, text: &str, files: &[String], home: bool, agent: &AgentKind, current: Option<&str>, fresh: bool) -> Vec<Sugg> {
-    let mut out = Vec::new();
-    if let Some(q) = mention_query(text) {
-        let ql = q.to_lowercase();
-        // Files
-        let mut hits: Vec<&String> = files.iter().filter(|p| p.to_lowercase().contains(&ql)).take(300).collect();
-        hits.sort_by_key(|p| (!p.rsplit('/').next().unwrap_or(p).to_lowercase().starts_with(&ql), p.len()));
-        for p in hits.into_iter().take(6) {
-            let (dir, name) = match p.rsplit_once('/') { Some((d, n)) => (d.to_string(), n.to_string()), None => (String::new(), p.clone()) };
-            out.push(Sugg { group: "Files", icon: I::File, logo: None, label: name, sub: dir, act: SuggAct::Chip(MentionChip::path(p, false)) });
-        }
-        // Folders
-        let mut dirs: Vec<String> = files
-            .iter()
-            .filter_map(|p| p.rsplit_once('/').map(|(d, _)| d.to_string()))
-            .filter(|d| d.to_lowercase().contains(&ql))
-            .collect();
-        dirs.sort();
-        dirs.dedup();
-        dirs.sort_by_key(|d| d.len());
-        for d in dirs.into_iter().take(3) {
-            out.push(Sugg { group: "Folders", icon: I::Folder, logo: None, label: format!("{d}/"), sub: String::new(), act: SuggAct::Chip(MentionChip::path(&format!("{d}/"), true)) });
-        }
-        // Other agents' conversations
-        let sessions = app.sessions.read();
-        for s in sessions.iter().filter(|s| Some(s.id.as_str()) != current && !s.archived && (ql.is_empty() || s.title.to_lowercase().contains(&ql))).take(4) {
-            out.push(Sugg {
-                group: "Agents",
-                icon: I::Message,
-                logo: crate::logos::agent_logo(&s.agent),
-                label: s.title.clone(),
-                sub: format!("{} · {}", s.agent.display_name(), crate::state::rel_time(s.updated_at)),
-                act: SuggAct::Chip(MentionChip::agent(s)),
-            });
-        }
-        // The agent's own agents: a chat that hasn't started can run as one
-        // (listed first), and any chat can hand work to one as a subagent.
-        if *agent == AgentKind::ClaudeCode {
-            let logo = crate::logos::agent_logo(agent);
-            let mut subs: Vec<(String, String)> = app.agent_models(agent).map(|m| m.subagents.iter().map(|s| (s.name.clone(), s.description.clone().unwrap_or_default())).collect()).unwrap_or_default();
-            for it in harness_items(app).into_iter().filter(|it| it.kind == ItemKind::Subagent && it.agents.contains(agent)) {
-                if !subs.iter().any(|(n, _)| *n == it.name) {
-                    subs.push((it.name.clone(), it.description.clone().unwrap_or_default()));
-                }
-            }
-            let subs: Vec<(String, String)> = subs.into_iter().filter(|(n, _)| ql.is_empty() || n.to_lowercase().contains(&ql) || "agent".starts_with(&ql)).take(6).collect();
-            if fresh {
-                // Claude Code's own built-ins aren't agents to run as.
-                let own: Vec<Sugg> = subs
-                    .iter()
-                    .filter(|(n, _)| !matches!(n.as_str(), "general-purpose" | "Explore" | "Plan" | "statusline-setup" | "claude-code-guide" | "claude"))
-                    .map(|(name, desc)| Sugg { group: "Run as", icon: I::Orbit, logo, label: name.clone(), sub: desc.chars().take(80).collect(), act: SuggAct::RunAs(name.clone(), agent.clone()) })
-                    .collect();
-                out.splice(0..0, own);
-            }
-            for (name, desc) in subs {
-                let sub: String = desc.chars().take(80).collect();
-                out.push(Sugg { group: "Subagents", icon: I::Orbit, logo, label: format!("@agent-{name}"), sub: sub.clone(), act: SuggAct::Chip(MentionChip::subagent(&name, &sub)) });
-            }
-        }
-        if "git".starts_with(&ql) || ql.starts_with("git") || "diff".starts_with(&ql) {
-            out.push(Sugg { group: "Context", icon: I::Diff, logo: None, label: "Git diff".into(), sub: "uncommitted changes".into(), act: SuggAct::Chip(MentionChip::git_diff()) });
-        }
-        return out;
-    }
-    if let Some(q) = slash_query(text) {
-        let ql = q.to_lowercase();
-        for (c, d) in SLASH.iter().copied() {
-            if c[1..].starts_with(&ql) && (home || !matches!(c, "/worktree" | "/local")) {
-                out.push(Sugg { group: "Larrier", icon: I::Command, logo: None, label: c.to_string(), sub: d.to_string(), act: SuggAct::Larrier(c) });
-            }
-        }
-        let logo = crate::logos::agent_logo(agent);
-        let mut seen = std::collections::BTreeSet::new();
-        for c in app.agent_models(agent).map(|m| m.commands).unwrap_or_default() {
-            if !c.name.to_lowercase().contains(&ql) || !seen.insert(c.name.clone()) {
-                continue;
-            }
-            let mcp = c.name.starts_with("mcp__");
-            let desc: String = c.hint.clone().map(|h| format!("{h} · ")).unwrap_or_default() + &c.description.clone().unwrap_or_default();
-            let desc: String = desc.chars().take(80).collect();
-            out.push(Sugg {
-                group: if mcp { "MCP prompts" } else { "Commands" },
-                icon: if mcp { I::Plug } else { I::Slash },
-                logo: if mcp { None } else { logo },
-                label: format!("/{}", c.name),
-                sub: desc.clone(),
-                act: SuggAct::Chip(MentionChip::skill(&c.name, false, &desc)),
-            });
-            if out.len() > 60 {
-                break;
-            }
-        }
-        for it in harness_items(app).into_iter().filter(|it| matches!(it.kind, ItemKind::Command | ItemKind::Skill) && it.agents.contains(agent)) {
-            let name = it.name.trim_start_matches('/').to_string();
-            if !name.to_lowercase().contains(&ql) || !seen.insert(name.clone()) {
-                continue;
-            }
-            let group = if it.kind == ItemKind::Skill { "Skills" } else { "Commands" };
-            let desc: String = it.description.clone().unwrap_or_default().chars().take(80).collect();
-            out.push(Sugg {
-                group,
-                icon: if it.kind == ItemKind::Skill { I::Sparkle } else { I::Slash },
-                logo: if it.kind == ItemKind::Command { logo } else { None },
-                label: format!("/{name}"),
-                sub: desc.clone(),
-                act: SuggAct::Chip(MentionChip::skill(&name, it.kind == ItemKind::Skill, &desc)),
-            });
-            if out.len() > 40 {
-                break;
-            }
-        }
-        out.sort_by_key(|s| match s.group { "Larrier" => 0, "Commands" => 1, "Skills" => 2, _ => 3 });
-    }
-    out
-}
-
-const SLASH: &[(&str, &str)] = &[
-    ("/plan", "Switch to Plan mode"),
-    ("/agent", "Switch to Agent mode"),
-    ("/ask", "Switch to Ask mode"),
-    ("/fork", "Fork this agent"),
-    ("/export", "Export as Larrier session"),
-    ("/terminal", "Open in the agent's CLI"),
-    ("/worktree", "Run in an isolated worktree"),
-    ("/local", "Run in the folder itself"),
-    ("/new", "Start a new agent"),
-    ("/mcp", "This agent's MCP servers"),
-    ("/usage", "Plan and token usage"),
-    ("/settings", "Open settings"),
-];
-
-/// Text after a trailing `@` token, if the caret is inside one.
-fn mention_query(text: &str) -> Option<String> {
-    if text.ends_with(char::is_whitespace) {
-        return None;
-    }
-    let token = text.rsplit(|c: char| c.is_whitespace() || c == super::mentions::CLOSE).next()?;
-    let q = token.strip_prefix('@')?;
-    (!q.contains('@')).then(|| q.to_string())
-}
-
-/// `/command` typed first (after any objects).
-fn slash_query(text: &str) -> Option<String> {
-    let token = text.rsplit(|c: char| c.is_whitespace() || c == super::mentions::CLOSE).next()?;
-    let before = &text[..text.len() - token.len()];
-    let t = token.strip_prefix('/')?;
-    strip_tokens(before).trim().is_empty().then(|| t.to_string())
+/// The byte offset of the caret, `after` characters before the end.
+fn caret_at(text: &str, after: usize) -> usize {
+    let n = text.chars().count();
+    text.char_indices().nth(n.saturating_sub(after)).map(|(i, _)| i).unwrap_or(text.len())
 }
 
 /// The text without its objects' tokens.
@@ -2666,15 +2654,4 @@ fn list_files(root: &str, max: usize) -> Vec<String> {
         }
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn mentions() {
-        assert_eq!(super::mention_query("look at @src/ma").as_deref(), Some("src/ma"));
-        assert_eq!(super::mention_query("look at @src/main.rs "), None);
-        assert_eq!(super::slash_query("/pl").as_deref(), Some("pl"));
-        assert_eq!(super::slash_query("/plan this"), None);
-    }
 }

@@ -830,6 +830,21 @@ select.input { cursor: pointer; padding-right: 4px; }
 .mention-menu { position: absolute; left: 28px; bottom: calc(100% - 4px); width: min(460px, calc(100% - 56px)); max-height: 340px; z-index: 50; }
 .mention-menu .menu-item .sub { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .mention-menu .menu-item .ic { display: flex; width: 16px; justify-content: center; color: var(--fg-2); }
+/* The @ and / menu: one-line rows (icon, name, its /command or a chevron
+   to the page it opens); @'s kinds carry a line saying what they hold.
+   A page opened from the first has its way back on top. */
+.mention-menu { width: min(420px, calc(100% - 56px)); max-height: 400px; }
+.mention-menu .menu-item.mm-row { height: 30px; }
+.mention-menu .menu-item.mm-row.two { height: auto; min-height: 44px; padding-top: 6px; padding-bottom: 6px; align-items: flex-start; }
+.mention-menu .mm-row.two .ic { height: 18px; align-items: center; }
+.mention-menu .mm-row.two .sub-arrow { align-self: center; }
+.mention-menu .mm-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.mention-menu .mm-text .t, .mention-menu .mm-text .d { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mention-menu .mm-text .t { line-height: 18px; color: var(--fg); }
+.mention-menu .mm-text .d { line-height: 16px; font-size: var(--ui-xs); color: var(--fg-3); }
+.mention-menu .menu-item .sub + .kb { margin-left: 0; padding-left: 10px; }
+.mention-menu .menu-item.mm-back { height: 30px; color: var(--fg-2); }
+.mention-menu .menu-item.mm-back .ic { color: var(--fg-3); }
 .mention-tabs { display: flex; gap: 2px; padding: 2px 4px 6px; border-bottom: 1px solid var(--border); margin: -2px -4px 4px; }
 .mention-tabs button { height: 22px; padding: 0 8px; border-radius: var(--r-sm); font-size: 11.5px; color: var(--fg-3); }
 .mention-tabs button.on { background: var(--chip); color: var(--fg); }

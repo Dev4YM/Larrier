@@ -453,6 +453,29 @@ pub fn Root() -> Element {
                   if (up) { set(m, 'top', 'auto'); set(m, 'bottom', (wrap.bottom - box.top + 4) + 'px'); }
                   else { set(m, 'bottom', 'auto'); set(m, 'top', (box.bottom - wrap.top + 4) + 'px'); }
                   m.classList.toggle('flip-up', up);
+                  // Across, it follows the @ or / it was opened from: its
+                  // icons line up under that character (measured in a copy
+                  // of the text laid out as the box lays it out), kept
+                  // inside the composer.
+                  const ta = m.parentElement.querySelector('textarea');
+                  if (ta) {
+                    const v = ta.value;
+                    let i = ta.selectionStart;
+                    // Back to where the token starts: its @ or /.
+                    while (i > 0 && !/\s/.test(v[i - 1]) && v[i - 1] !== '⁤') i--;
+                    const cs = getComputedStyle(ta);
+                    const mir = window.__lMirror || (window.__lMirror = document.body.appendChild(document.createElement('div')));
+                    for (const k of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'boxSizing', 'tabSize', 'textIndent', 'direction']) mir.style[k] = cs[k];
+                    Object.assign(mir.style, { position: 'fixed', left: '-9999px', top: '0', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: cs.wordBreak, width: ta.offsetWidth + 'px', borderStyle: 'solid' });
+                    mir.textContent = v.slice(0, i);
+                    const mark = mir.appendChild(document.createElement('span'));
+                    mark.textContent = v.slice(i, i + 1) || '.';
+                    const tr = ta.getBoundingClientRect();
+                    const x = tr.left + mark.offsetLeft - ta.scrollLeft;
+                    const w = m.offsetWidth;
+                    const lo2 = box.left - wrap.left, hi2 = box.right - wrap.left - w;
+                    set(m, 'left', Math.round(Math.max(lo2, Math.min(hi2, x - wrap.left - 12))) + 'px');
+                  }
                   // Anything still drawn over its far edge (a header, a drag
                   // strip) takes that much off.
                   const r2 = m.getBoundingClientRect();

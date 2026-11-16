@@ -5,6 +5,26 @@ Every Larrier release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.46 — 2026-11-16
+
+### New
+
+- An Agents page for how agents run, and an option to keep finished steps open
+- @ and / menus you can browse and search, working anywhere in the message
+- An OLED theme, a white chat on soft gray with an ink accent
+- A picture behind the new chat screen, with effects and saved wallpapers
+- Ultracode and Fast for Claude Code, Fast for Codex, thinking levels for Pi
+
+### Look and feel
+
+- Steps get room to breathe, on one even rhythm
+
+### Fixed
+
+- "Planning next moves" shows where the reply will appear, so it no longer jumps
+- The branch menu opens on its branches at once, with no loader
+- Right-click menus hold the window until they close
+- A lone chat tab keeps room at its end
 ## 0.1.45 — 2026-11-15
 
 ### New

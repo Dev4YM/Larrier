@@ -456,6 +456,7 @@ pub fn Transcript(id: String) -> Element {
                         started: r.started,
                         ended: r.ended,
                         live: writing && i + 1 == n_rows,
+                        waiting: waiting && i + 1 == n_rows,
                         show_reasoning,
                     }
                 }
@@ -484,9 +485,6 @@ pub fn Transcript(id: String) -> Element {
                         }
                         div { class: "pending-note", super::loaders::Orbit { size: 11 } if taking_back.contains(&q.id) { "Taking it back…" } else { "Sending into this turn…" } }
                     }
-                }
-                if waiting {
-                    div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
                 }
             }
             // Sticky inside the scroller: always just above the composer,
@@ -554,6 +552,9 @@ fn TurnView(
     started: chrono::DateTime<chrono::Utc>,
     ended: chrono::DateTime<chrono::Utc>,
     live: bool,
+    /// The prompt is sent and the agent hasn't answered yet.
+    #[props(default)]
+    waiting: bool,
     show_reasoning: bool,
 ) -> Element {
     let app = use_app();
@@ -597,6 +598,13 @@ fn TurnView(
     let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
     let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or(false);
     let final_mi = final_at.map(|(mi, _)| mi);
+    // "Planning next moves": from sending until the agent answers, and
+    // between its steps. One row in one place inside the turn, so it never
+    // jumps when the first reply arrives.
+    let planning = match turn.replies.last() {
+        None => waiting,
+        Some(m) => live && !last_is_live(m),
+    };
     // What a folded turn shows: its errors and its answer, by when they came.
     let mut folded: Vec<(usize, usize)> = turn
         .replies
@@ -649,9 +657,12 @@ fn TurnView(
                 button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
             }
             for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
-                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == turn.replies.len(), show_reasoning,
+                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == turn.replies.len(), show_reasoning, planning: false,
                     skip_final: !live && Some(mi) == final_mi, drop_errors: !live }
             }
+        }
+        if planning {
+            div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
         }
         if !live {
             // The answer and any errors, in the order they happened (a limit
@@ -1026,7 +1037,17 @@ fn group_parts(parts: &[Part]) -> Vec<Item> {
 }
 
 #[component]
-pub fn AssistantMessage(session_id: String, msg: Message, streaming: bool, show_reasoning: bool, #[props(default = false)] skip_final: bool, #[props(default = false)] drop_errors: bool) -> Element {
+pub fn AssistantMessage(
+    session_id: String,
+    msg: Message,
+    streaming: bool,
+    show_reasoning: bool,
+    #[props(default = false)] skip_final: bool,
+    #[props(default = false)] drop_errors: bool,
+    /// Show "Planning next moves" while it streams (a turn shows its own).
+    #[props(default = true)]
+    planning: bool,
+) -> Element {
     let mut parts = msg.parts.clone();
     if drop_errors {
         // Shown below the folded steps instead.
@@ -1071,7 +1092,7 @@ pub fn AssistantMessage(session_id: String, msg: Message, streaming: bool, show_
                     },
                 }
             }
-            if streaming && !last_is_live(&msg) {
+            if planning && streaming && !last_is_live(&msg) {
                 div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
             }
             if let Some(m) = meta.filter(|m| !m.is_empty() && !streaming && skip_final) {

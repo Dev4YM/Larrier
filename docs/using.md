@@ -99,7 +99,13 @@ onto the chat area:
 - The model picker has a search box, a rail of icons (★ Favorites, then
   each of your enabled harnesses) and the chosen one's models; typing
   searches every model. Star a model to keep it under Favorites. A model's
-  **Edit** shows its options (context size, reasoning effort, speed); the
+  **Edit** shows its options (context size, reasoning effort, speed).
+  Claude Code's efforts end with **Ultracode** (Extra high, and big tasks
+  run as workflows of many agents, using much more of your plan), Codex's
+  with **Ultra** where it offers it, and Pi's models take a thinking level.
+  **Fast** (the same model, faster, at a higher price) is a switch on
+  Claude Code's Fable 5.2, Opus 5.5 and Opus 5 and on Codex's models with a
+  Fast tier; the
   accounts the chat can run as sit above the models, and the gear at the
   bottom of the rail opens that harness's models in Settings.
 - `@` opens on what you can mention: **Files** (browse the project's

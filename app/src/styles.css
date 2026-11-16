@@ -410,6 +410,10 @@ svg { flex-shrink: 0; display: block; }
    stays hoverable and clickable. It's kept as the menu's close handler,
    which the window's pointerdown handler (ui/mod.rs) clicks. */
 .menu-backdrop { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+/* A menu opened by a right-click holds the window until it closes: nothing
+   outside hovers or takes focus, and a click outside only closes it.
+   Dropdowns opened from a button stay out of the way. */
+.menu-backdrop.ctx-block { pointer-events: auto; }
 /* The button whose menu is open stays lit until the menu closes. */
 .menu-anchor:has(> .menu) > :is(button, [role="button"]):not(.primary-btn) { color: var(--fg); background: var(--hover); }
 .menu-anchor:has(> .menu) > :is(button, [role="button"]):not(.primary-btn) :is(span, svg) { color: inherit; }

@@ -230,7 +230,7 @@ pub fn TabMenu() -> Element {
     let (v1, v2, v3, v4, v5) = (c.view.clone(), c.view.clone(), c.view.clone(), c.view.clone(), c.view.clone());
     let (s1, s2, s3) = (session.clone().unwrap_or_default(), session.clone().unwrap_or_default(), session.clone().unwrap_or_default());
     rsx! {
-        div { class: "menu-backdrop", style: "z-index: 1499;",
+        div { class: "menu-backdrop ctx-block", style: "z-index: 1499;",
             onclick: move |_| app.ui.write().tab_ctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().tab_ctx = None; },
         }
@@ -289,7 +289,7 @@ pub fn ContextMenu() -> Element {
     };
     let (i1, i2, i3, i4, i5, i6, i7) = (id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone(), id.clone());
     rsx! {
-        div { class: "menu-backdrop", onclick: move |_| app.ui.write().ctx = None,
+        div { class: "menu-backdrop ctx-block", onclick: move |_| app.ui.write().ctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().ctx = None; } }
         div { id: "ctx-menu", class: "menu", style: "position: fixed; left: {x}px; top: {y}px; visibility: hidden;",
             {item("Open", I::Message, Box::new(move || app.open_session(&i1)))}
@@ -875,7 +875,7 @@ pub fn GlobalMenu() -> Element {
     let dark = app.ui.read().dark;
 
     rsx! {
-        div { class: "menu-backdrop", style: "z-index: 1499;",
+        div { class: "menu-backdrop ctx-block", style: "z-index: 1499;",
             onclick: move |_| app.ui.write().gctx = None,
             oncontextmenu: move |e| { e.prevent_default(); app.ui.write().gctx = None; },
         }

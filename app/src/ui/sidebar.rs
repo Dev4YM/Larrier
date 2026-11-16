@@ -584,7 +584,7 @@ fn RepoGroup(
                 }
             }
             if let Some((x, y)) = at {
-                div { class: "menu-backdrop", onclick: move |_| ctx_at.set(None), oncontextmenu: move |e| { e.prevent_default(); ctx_at.set(None); } }
+                div { class: "menu-backdrop ctx-block", onclick: move |_| ctx_at.set(None), oncontextmenu: move |e| { e.prevent_default(); ctx_at.set(None); } }
                 div { id: "{ctx_id}", class: "menu ctx-menu", style: "left: {x}px; top: {y}px; visibility: hidden;", onclick: move |e| e.stop_propagation(),
                     ProjectActions { path: path.clone(), pinned, onclose: move |_| ctx_at.set(None) }
                 }

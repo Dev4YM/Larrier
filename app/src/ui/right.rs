@@ -678,7 +678,7 @@ fn BrowserTabMenu(id: u64, x: f64, y: f64, onclose: EventHandler<()>) -> Element
     let (u1, u2) = (tab.url.clone(), tab.url.clone());
     let owner = tab.owner.clone();
     rsx! {
-        div { class: "menu-backdrop", style: "z-index: 1499;",
+        div { class: "menu-backdrop ctx-block", style: "z-index: 1499;",
             onclick: move |_| onclose.call(()),
             oncontextmenu: move |e| { e.prevent_default(); onclose.call(()); },
         }

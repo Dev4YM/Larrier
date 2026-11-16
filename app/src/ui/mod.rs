@@ -794,6 +794,16 @@ pub fn Root() -> Element {
               const anchor = t && t.closest('.menu-anchor');
               const own = (anchor && anchor.querySelector('.menu')) || (t && t.closest('.mb-item.open'));
               for (const b of backs) b.click();
+              // A right-click outside only closes them: it's taken there,
+              // so no right-click menu or other dropdown opens from it and
+              // nothing under it reacts.
+              if (e.button === 2) {
+                e.preventDefault(); e.stopPropagation();
+                const eat = (ev) => { ev.preventDefault(); ev.stopImmediatePropagation(); };
+                for (const k of ['mousedown', 'mouseup', 'contextmenu']) window.addEventListener(k, eat, { capture: true, once: true });
+                setTimeout(() => { for (const k of ['mousedown', 'mouseup', 'contextmenu']) window.removeEventListener(k, eat, { capture: true }); }, 800);
+                return;
+              }
               if (own) {
                 const eat = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
                 window.addEventListener('click', eat, { capture: true, once: true });

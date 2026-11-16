@@ -77,7 +77,7 @@ fn rgb(hex: &str) -> Option<(u8, u8, u8)> {
 }
 
 /// An image file as a data URL (read once, then kept).
-fn image_url(path: &str) -> String {
+pub fn image_url(path: &str) -> String {
     static CACHE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
     if let Some(u) = CACHE.lock().unwrap().get(path) {
         return u.clone();

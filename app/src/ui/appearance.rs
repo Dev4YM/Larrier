@@ -701,6 +701,9 @@ pub fn AppearancePage() -> Element {
                         }
                     }
 
+                    // ---------------------------------------------------- home background
+                    super::home_bg::HomeBackgroundSettings {}
+
                     // ---------------------------------------------------- motion
                     div { class: "set-group-title", Lucide { name: "wind", size: 13 } "Motion" }
                     div { class: "set-card",

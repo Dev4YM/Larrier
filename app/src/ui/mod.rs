@@ -10,6 +10,7 @@ pub mod editor;
 mod files;
 pub mod harness_run;
 mod home;
+mod home_bg;
 pub mod loaders;
 pub mod mentions;
 mod meters;

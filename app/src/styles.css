@@ -2172,3 +2172,53 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .side-me-av { position: relative; display: inline-flex; flex-shrink: 0; }
 .side-me-av .gear-dot { top: -1px; right: -1px; box-shadow: 0 0 0 2px var(--win); }
 .menu.me-menu { min-width: 240px; }
+
+/* The home background: a picture over the top of the new chat screen
+   that fades into the page (never in a chat), with its effect; the
+   composer over it solid, or frosted by its blur. The frost is a layer
+   behind the composer's content, never a backdrop-filter on the composer
+   itself: that would become the frame its fixed menus are placed in (the
+   + and model menus landed at the window's bottom). */
+.main:has(> .hb-layer) { position: relative; }
+.main:has(> .hb-layer) > .main-head, .main:has(> .hb-layer) > .home { position: relative; z-index: 1; }
+.main > .hb-layer, .hb-preview > .hb-layer { position: absolute; left: 0; right: 0; top: 0; max-height: 100%; z-index: 0; pointer-events: none; }
+.hb-layer { overflow: hidden; }
+.hb-pic { position: relative; }
+.hb-grain, .hb-vignette, .hb-overlay { position: absolute; inset: 0; }
+.hb-pic img.hb-src { width: 100%; height: auto; display: block; }
+.hb-pic img.hb-hidden { visibility: hidden; }
+.hb-dither { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+.hb-grain { opacity: .5; mix-blend-mode: overlay; background-size: 180px 180px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.hb-vignette { background: radial-gradient(ellipse 75% 70% at 50% 42%, transparent 45%, rgba(0, 0, 0, .5) 100%); }
+.hb-overlay { background: var(--pane); }
+/* Its own layer, above what follows it, so its menus stay on top. */
+.home.has-bg .composer { position: relative; z-index: 2; background: transparent; }
+.hb-mock { background: transparent; }
+.home.has-bg .composer::before, .hb-mock::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: color-mix(in srgb, var(--card-2) var(--hb-solid, 100%), transparent);
+  -webkit-backdrop-filter: blur(var(--hb-blur, 0px)); backdrop-filter: blur(var(--hb-blur, 0px)); }
+
+/* Settings: the picture's row, a small new chat screen as it will look,
+   the sliders, and saved wallpapers as tiles to click. */
+.hb-pick { gap: 6px; align-items: center; }
+.hb-thumb { width: 44px; height: 30px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--border); margin-right: 4px; }
+.hb-preview-wrap { padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.hb-preview { position: relative; height: 230px; border-radius: var(--r-md); overflow: hidden; background: var(--pane); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
+.hb-mock { position: relative; z-index: 1; width: min(420px, 78%); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 12px 8px; box-shadow: 0 6px 20px -10px rgba(0, 0, 0, .25); }
+.hb-mock-text { font-size: var(--ui-sm); color: var(--fg-3); height: 34px; }
+.hb-mock-row { display: flex; align-items: center; color: var(--fg-2); }
+.hb-mock-send { width: 24px; height: 24px; border-radius: var(--r-md); background: var(--fg); color: var(--pane); display: inline-flex; align-items: center; justify-content: center; }
+.hb-slider { min-height: 44px; }
+.hb-slider .ap-range input[type="range"] { width: 200px; }
+.hb-actions { min-height: 44px; }
+.hb-empty { padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--border); font-size: var(--ui-sm); color: var(--fg-3); }
+.hb-walls { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; padding: var(--sp-4) var(--sp-5); border-top: 1px solid var(--border); }
+.hb-wall { position: relative; }
+.hb-wall-pick { display: block; width: 100%; aspect-ratio: 16 / 10; padding: 0; border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--border); background: var(--pane); position: relative; }
+.hb-wall-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hb-wall.on .hb-wall-pick { box-shadow: 0 0 0 2px var(--accent-c, var(--fg)); border-color: transparent; }
+.hb-wall-fx { position: absolute; left: 6px; bottom: 6px; height: 18px; padding: 0 6px; display: inline-flex; align-items: center; border-radius: var(--r-sm); background: color-mix(in srgb, var(--pane) 82%, transparent); color: var(--fg-2); font-size: var(--ui-2xs); }
+.hb-wall-x { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--pane) 86%, transparent); color: var(--fg-2); opacity: 0; transition: opacity var(--t-1) ease; }
+.hb-wall:hover .hb-wall-x, .hb-wall-x:focus-visible { opacity: 1; }
+.hb-wall-x:hover { color: var(--fg); }

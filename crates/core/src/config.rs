@@ -402,6 +402,100 @@ pub struct Settings {
     /// A finished turn's steps fold under "Worked for …" (off: they stay open).
     #[serde(default = "yes")]
     pub fold_steps: bool,
+    /// The picture behind the new chat screen.
+    #[serde(default)]
+    pub home_bg: HomeBackground,
+    /// Home backgrounds saved to switch between (kept on this computer).
+    #[serde(default)]
+    pub wallpapers: Vec<Wallpaper>,
+}
+
+/// The picture behind the new chat screen (Home only, never a chat) and
+/// how it's drawn: it covers the top of the page and fades into it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct HomeBackground {
+    /// An image or GIF copied into Larrier's folder; empty: none.
+    #[serde(default)]
+    pub image: String,
+    #[serde(default = "dither")]
+    pub effect: BgEffect,
+    /// Percent; 100 is the picture as it is.
+    #[serde(default = "pct169")]
+    pub brightness: u32,
+    /// Pixels.
+    #[serde(default)]
+    pub blur: u32,
+    #[serde(default = "pct100")]
+    pub image_opacity: u32,
+    /// How softly the picture's lower part fades into the page.
+    #[serde(default = "pct100")]
+    pub fade: u32,
+    /// The page's own color laid over the picture.
+    #[serde(default)]
+    pub overlay: u32,
+    /// Pixels of frosted blur behind the composer over the picture; 0 keeps
+    /// it solid.
+    #[serde(default)]
+    pub composer_blur: u32,
+}
+
+fn pct100() -> u32 {
+    100
+}
+
+fn pct169() -> u32 {
+    169
+}
+
+fn dither() -> BgEffect {
+    BgEffect::Dither
+}
+
+impl Default for HomeBackground {
+    fn default() -> Self {
+        // A picture starts dithered and brightened to a pale print.
+        HomeBackground { image: String::new(), effect: BgEffect::Dither, brightness: 169, blur: 0, image_opacity: 100, fade: 100, overlay: 0, composer_blur: 0 }
+    }
+}
+
+impl HomeBackground {
+    /// Everything but the picture back to how it starts.
+    pub fn reset_look(&self) -> HomeBackground {
+        HomeBackground { image: self.image.clone(), ..HomeBackground::default() }
+    }
+}
+
+/// How the home background is drawn.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BgEffect {
+    #[default]
+    None,
+    /// Ordered dots, like an old print.
+    Dither,
+    /// Film grain over the picture.
+    Grain,
+    /// Darkened edges.
+    Vignette,
+}
+
+impl BgEffect {
+    pub const ALL: [BgEffect; 4] = [BgEffect::None, BgEffect::Dither, BgEffect::Grain, BgEffect::Vignette];
+    pub fn label(self) -> &'static str {
+        match self {
+            BgEffect::None => "None",
+            BgEffect::Dither => "Dither",
+            BgEffect::Grain => "Grain",
+            BgEffect::Vignette => "Vignette",
+        }
+    }
+}
+
+/// A saved home background.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Wallpaper {
+    pub id: String,
+    pub look: HomeBackground,
 }
 
 /// What Larrier does about new releases on its own.
@@ -637,6 +731,8 @@ impl Default for Settings {
             busy_send: BusySend::Steer,
             browser_tools: true,
             fold_steps: true,
+            home_bg: HomeBackground::default(),
+            wallpapers: Vec::new(),
         }
     }
 }

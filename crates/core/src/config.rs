@@ -399,6 +399,9 @@ pub struct Settings {
     /// Agents get Larrier's browser as tools (shown live in the Browser tab).
     #[serde(default = "yes")]
     pub browser_tools: bool,
+    /// A finished turn's steps fold under "Worked for …" (off: they stay open).
+    #[serde(default = "yes")]
+    pub fold_steps: bool,
 }
 
 /// What Larrier does about new releases on its own.
@@ -633,6 +636,7 @@ impl Default for Settings {
             restore_window: true,
             busy_send: BusySend::Steer,
             browser_tools: true,
+            fold_steps: true,
         }
     }
 }

@@ -69,6 +69,10 @@ pub enum SettingsTab {
     General,
     Appearance,
     Usage,
+    /// How agents run (Settings → Agents).
+    AgentSettings,
+    /// The installed agents, labelled Harnesses (kept as `Agents` so saved
+    /// window state still opens it).
     Agents,
     Accounts,
     Models,
@@ -82,11 +86,12 @@ pub enum SettingsTab {
 impl SettingsTab {
     /// The pages listed. Accounts and Models are part of Harnesses now
     /// (`Agents`); they stay as views so saved window state still opens.
-    pub const ALL: [SettingsTab; 10] = [
+    pub const ALL: [SettingsTab; 11] = [
         SettingsTab::Profile,
         SettingsTab::General,
         SettingsTab::Appearance,
         SettingsTab::Usage,
+        SettingsTab::AgentSettings,
         SettingsTab::Agents,
         SettingsTab::SourceControl,
         SettingsTab::Sessions,
@@ -101,6 +106,7 @@ impl SettingsTab {
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Usage => "Plan & Usage",
             SettingsTab::SourceControl => "Source Control",
+            SettingsTab::AgentSettings => "Agents",
             SettingsTab::Agents => "Harnesses",
             SettingsTab::Accounts => "Accounts",
             SettingsTab::Models => "Models & API Keys",

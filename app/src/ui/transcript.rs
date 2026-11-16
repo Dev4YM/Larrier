@@ -229,7 +229,10 @@ pub fn Transcript(id: String) -> Element {
     // The agent finished its reply; only background work keeps it running.
     let writing = running && !app.idle.read().contains(&id);
     let steering = app.steering.read().get(&id).cloned().unwrap_or_default();
-    let show_reasoning = app.config.read().settings.show_reasoning;
+    let (show_reasoning, fold_steps) = {
+        let c = app.config.read();
+        (c.settings.show_reasoning, c.settings.fold_steps)
+    };
     let n_rows = rows.len();
 
     // Stick to the bottom while streaming unless the user scrolled up; jump
@@ -458,6 +461,7 @@ pub fn Transcript(id: String) -> Element {
                         live: writing && i + 1 == n_rows,
                         waiting: waiting && i + 1 == n_rows,
                         show_reasoning,
+                        fold_steps,
                     }
                 }
                 // Messages sent into the running turn, shown at once and
@@ -556,6 +560,9 @@ fn TurnView(
     #[props(default)]
     waiting: bool,
     show_reasoning: bool,
+    /// Finished turns start folded (Settings → Agents).
+    #[props(default = true)]
+    fold_steps: bool,
 ) -> Element {
     let app = use_app();
     // The work's steps show while it runs and fold away, smoothly, when it
@@ -596,7 +603,7 @@ fn TurnView(
     let last_reply = turn.replies.last().cloned();
     let hidden = turn.replies.len().saturating_sub(steps());
     let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
-    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or(false);
+    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or(!fold_steps);
     let final_mi = final_at.map(|(mi, _)| mi);
     // "Planning next moves": from sending until the agent answers, and
     // between its steps. One row in one place inside the turn, so it never

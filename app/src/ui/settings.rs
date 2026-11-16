@@ -17,7 +17,8 @@ fn tab_icon(t: SettingsTab) -> I {
         SettingsTab::Appearance => I::Sun,
         SettingsTab::Usage => I::Cpu,
         SettingsTab::SourceControl => I::GitBranch,
-        SettingsTab::Agents => I::Bot,
+        SettingsTab::AgentSettings => I::Bot,
+        SettingsTab::Agents => I::Blocks,
         SettingsTab::Accounts => I::User,
         SettingsTab::Models => I::Box,
         SettingsTab::Sessions => I::History,
@@ -96,6 +97,7 @@ pub fn SettingsView(tab: SettingsTab) -> Element {
                 div { class: "settings-inner",
                     match tab {
                         SettingsTab::General => rsx! { General {} },
+                        SettingsTab::AgentSettings => rsx! { AgentSettings {} },
                         SettingsTab::Appearance => rsx! { Appearance {} },
                         SettingsTab::Usage => rsx! { super::usage::UsageView {} },
                         SettingsTab::Profile => rsx! { super::profile::ProfileView {} },
@@ -129,10 +131,8 @@ fn Row(title: String, #[props(default)] desc: Option<String>, children: Element)
 
 #[component]
 fn General() -> Element {
-    let mut app = use_app();
+    let app = use_app();
     let s = app.config.read().settings.clone();
-    let seg = |on: bool| if on { "on" } else { "" };
-    let agent_opts: Vec<(String, String)> = larrier_core::agent::runnable().map(|sp| (sp.kind.id(), sp.name.to_string())).collect();
     rsx! {
         h1 { "General" }
         div { class: "set-group-title", "Startup" }
@@ -142,9 +142,6 @@ fn General() -> Element {
             }
             Row { title: "Window Restoration".to_string(), desc: Some("Reopen Larrier with the same size and position.".to_string()),
                 Toggle { on: s.restore_window, onchange: move |v| app.update_config(|c| c.settings.restore_window = v) }
-            }
-            Row { title: "Continue Interrupted Agents".to_string(), desc: Some("Offer to resume agents that were running when Larrier closed.".to_string()),
-                Toggle { on: s.continue_interrupted, onchange: move |v| app.update_config(|c| c.settings.continue_interrupted = v) }
             }
             Row { title: "Import Sessions on Startup".to_string(), desc: Some("Pull new conversations from every installed agent when Larrier opens.".to_string()),
                 Toggle { on: s.auto_import, onchange: move |v| app.update_config(|c| c.settings.auto_import = v) }
@@ -165,9 +162,26 @@ fn General() -> Element {
                 }
             }
         }
-        div { class: "set-group-title", "Agents" }
+    }
+}
+
+// ------------------------------------------------------------------ agents (how they run)
+
+/// How agents run: what a new one starts with, what sending does while
+/// it works, what it may use, and how its work shows in the chat. Each
+/// agent's own accounts, models and version are in Harnesses.
+#[component]
+fn AgentSettings() -> Element {
+    let mut app = use_app();
+    let s = app.config.read().settings.clone();
+    let seg = |on: bool| if on { "on" } else { "" };
+    let agent_opts: Vec<(String, String)> = larrier_core::agent::runnable().map(|sp| (sp.kind.id(), sp.name.to_string())).collect();
+    let send_keys = crate::platform::keys("Ctrl+Enter");
+    rsx! {
+        h1 { "Agents" }
+        div { class: "set-group-title", "New Agents" }
         div { class: "set-card",
-            Row { title: "Default Agent".to_string(), desc: Some("Used for new agents.".to_string()),
+            Row { title: "Default Agent".to_string(), desc: Some("Runs new chats unless you pick another in the message box.".to_string()),
                 super::Select {
                     value: s.default_agent.id(),
                     options: agent_opts,
@@ -185,8 +199,17 @@ fn General() -> Element {
                     }
                 }
             }
+            Row { title: "Start in a Worktree".to_string(), desc: Some("Give each new agent its own git worktree, so agents working side by side never collide. Their folder is set in Source Control.".to_string()),
+                Toggle { on: s.use_worktrees, onchange: move |v| { app.update_config(|c| c.settings.use_worktrees = v); let mut d = app.draft.write(); d.worktree = v; d.existing_worktree = None; } }
+            }
+        }
+        div { class: "set-group-title", "Messages" }
+        div { class: "set-card",
+            Row { title: format!("Send with {send_keys}"), desc: Some("Otherwise Enter sends and Shift+Enter adds a line.".to_string()),
+                Toggle { on: s.send_with_ctrl_enter, onchange: move |v| app.update_config(|c| c.settings.send_with_ctrl_enter = v) }
+            }
             Row { title: "While an Agent Works, Enter".to_string(),
-                desc: Some(format!("{}. {} does the other of steer and queue (it never stops the agent). Agents that can't read messages mid-turn get them queued.", s.busy_send.description(), crate::platform::keys("Ctrl+Enter"))),
+                desc: Some(format!("{}. {send_keys} does the other of steer and queue (it never stops the agent). Agents that can't read messages mid-turn get them queued.", s.busy_send.description())),
                 super::Select {
                     value: format!("{:?}", s.busy_send),
                     options: larrier_core::BusySend::ALL.iter().map(|b| (format!("{b:?}"), b.label().to_string())).collect(),
@@ -197,6 +220,9 @@ fn General() -> Element {
                     },
                 }
             }
+        }
+        div { class: "set-group-title", "Running" }
+        div { class: "set-card",
             if larrier_agents::browser::SUPPORTED {
                 Row { title: "Browser for Agents".to_string(), desc: Some("Claude Code, Codex and agents connected over ACP can open pages, click, type and take screenshots in Larrier's browser, which you watch in the Browser tab.".to_string()),
                     Toggle { on: s.browser_tools, onchange: move |v| app.update_config(|c| c.settings.browser_tools = v) }
@@ -206,11 +232,23 @@ fn General() -> Element {
                     span { class: "faint", "Not available" }
                 }
             }
-            Row { title: format!("Send with {}", crate::platform::keys("Ctrl+Enter")), desc: Some("Otherwise Enter sends and Shift+Enter adds a line.".to_string()),
-                Toggle { on: s.send_with_ctrl_enter, onchange: move |v| app.update_config(|c| c.settings.send_with_ctrl_enter = v) }
+            Row { title: "Continue Interrupted Agents".to_string(), desc: Some("Offer to resume agents that were running when Larrier closed.".to_string()),
+                Toggle { on: s.continue_interrupted, onchange: move |v| app.update_config(|c| c.settings.continue_interrupted = v) }
             }
-            Row { title: "Show Reasoning".to_string(), desc: Some("Display thinking blocks inside \u{201c}Worked for\u{201d}.".to_string()),
+        }
+        div { class: "set-group-title", "In the Chat" }
+        div { class: "set-card",
+            Row { title: "Fold Finished Steps".to_string(), desc: Some("When a turn ends, its steps slide shut under \u{201c}Worked for\u{201d} and the answer stays in sight. Click it to open them again.".to_string()),
+                Toggle { on: s.fold_steps, onchange: move |v| app.update_config(|c| c.settings.fold_steps = v) }
+            }
+            Row { title: "Show Reasoning".to_string(), desc: Some("Show the agent's thinking, where it shares it, as steps you can open.".to_string()),
                 Toggle { on: s.show_reasoning, onchange: move |v| app.update_config(|c| c.settings.show_reasoning = v) }
+            }
+        }
+        div { class: "set-group-title", "Each Agent" }
+        div { class: "set-card",
+            Row { title: "Accounts, Models and Versions".to_string(), desc: Some("Each agent's sign-ins and API keys, default model and effort, how it runs and its updates.".to_string()),
+                button { class: "ghost-btn", onclick: move |_| app.set_view(View::Settings(SettingsTab::Agents)), "Open Harnesses" Icon { i: I::ArrowRight, size: 13 } }
             }
         }
     }
@@ -227,7 +265,7 @@ fn Appearance() -> Element {
 
 #[component]
 fn SourceControl() -> Element {
-    let mut app = use_app();
+    let app = use_app();
     let s = app.config.read().settings.clone();
     let gh = use_resource(|| async {
         tokio::task::spawn_blocking(|| larrier_agents::detect::which_program("gh").is_some()).await.unwrap_or(false)
@@ -256,9 +294,6 @@ fn SourceControl() -> Element {
         }
         div { class: "set-group-title", "Worktrees" }
         div { class: "set-card",
-            Row { title: "Use Worktrees by Default".to_string(), desc: Some("Start each new agent in its own git worktree so parallel agents never collide.".to_string()),
-                Toggle { on: s.use_worktrees, onchange: move |v| { app.update_config(|c| c.settings.use_worktrees = v); let mut d = app.draft.write(); d.worktree = v; d.existing_worktree = None; } }
-            }
             Row { title: "Worktrees Folder".to_string(), desc: Some(dir.clone()),
                 button { class: "ghost-btn",
                     onclick: move |_| {

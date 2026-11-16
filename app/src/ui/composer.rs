@@ -2200,8 +2200,18 @@ fn WorktreeList(trees: Option<Vec<larrier_agents::git::Worktree>>, query: Signal
 fn BranchPicker(folder: Option<String>, current: Option<String>, new_tree: bool, existing: Option<String>) -> Element {
     let mut app = use_app();
     let mut open = use_signal(|| false);
-    // `None` while they're read.
+    // The project's branches and its default: known at once from the last
+    // read, read again quietly when the project changes and on opening.
+    // `None` only before the first read finishes.
     let mut list = use_signal(|| None::<(Vec<String>, String)>);
+    use_effect(use_reactive!(|folder| {
+        let Some(f) = folder else {
+            list.set(None);
+            return;
+        };
+        list.set(branches_known(&f));
+        spawn(refresh_branches(f, list));
+    }));
     let mut q = use_signal(String::new);
     let base = app.draft.read().base_branch.clone();
     let shown_branch = if new_tree { base.clone().or(current.clone()) } else { current.clone() };
@@ -2218,24 +2228,9 @@ fn BranchPicker(folder: Option<String>, current: Option<String>, new_tree: bool,
                 title: if fixed { "The worktree's branch".to_string() } else if new_tree { "The branch the new worktree starts from".to_string() } else { "The branch checked out in the project".to_string() },
                 onclick: move |_| {
                     let Some(f) = f2.clone() else { return };
-                    list.set(None);
                     q.set(String::new());
                     open.set(true);
-                    spawn(async move {
-                        let got = tokio::task::spawn_blocking(move || {
-                            let p = std::path::Path::new(&f);
-                            (larrier_agents::git::branches(p), larrier_agents::git::default_branch(p))
-                        })
-                        .await
-                        .ok();
-                        // The default branch first, then the most recent.
-                        let (mut names, default) = got.unwrap_or_default();
-                        if let Some(i) = names.iter().position(|b| *b == default) {
-                            let d = names.remove(i);
-                            names.insert(0, d);
-                        }
-                        list.set(Some((names, default)));
-                    });
+                    spawn(refresh_branches(f, list));
                 },
                 Icon { i: I::GitBranch, size: 14, stroke: 1.5 }
                 span { class: "ellipsis", "{label}" }
@@ -2266,13 +2261,13 @@ fn BranchPicker(folder: Option<String>, current: Option<String>, new_tree: bool,
                         }
                     };
                     let sb = shown_branch.clone();
-                    let item = move |b: String, fresh: bool| {
+                    let item = move |b: String| {
                         let on = sb.as_deref() == Some(b.as_str());
                         let is_default = default.as_deref() == Some(b.as_str());
                         let b2 = b.clone();
                         let mut pick = pick.clone();
                         rsx! {
-                            button { key: "{b}", class: format!("menu-item{}{}", if on { " checked" } else { "" }, if fresh { " menu-fresh" } else { "" }), title: "{b}",
+                            button { key: "{b}", class: if on { "menu-item checked" } else { "menu-item" }, title: "{b}",
                                 onclick: move |_| pick(b2.clone()),
                                 span { class: "muted", Icon { i: I::GitBranch, size: 14 } }
                                 span { class: "ellipsis", "{b}" }
@@ -2282,19 +2277,50 @@ fn BranchPicker(folder: Option<String>, current: Option<String>, new_tree: bool,
                         }
                     };
                     match list.read().clone() {
-                        // The branch in use shows at once; the rest load.
+                        // Before the very first read: the branch in use; the
+                        // rest join it when they're read, with no loader.
                         None => rsx! {
-                            if let Some(b) = shown_branch.clone() { {item(b, false)} }
-                            super::MenuSkeleton { rows: 2 }
+                            if let Some(b) = shown_branch.clone() { {item(b)} }
                         },
                         Some(_) => rsx! {
-                            for b in rows.clone() { {item(b, true)} }
+                            for b in rows.clone() { {item(b)} }
                             if rows.is_empty() { div { class: "menu-empty", "No branches match" } }
                         },
                     }
                 }
             }
         }
+    }
+}
+
+/// Each project's branches (the default first, then the most recent) and
+/// its default branch, as last read.
+static BRANCHES: OnceLock<Mutex<std::collections::HashMap<String, (Vec<String>, String)>>> = OnceLock::new();
+
+fn branches_known(folder: &str) -> Option<(Vec<String>, String)> {
+    BRANCHES.get_or_init(Default::default).lock().ok()?.get(folder).cloned()
+}
+
+/// Read a project's branches again; the menu changes only if they did.
+async fn refresh_branches(folder: String, mut list: Signal<Option<(Vec<String>, String)>>) {
+    let f = folder.clone();
+    let got = tokio::task::spawn_blocking(move || {
+        let p = std::path::Path::new(&f);
+        (larrier_agents::git::branches(p), larrier_agents::git::default_branch(p))
+    })
+    .await
+    .ok();
+    let Some((mut names, default)) = got else { return };
+    if let Some(i) = names.iter().position(|b| *b == default) {
+        let d = names.remove(i);
+        names.insert(0, d);
+    }
+    let now = Some((names, default));
+    if let Ok(mut m) = BRANCHES.get_or_init(Default::default).lock() {
+        m.insert(folder, now.clone().unwrap_or_default());
+    }
+    if *list.peek() != now {
+        list.set(now);
     }
 }
 

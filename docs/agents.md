@@ -38,6 +38,38 @@ others their own headless mode or ACP, where they can ask. Where an agent
 can't ask while Lary runs it, Lary says what it refused and lets you
 change the permission mode.
 
+## The official way: Claude Code, Codex, Cursor and Grok
+
+These four run the way their makers support for apps like Lary, and apart
+from your own setup:
+
+- **How they connect:** Claude Code over the stream-JSON control channel
+  the Claude Agent SDK uses; Codex over its app server; Cursor Agent over
+  ACP (`cursor-agent acp`); Grok Build over ACP (`grok agent stdio`).
+- **Which program runs:** Lary's own copy by default, downloaded from the
+  maker's release source into Lary's folder (Claude Code from
+  downloads.claude.ai and Codex from OpenAI's GitHub releases, both checked
+  against their published SHA-256; Cursor from downloads.cursor.com; Grok
+  from x.ai/cli). It downloads the first time a chat needs it, or from
+  **Settings → Harnesses → ‹agent› → Version**, where you can switch to the
+  copy installed on your computer instead. Lary never installs, updates or
+  configures your own copy.
+- **Where they run:** every account in a folder of Lary's of its own
+  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `CURSOR_CONFIG_DIR`, `GROK_HOME`), so
+  your own settings, hooks, plugins and sign-in are never read or changed;
+  only an account set to **This computer** uses your own sign-in.
+- **How they sign in:**
+
+  | Agent | Ways, the first being the default |
+  |---|---|
+  | Claude Code | **Setup token** (run `claude setup-token` yourself and paste what it prints) · **Sign in** (Claude Code's own login with your subscription, in Lary's folder) · **API key** · This computer |
+  | Codex | **ChatGPT** (sign-in through Codex's app server, as its own apps do: OpenAI's page opens in your browser) · **API key** · This computer |
+  | Cursor Agent | **API key** · **Sign in** (Cursor's own login, in Lary's folder) · This computer |
+  | Grok Build | **API key** (xAI) · **Sign in** (`grok login`, in Lary's folder) · This computer |
+
+  Keys and tokens stay in your OS keychain and reach the agent only when
+  its account runs.
+
 ## Modes and permissions
 
 Each agent's real modes (plan, ask, auto-accept, …) and permission settings

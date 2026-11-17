@@ -14,11 +14,15 @@ pub struct Detected {
     /// Why a found binary was rejected (e.g. a stub that prints "not found").
     #[serde(default)]
     pub note: Option<String>,
+    /// It runs on Lary's own copy: available whether or not it's been
+    /// downloaded yet (it is when first needed).
+    #[serde(default)]
+    pub lary_copy: bool,
 }
 
 impl Detected {
     pub fn installed(&self) -> bool {
-        self.path.is_some()
+        self.path.is_some() || self.lary_copy
     }
 }
 
@@ -153,7 +157,11 @@ pub async fn detect_all(cfg: &Config) -> Vec<Detected> {
     let kinds: Vec<AgentKind> = lary_core::agent::runnable().filter(|s| !s.binaries.is_empty()).map(|s| s.kind.clone()).collect();
     let futs = kinds.into_iter().map(|k| {
         let ov = cfg.agent(&k).binary.clone();
+        let lary_copy = crate::request::uses_lary_copy(cfg, &k);
         async move {
+            if lary_copy {
+                return Detected { path: crate::runtime::program(&k), version: crate::runtime::version(&k), note: None, lary_copy: true, kind: k };
+            }
             let found = find_binary(&k, ov.as_deref());
             let (path, version, note) = match found {
                 Some(p) => match probe(&p).await {
@@ -164,7 +172,7 @@ pub async fn detect_all(cfg: &Config) -> Vec<Detected> {
                 },
                 None => (None, None, None),
             };
-            Detected { kind: k, path, version, note }
+            Detected { kind: k, path, version, note, lary_copy: false }
         }
     });
     futures::future::join_all(futs).await

@@ -198,13 +198,69 @@ pub fn account_env(agent: &AgentKind, account: &Account) -> Vec<(String, String)
 }
 
 /// Environment for an agent: per-agent config env plus the account's env.
+/// The official harnesses (see [`crate::runtime`]) run every account in a
+/// folder of Lary's own, so they never read or change the user's own setup
+/// (settings, hooks, plugins, sign-in) unless the account is the user's
+/// own sign-in on this computer.
 fn agent_env(cfg: &Config, agent: &AgentKind, account_id: Option<&str>) -> Vec<(String, String)> {
     let ac = cfg.agent(agent);
     let mut env: Vec<(String, String)> = ac.env.iter().map(|(k, v)| (k.clone(), secrets::resolve(v))).collect();
-    if let Some(acc) = cfg.account_for(agent, account_id) {
+    let acc = cfg.account_for(agent, account_id);
+    if let Some(acc) = acc {
         env.extend(account_env(agent, acc));
     }
+    if let Some(home) = lary_home(agent, acc) {
+        if let Some(var) = agent.spec().home_env {
+            if !env.iter().any(|(k, _)| k == var) {
+                let _ = std::fs::create_dir_all(&home);
+                env.push((var.to_string(), home.to_string_lossy().to_string()));
+            }
+        }
+    }
     env
+}
+
+/// The folder of Lary's an official harness runs in for an account (its
+/// own, by id) or with none set up (one for the agent): None for the user's
+/// own sign-in, a folder the account names, and other harnesses.
+pub fn lary_home(agent: &AgentKind, account: Option<&Account>) -> Option<PathBuf> {
+    if !crate::runtime::supported(agent) {
+        return None;
+    }
+    let accounts = lary_core::store::data_root().join("accounts");
+    match account.map(|a| (&a.auth, &a.id)) {
+        Some((AccountAuth::SystemLogin | AccountAuth::ConfigDir { .. }, _)) => None,
+        Some((_, id)) => Some(accounts.join(id)),
+        None => Some(accounts.join(agent.id())),
+    }
+}
+
+/// The program Lary runs for an agent: a path set for it, else Lary's own
+/// copy (the official harnesses, unless set to use the installed one), else
+/// the one installed on this computer.
+pub fn program_for(cfg: &Config, agent: &AgentKind) -> Option<PathBuf> {
+    let ac = cfg.agent(agent);
+    if ac.binary.as_deref().is_some_and(|b| !b.trim().is_empty()) {
+        return detect::find_binary(agent, ac.binary.as_deref());
+    }
+    if uses_lary_copy(cfg, agent) {
+        return crate::runtime::program(agent);
+    }
+    detect::find_binary(agent, None)
+}
+
+/// Whether an agent runs on Lary's own copy (downloaded when first needed).
+pub fn uses_lary_copy(cfg: &Config, agent: &AgentKind) -> bool {
+    let ac = cfg.agent(agent);
+    crate::runtime::supported(agent) && !ac.use_installed && ac.binary.as_deref().is_none_or(|b| b.trim().is_empty())
+}
+
+fn missing(cfg: &Config, agent: &AgentKind) -> anyhow::Error {
+    if uses_lary_copy(cfg, agent) {
+        anyhow!("Lary's copy of {} isn't downloaded yet. Get it in Settings → Harnesses → {}.", agent.spec().name, agent.spec().name)
+    } else {
+        not_installed(agent)
+    }
 }
 
 /// Resolve how to launch `agent` with the configured binary/account.
@@ -225,7 +281,7 @@ pub fn resolve_launch(cfg: &Config, agent: &AgentKind, account_id: Option<&str>)
         return Ok(launch);
     }
     let ac = cfg.agent(agent);
-    let program = detect::find_binary(agent, ac.binary.as_deref()).ok_or_else(|| not_installed(agent))?;
+    let program = program_for(cfg, agent).ok_or_else(|| missing(cfg, agent))?;
     let (program, prefix) = unwrap_shim(&program);
     launch.program = program;
     launch.prefix_args = prefix;
@@ -256,7 +312,7 @@ pub fn resolve_acp_launch(cfg: &Config, agent: &AgentKind, account_id: Option<&s
     let (first, rest) = acp.split_first().ok_or_else(|| anyhow!("empty ACP command"))?;
     let ac = cfg.agent(agent);
     let program = if spec.binaries.contains(first) {
-        detect::find_binary(agent, ac.binary.as_deref()).ok_or_else(|| not_installed(agent))?
+        program_for(cfg, agent).ok_or_else(|| missing(cfg, agent))?
     } else {
         detect::which_program(first).ok_or_else(|| anyhow!("`{first}` was not found on PATH (needed to start {} over ACP)", spec.name))?
     };

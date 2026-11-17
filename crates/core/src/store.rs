@@ -439,7 +439,7 @@ mod tests {
         let first = store.load_config();
         assert_eq!(std::fs::read_to_string(dir.join("config.v3.json")).unwrap(), old);
         let saved = std::fs::read_to_string(dir.join("config.json")).unwrap();
-        assert!(saved.contains("\"version\": 4") && !saved.contains("endpoints"), "{saved}");
+        assert!(saved.contains(&format!("\"version\": {}", crate::config::CONFIG_VERSION)) && !saved.contains("endpoints"), "{saved}");
         let again = store.load_config();
         assert_eq!(first.accounts, again.accounts, "the same accounts, ids included");
         let _ = std::fs::remove_dir_all(dir);

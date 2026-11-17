@@ -63,13 +63,13 @@ fn config_version() -> u32 {
 }
 
 /// The config format this build writes (see `Config::migrate`).
-pub const CONFIG_VERSION: u32 = 4;
+pub const CONFIG_VERSION: u32 = 5;
 
 /// Agents whose own headless runners refuse whatever needs asking, while
 /// over the Agent Client Protocol the asks reach the user: they connect
 /// over ACP unless the user picks Native.
 pub fn acp_by_default(kind: &AgentKind) -> bool {
-    matches!(kind, AgentKind::OpenCode | AgentKind::Hermes)
+    matches!(kind, AgentKind::OpenCode | AgentKind::Hermes | AgentKind::Cursor)
 }
 
 impl Default for Config {
@@ -107,6 +107,12 @@ impl Config {
         if self.version < 4 {
             // 4: every credential is an account of one harness.
             self.migrate_credentials();
+        }
+        if self.version < 5 {
+            // 5: Cursor connects its official way, over ACP.
+            for a in self.agents.iter_mut().filter(|a| a.kind == AgentKind::Cursor) {
+                a.prefer_acp = true;
+            }
         }
         self.version = self.version.max(CONFIG_VERSION);
     }
@@ -825,6 +831,11 @@ pub struct AgentConfig {
     /// Prefer ACP even when a native stream protocol is available.
     #[serde(default)]
     pub prefer_acp: bool,
+    /// Run the copy installed on this computer rather than Lary's own
+    /// (Claude Code, Codex, Cursor Agent and Grok Build; see
+    /// `lary_agents::runtime`).
+    #[serde(default)]
+    pub use_installed: bool,
     /// Model ids added by hand before custom models existed; read as
     /// [`CustomModel`]s without an endpoint.
     #[serde(default)]
@@ -863,6 +874,7 @@ impl AgentConfig {
             default_mode: None,
             default_permission: None,
             prefer_acp: acp,
+            use_installed: false,
             extra_models: Vec::new(),
             import: true,
             default_effort: None,

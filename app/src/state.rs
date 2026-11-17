@@ -1308,7 +1308,22 @@ impl App {
         if self.split.peek().as_deref() != Some(id.as_str()) {
             self.navigate(View::Agent(id.clone()));
         }
+        // Lary's own copy of the harness, fetched the first time it's needed.
+        if lary_agents::request::uses_lary_copy(&self.config.peek(), &agent) && lary_agents::runtime::program(&agent).is_none() {
+            self.toast(format!("Getting Lary's copy of {}…", agent.display_name()));
+            let app = self;
+            spawn_forever(async move {
+                // On failure the turn still starts and says why it can't run.
+                let _ = crate::agent_versions::fetch_lary_copy(app, agent.clone()).await;
+                app.begin_turn(id, agent, model, account, notice);
+            });
+            return;
+        }
+        self.begin_turn(id, agent, model, account, notice);
+    }
 
+    /// Build a turn's request and start the agent on it.
+    fn begin_turn(mut self, id: String, agent: AgentKind, model: Option<String>, account: Option<String>, notice: Option<String>) {
         let cfg = self.config.read().clone();
         let request = self.peek_session(&id, |s| lary_agents::build_request(&cfg, s, &agent)).expect("loaded");
         let mut recorder = self.mutate_session(&id, |s| TurnRecorder::begin(s, agent.clone(), model, account)).expect("loaded");
@@ -2245,12 +2260,47 @@ impl App {
         let Some(login) = account.agent.spec().login_command else {
             return self.toast(format!("{} signs in from its own app", account.agent.display_name()));
         };
-        let cmd = as_account(&account.agent, Some(account), login);
-        let cwd = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
-        match open_terminal(&cwd, &cmd) {
-            Ok(()) => self.toast(format!("Sign in to “{}” in the terminal. In the browser, use the account you want for it, switching there if it shows another.", account.label)),
-            Err(e) => self.toast_err(format!("Could not open a terminal: {e}")),
-        }
+        let (app, account) = (self, account.clone());
+        spawn_forever(async move {
+            let agent = account.agent.clone();
+            // Lary's own copy signs in (fetched first when it's needed).
+            if lary_agents::request::uses_lary_copy(&app.config.peek(), &agent) && lary_agents::runtime::program(&agent).is_none() && crate::agent_versions::fetch_lary_copy(app, agent.clone()).await.is_err() {
+                return;
+            }
+            let program = lary_agents::request::program_for(&app.config.peek(), &agent);
+            // Codex signs in the way its own clients do: through its app
+            // server, on OpenAI's page in the browser.
+            if let (AgentKind::Codex, AccountAuth::ConfigDir { path }, Some(p)) = (&agent, &account.auth, program.as_ref()) {
+                app.toast(format!("Sign in to “{}” on OpenAI's page in your browser…", account.label));
+                match lary_agents::codex_login::chatgpt(p, std::path::Path::new(path), |url| {
+                    let _ = open::that(url);
+                })
+                .await
+                {
+                    Ok(()) => {
+                        app.toast(format!("“{}” is signed in", account.label));
+                        // Its row reads the sign-in again.
+                        app.update_config(|_| {});
+                    }
+                    Err(e) => app.toast_err(format!("Codex sign-in: {e:#}")),
+                }
+                return;
+            }
+            // The agent's own sign-in, by its full path, in the account's folder.
+            let cmd = match program {
+                Some(p) => {
+                    let rest = login.split_once(' ').map(|(_, r)| r).unwrap_or("");
+                    format!("\"{}\" {rest}", p.display())
+                }
+                None => login.to_string(),
+            };
+            let cmd = as_account(&agent, Some(&account), &cmd);
+            let cwd = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
+            match open_terminal(&cwd, &cmd) {
+                Ok(()) => app.toast(format!("Sign in to “{}” in the terminal. In the browser, use the account you want for it, switching there if it shows another.", account.label)),
+                Err(e) => app.toast_err(format!("Could not open a terminal: {e}")),
+            }
+        });
     }
 
     pub fn open_in_terminal(self, id: &str) {

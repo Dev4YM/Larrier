@@ -383,6 +383,7 @@ fn runs_as(cfg: &lary_core::Config, kind: &AgentKind) -> String {
     let list = cfg.accounts_for(kind);
     match (list.len(), cfg.default_account(kind)) {
         (0, _) if *kind == AgentKind::Chat => "No API account yet".into(),
+        (0, _) if lary_agents::runtime::supported(kind) => "No account yet".into(),
         (0, _) => "Current sign-in".into(),
         (1, Some(a)) => a.label.clone(),
         (n, Some(a)) => format!("{} · {n} accounts", a.label),
@@ -466,7 +467,13 @@ fn HarnessRow(kind: AgentKind) -> Element {
     } else if !on {
         "Off".into()
     } else {
-        d.as_ref().and_then(|d| d.version.clone()).map(|v| format!("v{v}")).unwrap_or_default()
+        let v = d.as_ref().and_then(|d| d.version.clone()).map(|v| format!("v{v}")).unwrap_or_default();
+        // Lary's own copy says so (and when it isn't downloaded yet).
+        match d.as_ref().filter(|d| d.lary_copy) {
+            Some(_) if v.is_empty() => "Lary's copy · downloads when needed".into(),
+            Some(_) => format!("Lary's copy · {v}"),
+            None => v,
+        }
     };
     let k1 = kind.clone();
     rsx! {
@@ -598,13 +605,74 @@ fn VersionPanel(kind: AgentKind) -> Element {
     let newer = crate::agent_versions::update_to(&app, &kind);
     let latest = crate::agent_versions::LATEST.read().get(&id).cloned();
     let checking = crate::agent_versions::CHECKING();
+    // The official harnesses run on Lary's own copy unless set to the one
+    // installed on this computer.
+    let official = lary_agents::runtime::supported(&kind);
+    let lary_copy = lary_agents::request::uses_lary_copy(&app.config.read(), &kind);
     let versions = lary_agents::updates::of(&kind);
-    let update_cmd = if installed { crate::agent_versions::step(&app, &kind, false) } else { None };
-    let install_cmd = if installed { None } else { lary_agents::updates::install_step(&kind) };
-    let (k1, k2) = (kind.clone(), kind.clone());
+    let update_cmd = if installed && !lary_copy { crate::agent_versions::step(&app, &kind, false) } else { None };
+    let install_cmd = if installed || lary_copy { None } else { lary_agents::updates::install_step(&kind) };
+    let (k1, k2, k3, k4, k5) = (kind.clone(), kind.clone(), kind.clone(), kind.clone(), kind.clone());
+    let pick = move |installed_one: bool, k: AgentKind| {
+        app.update_config(move |c| {
+            let a = c.agent_mut(&k);
+            a.use_installed = installed_one;
+            // Lary's copy is what runs: a program path set for it goes.
+            if !installed_one {
+                a.binary = None;
+            }
+        });
+        app.detect_agents();
+    };
     rsx! {
         div { class: "set-card ad-card",
-            div { class: "ad-row",
+            if official {
+                div { class: "ad-row",
+                    span { class: "k", "Program" }
+                    div { class: "v",
+                        div { class: "seg",
+                            button { class: if lary_copy { "on" } else { "" }, onclick: move |_| pick(false, k3.clone()), "Lary's copy" }
+                            button { class: if lary_copy { "" } else { "on" }, onclick: move |_| pick(true, k4.clone()), "Installed one" }
+                        }
+                        div { class: "h",
+                            if lary_copy { "Lary downloads {spec.name} from {crate::agent_versions::source(&kind)} into its own folder and runs it there, apart from any copy you installed and its settings." }
+                            else { "The {spec.name} installed on this computer. Lary still runs it in its own folder for each account, apart from your own settings, unless an account is your own sign-in." }
+                        }
+                    }
+                }
+            }
+            if lary_copy {
+                div { class: "ad-row",
+                    span { class: "k", "Lary's copy" }
+                    div { class: "v",
+                        div { class: "row",
+                            span { class: "plain strong",
+                                match lary_agents::runtime::version(&kind) {
+                                    Some(v) => format!("v{v}"),
+                                    None => "Not downloaded yet".to_string(),
+                                }
+                            }
+                            if newer.is_some() { span { class: "hn-tag new", "Newer" } }
+                            div { class: "grow" }
+                            button { class: if newer.is_some() || lary_agents::runtime::version(&kind).is_none() { "primary-btn" } else { "ghost-btn" }, disabled: running,
+                                onclick: move |_| crate::agent_versions::run(app, k5.clone(), false),
+                                match (&newer, lary_agents::runtime::version(&kind)) {
+                                    (_, None) => "Download".to_string(),
+                                    (Some(v), _) => format!("Update to v{v}"),
+                                    (None, _) => "Download again".to_string(),
+                                }
+                            }
+                        }
+                        div { class: "h",
+                            match &latest {
+                                Some(v) => format!("Newest from {}: v{v}. It also downloads by itself the first time a chat needs it.", crate::agent_versions::source(&kind)),
+                                None => "It downloads by itself the first time a chat needs it.".to_string(),
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "ad-row", style: if lary_copy { "display: none;" } else { "" },
                 span { class: "k", "Installed" }
                 div { class: "v",
                     span { class: "plain strong",
@@ -619,7 +687,7 @@ fn VersionPanel(kind: AgentKind) -> Element {
                     }
                 }
             }
-            if let Some(vs) = versions {
+            if let Some(vs) = versions.filter(|_| !lary_copy) {
                 div { class: "ad-row",
                     span { class: "k", "Latest" }
                     div { class: "v",
@@ -669,7 +737,7 @@ fn VersionPanel(kind: AgentKind) -> Element {
             }
             if let Some(j) = job.clone() {
                 div { class: "ad-row",
-                    span { class: "k", if j.installing { "Installing" } else { "Updating" } }
+                    span { class: "k", if lary_copy { "Download" } else if j.installing { "Installing" } else { "Updating" } }
                     div { class: "v",
                         div { class: "plain",
                             match j.ok {
@@ -719,15 +787,20 @@ pub fn AgentAccounts(kind: AgentKind) -> Element {
     let app = use_app();
     let chat = kind == AgentKind::Chat;
     let accounts: Vec<Account> = app.config.read().accounts_for(&kind).into_iter().cloned().collect();
-    // With no accounts, an agent runs on whatever it's signed into.
-    let implicit = (accounts.is_empty() && !chat).then(|| Account::new(kind.clone(), "Current sign-in".to_string(), AccountAuth::SystemLogin));
+    // The official harnesses keep apart from what's on the computer: with
+    // no account they have nothing to sign in with yet.
+    let official = lary_agents::runtime::supported(&kind);
+    // With no accounts, another agent runs on whatever it's signed into.
+    let implicit = (accounts.is_empty() && !chat && !official).then(|| Account::new(kind.clone(), "Current sign-in".to_string(), AccountAuth::SystemLogin));
     let rows: Vec<(Account, bool)> = match implicit {
         Some(a) => vec![(a, true)],
         None => accounts.into_iter().map(|a| (a, false)).collect(),
     };
     rsx! {
         div { class: "set-card",
-            if rows.is_empty() {
+            if rows.is_empty() && official {
+                div { class: "hn-empty", "No account yet. {kind.display_name()} runs in a folder of Lary's, apart from your own setup: add an account to sign it in." }
+            } else if rows.is_empty() {
                 div { class: "hn-empty", "No API account yet. Add one for Anthropic, OpenAI, Google Gemini, OpenRouter, Ollama or any OpenAI-compatible endpoint." }
             }
             for (a, only) in rows {
@@ -787,6 +860,7 @@ fn AccountRow(a: Account, only: bool) -> Element {
             s
         }
         AccountAuth::ApiKey { env_var, .. } => format!("API key · as {env_var}"),
+        AccountAuth::Env { vars } if vars.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN") => "Setup token · in a folder of Lary's".to_string(),
         AccountAuth::Env { vars } => format!("{} variables", vars.len()),
     };
     // Its state, in a word or two.

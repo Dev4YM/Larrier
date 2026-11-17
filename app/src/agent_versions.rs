@@ -57,8 +57,13 @@ async fn check() {
         return;
     }
     *CHECKING.write() = true;
-    let kinds: Vec<AgentKind> = AgentKind::BUILTIN.iter().filter(|k| updates::of(k).is_some()).cloned().collect();
-    let found = futures::future::join_all(kinds.into_iter().map(|k| async move { (k.id(), updates::latest(&k).await) })).await;
+    let kinds: Vec<AgentKind> = AgentKind::BUILTIN.iter().filter(|k| updates::of(k).is_some() || lary_agents::runtime::supported(k)).cloned().collect();
+    let found = futures::future::join_all(kinds.into_iter().map(|k| async move {
+        // Lary's own copies come from the vendor's release source.
+        let v = if lary_agents::runtime::supported(&k) { lary_agents::runtime::latest_version(&k).await } else { updates::latest(&k).await };
+        (k.id(), v)
+    }))
+    .await;
     {
         let mut latest = LATEST.write();
         for (id, v) in found {
@@ -95,6 +100,12 @@ pub fn step(app: &App, kind: &AgentKind, install: bool) -> Option<updates::Step>
 /// Install or update `kind`, its output shown as it runs; the agents are
 /// found again afterwards and the outcome is told.
 pub fn run(app: App, kind: AgentKind, install: bool) {
+    if lary_agents::request::uses_lary_copy(&app.config.peek(), &kind) {
+        spawn_forever(async move {
+            let _ = fetch_lary_copy(app, kind).await;
+        });
+        return;
+    }
     let Some(step) = step(&app, &kind, install) else {
         app.toast_err(format!("Lary can't {} {} itself: see its site", if install { "install" } else { "update" }, kind.display_name()));
         return;
@@ -187,6 +198,80 @@ pub fn run(app: App, kind: AgentKind, install: bool) {
             (false, _) => app.toast_err(format!("{name}: the {} didn't go through — its output is in Settings → Agents", if install { "install" } else { "update" })),
         }
     });
+}
+
+/// Get the newest official release of an agent as Lary's own copy (shown
+/// as its job, with the download's progress). A fetch already running is
+/// waited for.
+pub async fn fetch_lary_copy(app: App, kind: AgentKind) -> anyhow::Result<()> {
+    let id = kind.id();
+    let name = kind.display_name();
+    if JOBS.peek().get(&id).is_some_and(|j| j.ok.is_none()) {
+        while JOBS.peek().get(&id).is_some_and(|j| j.ok.is_none()) {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+        return match JOBS.peek().get(&id).and_then(|j| j.ok) {
+            Some(true) => Ok(()),
+            _ => Err(anyhow::anyhow!("Lary couldn't get its copy of {name}")),
+        };
+    }
+    let had = lary_agents::runtime::version(&kind);
+    JOBS.write().insert(id.clone(), Job { installing: had.is_none(), shown: format!("Lary's copy of {name}, from {}", source(&kind)), log: Vec::new(), ok: None });
+    let set = {
+        let id = id.clone();
+        move |line: String| {
+            if let Some(j) = JOBS.write().get_mut(&id) {
+                // One progress line, redrawn.
+                if j.log.last().is_some_and(|l| l.starts_with("Downloaded ")) && line.starts_with("Downloaded ") {
+                    j.log.pop();
+                }
+                j.log.push(line);
+            }
+        }
+    };
+    let mut shown_mb = u64::MAX;
+    let got = lary_agents::runtime::fetch(&kind, |done, total| {
+        let mb = done / 1_000_000;
+        if mb != shown_mb {
+            shown_mb = mb;
+            set(if total > 0 { format!("Downloaded {mb} of {} MB", total / 1_000_000) } else { format!("Downloaded {mb} MB") });
+        }
+    })
+    .await;
+    let ok = got.is_ok();
+    match &got {
+        Ok((v, _)) => set(format!("{name} {v} is ready, in Lary's folder.")),
+        Err(e) => set(format!("{e:#}")),
+    }
+    if let Some(j) = JOBS.write().get_mut(&id) {
+        j.ok = Some(ok);
+    }
+    let cfg = app.config.peek().clone();
+    let found = lary_agents::detect_all(&cfg).await;
+    let mut detected = app.detected;
+    detected.set(found);
+    match got {
+        Ok((v, _)) if had.as_deref() != Some(v.as_str()) => {
+            app.toast(format!("{name} {v} is ready"));
+            Ok(())
+        }
+        Ok(_) => Ok(()),
+        Err(e) => {
+            app.toast_err(format!("Couldn't get {name}: {e:#}"));
+            Err(e)
+        }
+    }
+}
+
+/// Where Lary's copy of an agent comes from, as it reads.
+pub fn source(kind: &AgentKind) -> &'static str {
+    match kind {
+        AgentKind::ClaudeCode => "downloads.claude.ai",
+        AgentKind::Codex => "OpenAI's releases on GitHub",
+        AgentKind::Cursor => "downloads.cursor.com",
+        AgentKind::Grok => "x.ai/cli",
+        _ => "its maker",
+    }
 }
 
 /// A line without its terminal colors and cursor moves, as it last read

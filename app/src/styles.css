@@ -2222,3 +2222,6 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .hb-wall-x { position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--pane) 86%, transparent); color: var(--fg-2); opacity: 0; transition: opacity var(--t-1) ease; }
 .hb-wall:hover .hb-wall-x, .hb-wall-x:focus-visible { opacity: 1; }
 .hb-wall-x:hover { color: var(--fg); }
+
+/* A dialog's choices stay one line each. */
+.modal-body .seg button { white-space: nowrap; }

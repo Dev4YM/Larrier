@@ -11,6 +11,8 @@ pub mod git;
 pub mod models;
 pub mod harness;
 pub mod request;
+pub mod runtime;
+pub mod codex_login;
 pub mod updates;
 
 pub use detect::{detect_all, Detected};

@@ -422,9 +422,27 @@ fn note_source(m: &mut AgentModels, path: &Path) {
 }
 
 /// Run a CLI quietly and return its output (stdout, then stderr).
+/// Lary's own copy of a harness reads its models in Lary's folder for the
+/// agent, never in the user's own setup.
+fn in_lary_folder(cmd: &mut tokio::process::Command, program: &Path) {
+    let root = lary_core::store::data_root();
+    if !program.starts_with(root.join("runtimes")) {
+        return;
+    }
+    for kind in [AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Cursor, AgentKind::Grok] {
+        if program.starts_with(root.join("runtimes").join(kind.id())) {
+            if let (Some(var), Some(home)) = (kind.spec().home_env, crate::request::lary_home(&kind, None)) {
+                let _ = std::fs::create_dir_all(&home);
+                cmd.env(var, home);
+            }
+        }
+    }
+}
+
 async fn run_cli(program: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
     let (prog, prefix) = crate::request::unwrap_shim(program);
     let mut cmd = tokio::process::Command::new(prog);
+    in_lary_folder(&mut cmd, program);
     cmd.args(prefix).args(args).stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     cmd.kill_on_drop(true);
@@ -484,6 +502,7 @@ async fn claude_listing(program: &Path) -> Result<(Vec<AgentModel>, Menu), Strin
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let (prog, prefix) = crate::request::unwrap_shim(program);
     let mut cmd = tokio::process::Command::new(prog);
+    in_lary_folder(&mut cmd, program);
     cmd.args(prefix).args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
     cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
     cmd.kill_on_drop(true);

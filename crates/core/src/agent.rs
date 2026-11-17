@@ -833,7 +833,7 @@ static CATALOG: [AgentSpec; 18] = [
         models: &["default"],
         mode_groups: &[],
         key_env: &["XAI_API_KEY"],
-        home_env: None,
+        home_env: Some("GROK_HOME"),
         login_command: Some("grok login"),
         can_run: true,
         can_import: false,

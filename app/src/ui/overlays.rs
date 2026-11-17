@@ -461,8 +461,22 @@ fn WhatsNewModal(version: String, updated: bool) -> Element {
     }
 }
 
+/// How an official harness signs in, in the order offered (the first is
+/// the default). Empty for the others.
+fn official_methods(kind: &AgentKind) -> Vec<(AuthKind, &'static str)> {
+    match kind {
+        AgentKind::ClaudeCode => vec![(AuthKind::Token, "Setup token"), (AuthKind::Dir, "Sign in"), (AuthKind::Api, "API key"), (AuthKind::System, "This computer")],
+        AgentKind::Codex => vec![(AuthKind::Dir, "ChatGPT"), (AuthKind::Api, "API key"), (AuthKind::System, "This computer")],
+        AgentKind::Cursor => vec![(AuthKind::Key, "API key"), (AuthKind::Dir, "Sign in"), (AuthKind::System, "This computer")],
+        AgentKind::Grok => vec![(AuthKind::Key, "API key"), (AuthKind::Dir, "Sign in"), (AuthKind::System, "This computer")],
+        _ => Vec::new(),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum AuthKind {
+    /// A Claude subscription token the user makes with `claude setup-token`.
+    Token,
     System,
     Dir,
     /// A folder the agent already signs in from (another account's).
@@ -528,8 +542,13 @@ fn AddAccountModal(kind: AgentKind) -> Element {
     let chat = kind == AgentKind::Chat;
     let kinds = lary_agents::request::api_kinds(&kind);
     let can_api = !kinds.is_empty();
+    // The harnesses Lary runs the official way sign in their own ways.
+    let official = lary_agents::runtime::supported(&kind);
+    let methods = official_methods(&kind);
     let mut auth = use_signal(|| {
-        if chat {
+        if let Some((first, _)) = official_methods(&kind).first() {
+            *first
+        } else if chat {
             AuthKind::Api
         } else if spec.home_env.is_some() {
             AuthKind::Dir
@@ -561,6 +580,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
     let k2 = kind.clone();
     let save = move |_| {
         let fallback = match auth() {
+            AuthKind::Token => "Claude subscription".to_string(),
             AuthKind::Existing if !folder_name().is_empty() => folder_name(),
             AuthKind::Api => api_kind().label().to_string(),
             AuthKind::Key => format!("{} API key", k2.display_name()),
@@ -570,6 +590,16 @@ fn AddAccountModal(kind: AgentKind) -> Element {
         let id = new_id();
         let mut needs_login = matches!(auth(), AuthKind::Dir);
         let a = match auth() {
+            // Claude Code takes the token from its variable; the account
+            // runs in a folder of Lary's of its own.
+            AuthKind::Token => {
+                let r = format!("account:{id}");
+                if let Err(e) = lary_core::secrets::set(&r, key().trim()) {
+                    app.toast_err(format!("Could not store the token: {e}"));
+                    return;
+                }
+                AccountAuth::Env { vars: vec![("CLAUDE_CODE_OAUTH_TOKEN".to_string(), format!("secret:{r}"))] }
+            }
             AuthKind::System => AccountAuth::SystemLogin,
             AuthKind::Dir => {
                 let dir = store().accounts_dir().join(&id);
@@ -623,7 +653,9 @@ fn AddAccountModal(kind: AgentKind) -> Element {
         // An agent's first added account keeps it on what it ran with:
         // that stays, as an account of its own, the default; the new one
         // can be made default. (Lary Chat had nothing to run on.)
-        let keep_current = first && k2 != AgentKind::Chat && auth() != AuthKind::System;
+        // (Not for the official harnesses: they keep apart from what's on
+        // the computer.)
+        let keep_current = first && k2 != AgentKind::Chat && auth() != AuthKind::System && !lary_agents::runtime::supported(&k2);
         acc.is_default = first && !keep_current;
         app.update_config(|c| {
             if keep_current {
@@ -648,7 +680,19 @@ fn AddAccountModal(kind: AgentKind) -> Element {
             div { class: "kv",
                 span { class: "k", "Name" }
                 input { class: "input full", placeholder: "Work, Personal, Team…", value: "{label}", oninput: move |e| label.set(e.value()) }
-                if !chat {
+                if official {
+                    span { class: "k", "Signs in with" }
+                    div { class: "seg",
+                        for (m, l) in methods.clone() {
+                            button { key: "{l}", class: if auth() == m { "on" } else { "" }, onclick: move |_| { auth.set(m); key.set(String::new()); }, "{l}" }
+                        }
+                    }
+                }
+                if auth() == AuthKind::Token {
+                    span { class: "k", "Setup token" }
+                    input { class: "input full", r#type: "password", placeholder: "Paste the token `claude setup-token` printed", value: "{key}", spellcheck: "false", oninput: move |e| key.set(e.value()) }
+                }
+                if !chat && !official {
                     span { class: "k", "Runs as" }
                     div { class: "seg",
                         if spec.home_env.is_some() {
@@ -746,6 +790,18 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                 }
             }
             match auth() {
+                AuthKind::Token => rsx! { div { "In a terminal, run " code { "claude setup-token" } " and sign in with your Claude account, then paste the token it prints. It stays in your OS keychain, and Claude Code runs with it in a folder of Lary's for this account, apart from your own setup." } },
+                AuthKind::Dir if official => rsx! { div {
+                    {match &kind {
+                        AgentKind::Codex => "Signs in with ChatGPT the way Codex's own apps do: OpenAI's page opens in your browser once the account is added. The sign-in stays in a folder of Lary's for this account.",
+                        AgentKind::ClaudeCode => "Claude Code's own sign-in with your Claude subscription, in a terminal once the account is added. It stays in a folder of Lary's for this account, apart from your own Claude Code.",
+                        AgentKind::Cursor => "Cursor's own sign-in, in a terminal once the account is added. It stays in a folder of Lary's for this account, apart from your own Cursor.",
+                        _ => "xAI's own sign-in (grok login), in a terminal once the account is added. It stays in a folder of Lary's for this account, apart from your own Grok.",
+                    }}
+                } },
+                AuthKind::Key if official => rsx! { div { "The key stays in your OS keychain. {spec.name} gets it only when this account runs, in a folder of Lary's of its own." } },
+                AuthKind::Api if official => rsx! { div { "{spec.name} runs on this API with this key, in a folder of Lary's for this account. The key stays in your OS keychain." } },
+                AuthKind::System if official => rsx! { div { "Your own {spec.name} sign-in on this computer, with your own settings, hooks and plugins: Lary runs it as you do." } },
                 AuthKind::Dir => rsx! { div { "Lary creates an isolated config folder for this account and opens {spec.name}'s login in a terminal. Each account keeps its own credentials and history." } },
                 AuthKind::Existing => rsx! {
                     div {
@@ -767,7 +823,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
         div { class: "modal-foot",
             button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
             button { class: "primary-btn",
-                disabled: (auth() == AuthKind::Key && key().trim().is_empty())
+                disabled: (matches!(auth(), AuthKind::Key | AuthKind::Token) && key().trim().is_empty())
                     || (auth() == AuthKind::Existing && signed_in(&kind, &folder()).is_none())
                     || (auth() == AuthKind::Api && ((api_kind().needs_key() && key().trim().is_empty()) || (url().trim().is_empty() && api_kind().default_url().is_empty()) || (chat && models().trim().is_empty()))),
                 onclick: save, "Add account" }

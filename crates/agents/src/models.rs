@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use larrier_core::AgentKind;
+use lary_core::AgentKind;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -211,7 +211,7 @@ pub struct ModelParams {
 }
 
 impl ModelParams {
-    /// `id[context=…,<effort>=…,fast=…]` for an effort (Larrier's names)
+    /// `id[context=…,<effort>=…,fast=…]` for an effort (Lary's names)
     /// and speed.
     pub fn compose(&self, id: &str, context: &str, effort: Option<&str>, fast: bool) -> String {
         let mut parts = vec![format!("context={context}")];
@@ -226,7 +226,7 @@ impl ModelParams {
     }
 }
 
-/// An effort as Larrier names it (`extra-high` → `xhigh`).
+/// An effort as Lary names it (`extra-high` → `xhigh`).
 pub fn normalize_effort(v: &str) -> String {
     if v == "extra-high" { "xhigh".to_string() } else { v.to_string() }
 }
@@ -290,7 +290,7 @@ pub struct NativeProvider {
     pub models: Vec<String>,
 }
 
-/// Whether Larrier can read a model list from the agent's CLI (slow: it
+/// Whether Lary can read a model list from the agent's CLI (slow: it
 /// may go to the network).
 pub fn has_cli_listing(agent: &AgentKind) -> bool {
     matches!(agent, AgentKind::ClaudeCode | AgentKind::Cursor | AgentKind::OpenCode | AgentKind::Droid)
@@ -333,24 +333,24 @@ fn keep_listed(p: &AgentModels) -> Vec<AgentModel> {
 /// The agent's files, on top of its CLI model list.
 pub fn read_files(agent: &AgentKind, listed: Vec<AgentModel>) -> AgentModels {
     let mut m = match agent {
-        AgentKind::ClaudeCode => claude(&larrier_formats::claude::root(None), listed),
-        AgentKind::Codex => codex(&larrier_formats::codex::root(None)),
-        AgentKind::Cursor => cursor(&larrier_formats::cursor::config_dir(), larrier_formats::cursor::ide_db().as_deref(), listed),
+        AgentKind::ClaudeCode => claude(&lary_formats::claude::root(None), listed),
+        AgentKind::Codex => codex(&lary_formats::codex::root(None)),
+        AgentKind::Cursor => cursor(&lary_formats::cursor::config_dir(), lary_formats::cursor::ide_db().as_deref(), listed),
         AgentKind::OpenCode => opencode(&opencode_config_dir(), &opencode_state_dir(), listed),
         AgentKind::Droid => droid(&factory_home(), listed),
-        AgentKind::Hermes => hermes(&larrier_formats::hermes::home_dir()),
-        AgentKind::Gemini => gemini(&larrier_formats::util::home().join(".gemini")),
+        AgentKind::Hermes => hermes(&lary_formats::hermes::home_dir()),
+        AgentKind::Gemini => gemini(&lary_formats::util::home().join(".gemini")),
         AgentKind::Pi => pi(&pi_dir()),
         _ => AgentModels::default(),
     };
     if m.models.is_empty() {
-        // Agents Larrier doesn't read yet: the catalog's suggestions.
+        // Agents Lary doesn't read yet: the catalog's suggestions.
         m.models = agent
             .spec()
             .models
             .iter()
             .filter(|id| !matches!(**id, "default" | "auto"))
-            .map(|id| AgentModel { featured: true, ..AgentModel::new(*id, larrier_core::models::display_name(id)) })
+            .map(|id| AgentModel { featured: true, ..AgentModel::new(*id, lary_core::models::display_name(id)) })
             .collect();
     }
     m
@@ -492,13 +492,13 @@ async fn claude_listing(program: &Path) -> Result<(Vec<AgentModel>, Menu), Strin
     cmd.creation_flags(0x0800_0000);
     let mut child = cmd.spawn().map_err(|e| format!("Couldn't list models: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
-    let line = "{\"type\":\"control_request\",\"request_id\":\"larrier_models\",\"request\":{\"subtype\":\"initialize\"}}\n";
+    let line = "{\"type\":\"control_request\",\"request_id\":\"lary_models\",\"request\":{\"subtype\":\"initialize\"}}\n";
     stdin.write_all(line.as_bytes()).await.map_err(|e| e.to_string())?;
     let mut lines = BufReader::new(child.stdout.take().ok_or("no stdout")?).lines();
     let read = async {
         while let Ok(Some(l)) = lines.next_line().await {
             let Ok(v) = serde_json::from_str::<Value>(&l) else { continue };
-            if v["type"] == "control_response" && v["response"]["request_id"] == "larrier_models" {
+            if v["type"] == "control_response" && v["response"]["request_id"] == "lary_models" {
                 return Some(v);
             }
         }
@@ -513,7 +513,7 @@ async fn claude_listing(program: &Path) -> Result<(Vec<AgentModel>, Menu), Strin
     if reply.is_some() {
         let started = std::time::Instant::now();
         for n in 0.. {
-            let rid = format!("larrier_mcp_{n}");
+            let rid = format!("lary_mcp_{n}");
             let line = format!("{{\"type\":\"control_request\",\"request_id\":\"{rid}\",\"request\":{{\"subtype\":\"mcp_status\"}}}}\n");
             if stdin.write_all(line.as_bytes()).await.is_err() {
                 break;
@@ -604,9 +604,9 @@ pub fn parse_claude_models(init: &Value) -> Vec<AgentModel> {
         }
         m.fast_mode = claude_has_fast(&resolved);
         m.listed = true;
-        m.context = larrier_core::models::lookup(&resolved).and_then(|i| i.context);
+        m.context = lary_core::models::lookup(&resolved).and_then(|i| i.context);
         if id == "default" {
-            // The agent's own default: Larrier lists it as "Default".
+            // The agent's own default: Lary lists it as "Default".
             m.default = true;
             m.aliases = vec![resolved];
         } else {
@@ -645,7 +645,7 @@ mod param_tests {
 }
 
 fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
-    use larrier_core::models::{self, ModelStatus, Source, Vendor};
+    use lary_core::models::{self, ModelStatus, Source, Vendor};
     let mut m = AgentModels::default();
     let settings_path = dir.join("settings.json");
     note_source(&mut m, &settings_path);
@@ -763,7 +763,7 @@ fn codex(dir: &Path) -> AgentModels {
         note_source(&mut m, &cache_path);
         for x in cache.get("models").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
             let Some(slug) = str_of(&x, &["slug"]) else { continue };
-            let mut am = AgentModel::new(slug, str_of(&x, &["display_name"]).map(codex_name).unwrap_or_else(|| larrier_core::models::display_name(slug)));
+            let mut am = AgentModel::new(slug, str_of(&x, &["display_name"]).map(codex_name).unwrap_or_else(|| lary_core::models::display_name(slug)));
             am.description = str_of(&x, &["description"]).map(str::to_string);
             am.efforts = x.get("supported_reasoning_levels").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|e| str_of(e, &["effort"]).map(str::to_string)).collect()).unwrap_or_default();
             am.default_effort = str_of(&x, &["default_reasoning_level"]).map(str::to_string);
@@ -788,7 +788,7 @@ fn codex(dir: &Path) -> AgentModels {
     }
     if let Some(d) = m.default_model.clone() {
         if !m.models.iter().any(|x| x.id == d) {
-            m.models.push(AgentModel { featured: true, custom: provider != "openai", group: Some(provider.clone()), ..AgentModel::new(d.clone(), larrier_core::models::display_name(&d)) });
+            m.models.push(AgentModel { featured: true, custom: provider != "openai", group: Some(provider.clone()), ..AgentModel::new(d.clone(), lary_core::models::display_name(&d)) });
         }
     }
     m
@@ -840,7 +840,7 @@ pub fn parse_cursor_list(text: &str) -> Vec<AgentModel> {
         sort_efforts(&mut efforts);
         m.efforts = efforts;
         m.default_effort = if m.variants.iter().any(|v| v.effort.is_none()) { None } else { ["medium", "high"].iter().find(|e| m.efforts.iter().any(|x| x == *e)).map(|e| e.to_string()) };
-        m.group = Some(larrier_core::models::Vendor::infer(m.id.trim_start_matches("cursor-"), "").name().to_string());
+        m.group = Some(lary_core::models::Vendor::infer(m.id.trim_start_matches("cursor-"), "").name().to_string());
     }
     out
 }
@@ -907,7 +907,7 @@ fn cursor(cli_dir: &Path, ide_db: Option<&Path>, listed: Vec<AgentModel>) -> Age
     let mut enabled: Option<Vec<String>> = None;
     let mut params: Vec<(String, ModelParams)> = Vec::new();
     if let Some(db) = ide_db {
-        if let Ok(conn) = larrier_formats::util::open_sqlite(db) {
+        if let Ok(conn) = lary_formats::util::open_sqlite(db) {
             let get = |k: &str| conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [k], |r| r.get::<_, String>(0)).ok();
             let has = |k: &str| conn.query_row("SELECT 1 FROM ItemTable WHERE key = ?1", [k], |_| Ok(())).is_ok();
             if let Some(user) = get("src.vs.platform.reactivestorage.browser.reactiveStorageServiceImpl.persistentStorage.applicationUser").and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
@@ -1011,11 +1011,11 @@ fn cursor(cli_dir: &Path, ide_db: Option<&Path>, listed: Vec<AgentModel>) -> Age
 // ------------------------------------------------------------------ OpenCode
 
 fn opencode_config_dir() -> PathBuf {
-    larrier_formats::util::env_dir("XDG_CONFIG_HOME").unwrap_or_else(|| larrier_formats::util::home().join(".config")).join("opencode")
+    lary_formats::util::env_dir("XDG_CONFIG_HOME").unwrap_or_else(|| lary_formats::util::home().join(".config")).join("opencode")
 }
 
 fn opencode_state_dir() -> PathBuf {
-    larrier_formats::util::env_dir("XDG_STATE_HOME").unwrap_or_else(|| larrier_formats::util::home().join(".local").join("state")).join("opencode")
+    lary_formats::util::env_dir("XDG_STATE_HOME").unwrap_or_else(|| lary_formats::util::home().join(".local").join("state")).join("opencode")
 }
 
 /// `opencode models --verbose`: "provider/model" lines, each followed by
@@ -1046,7 +1046,7 @@ pub fn parse_opencode_models(text: &str) -> Vec<AgentModel> {
 }
 
 fn opencode_model(id: &str, v: &Value) -> AgentModel {
-    let mut m = AgentModel::new(id, str_of(v, &["name"]).map(str::to_string).unwrap_or_else(|| larrier_core::models::display_name(id)));
+    let mut m = AgentModel::new(id, str_of(v, &["name"]).map(str::to_string).unwrap_or_else(|| lary_core::models::display_name(id)));
     m.group = str_of(v, &["providerID"]).map(str::to_string).or_else(|| id.split_once('/').map(|(p, _)| p.to_string()));
     m.efforts = v.get("variants").and_then(|x| x.as_object()).map(|o| o.keys().filter(|k| *k != "default").cloned().collect()).unwrap_or_default();
     sort_efforts(&mut m.efforts);
@@ -1056,7 +1056,7 @@ fn opencode_model(id: &str, v: &Value) -> AgentModel {
 }
 
 fn opencode_data_dir() -> PathBuf {
-    larrier_formats::util::env_dir("XDG_DATA_HOME").unwrap_or_else(|| larrier_formats::util::home().join(".local").join("share")).join("opencode")
+    lary_formats::util::env_dir("XDG_DATA_HOME").unwrap_or_else(|| lary_formats::util::home().join(".local").join("share")).join("opencode")
 }
 
 fn opencode(cfg_dir: &Path, state_dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
@@ -1090,7 +1090,7 @@ fn opencode(cfg_dir: &Path, state_dir: &Path, listed: Vec<AgentModel>) -> AgentM
             m.providers.push(NativeProvider { name: str_of(p, &["name"]).unwrap_or(pid).to_string(), base_url, has_key, active: None, models: models.clone() });
             for id in models {
                 if !m.models.iter().any(|x| x.id == id) {
-                    m.models.push(AgentModel { custom: true, group: Some(pid.clone()), ..AgentModel::new(id.clone(), larrier_core::models::display_name(&id)) });
+                    m.models.push(AgentModel { custom: true, group: Some(pid.clone()), ..AgentModel::new(id.clone(), lary_core::models::display_name(&id)) });
                 }
             }
         }
@@ -1103,7 +1103,7 @@ fn opencode(cfg_dir: &Path, state_dir: &Path, listed: Vec<AgentModel>) -> AgentM
     }
     if let Some(d) = m.default_model.clone() {
         if !m.models.iter().any(|x| x.id == d) {
-            m.models.push(AgentModel { featured: true, ..AgentModel::new(d.clone(), larrier_core::models::display_name(&d)) });
+            m.models.push(AgentModel { featured: true, ..AgentModel::new(d.clone(), lary_core::models::display_name(&d)) });
         }
     }
     m
@@ -1112,7 +1112,7 @@ fn opencode(cfg_dir: &Path, state_dir: &Path, listed: Vec<AgentModel>) -> AgentM
 // ------------------------------------------------------------------ Droid
 
 fn factory_home() -> PathBuf {
-    larrier_formats::util::env_dir("FACTORY_HOME_OVERRIDE").unwrap_or_else(larrier_formats::util::home).join(".factory")
+    lary_formats::util::env_dir("FACTORY_HOME_OVERRIDE").unwrap_or_else(lary_formats::util::home).join(".factory")
 }
 
 /// What `droid exec --help` lists: models, custom models, each one's
@@ -1169,7 +1169,7 @@ pub fn parse_droid_help(text: &str) -> DroidHelp {
                 m.listed = true;
                 m.featured = true;
                 m.custom = section == "custom";
-                m.group = Some(if m.custom { "Custom".into() } else { larrier_core::models::Vendor::infer(id, "").name().to_string() });
+                m.group = Some(if m.custom { "Custom".into() } else { lary_core::models::Vendor::infer(id, "").name().to_string() });
                 h.models.push(m);
             }
             "details" => {
@@ -1269,7 +1269,7 @@ fn hermes(home: &Path) -> AgentModels {
     if let (Some(cache), Some(p)) = (read_json(&cache_path), provider.as_deref()) {
         note_source(&mut m, &cache_path);
         for id in cache.get(p).and_then(|x| x.get("models")).and_then(|x| x.as_array()).cloned().unwrap_or_default().iter().filter_map(|x| x.as_str()) {
-            m.models.push(AgentModel { featured: true, listed: true, efforts: efforts.clone(), group: Some(p.to_string()), ..AgentModel::new(id, larrier_core::models::display_name(id)) });
+            m.models.push(AgentModel { featured: true, listed: true, efforts: efforts.clone(), group: Some(p.to_string()), ..AgentModel::new(id, lary_core::models::display_name(id)) });
         }
     }
     if let Some(p) = &provider {
@@ -1277,7 +1277,7 @@ fn hermes(home: &Path) -> AgentModels {
     }
     if let Some(d) = m.default_model.clone() {
         if !m.models.iter().any(|x| x.id == d) {
-            m.models.push(AgentModel { featured: true, efforts: efforts.clone(), ..AgentModel::new(d.clone(), larrier_core::models::display_name(&d)) });
+            m.models.push(AgentModel { featured: true, efforts: efforts.clone(), ..AgentModel::new(d.clone(), lary_core::models::display_name(&d)) });
         }
     }
     m
@@ -1295,7 +1295,7 @@ fn gemini(dir: &Path) -> AgentModels {
 }
 
 fn pi_dir() -> PathBuf {
-    larrier_formats::util::env_dir("PI_CODING_AGENT_DIR").unwrap_or_else(|| larrier_formats::util::home().join(".pi").join("agent"))
+    lary_formats::util::env_dir("PI_CODING_AGENT_DIR").unwrap_or_else(|| lary_formats::util::home().join(".pi").join("agent"))
 }
 
 /// Pi's `--thinking` levels; it lowers one to what the model supports.
@@ -1318,7 +1318,7 @@ fn pi(dir: &Path) -> AgentModels {
             m.providers.push(NativeProvider { name: pid.clone(), base_url: str_of(&p, &["baseUrl"]).map(str::to_string), has_key: str_of(&p, &["apiKey"]).is_some(), active: None, models: ids.clone() });
             for id in ids {
                 let efforts = PI_THINKING.iter().map(|e| e.to_string()).collect();
-                m.models.push(AgentModel { featured: true, custom: true, efforts, group: Some(pid.clone()), ..AgentModel::new(id.clone(), larrier_core::models::display_name(&id)) });
+                m.models.push(AgentModel { featured: true, custom: true, efforts, group: Some(pid.clone()), ..AgentModel::new(id.clone(), lary_core::models::display_name(&id)) });
             }
         }
     }
@@ -1471,7 +1471,7 @@ mod tests {
 mod real {
     use super::*;
 
-    /// Prints what Larrier reads from the agents on this machine (read only).
+    /// Prints what Lary reads from the agents on this machine (read only).
     #[tokio::test]
     #[ignore]
     async fn real_agent_models() {

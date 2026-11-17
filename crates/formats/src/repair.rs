@@ -1,11 +1,11 @@
-//! Repairs of sessions Larrier recorded itself, from the agent's own
+//! Repairs of sessions Lary recorded itself, from the agent's own
 //! transcript of the same conversation (linked native sessions are never
 //! re-imported, so an importer fix doesn't reach them).
 
 use std::path::Path;
 
-use larrier_core::lsf::is_narration_block;
-use larrier_core::{Message, Part, Store};
+use lary_core::lsf::is_narration_block;
+use lary_core::{Message, Part, Store};
 use serde_json::Value;
 
 /// Shorter narration only counts when it is a whole thought: as the start
@@ -13,7 +13,7 @@ use serde_json::Value;
 const MIN_JOINED: usize = 12;
 
 /// Narration (words for the reader that Claude models send as thinking
-/// blocks) that Larrier recorded as thinking before it told them apart: a
+/// blocks) that Lary recorded as thinking before it told them apart: a
 /// thought that is, starts or ends with one of the transcript's narration
 /// blocks gives that part back as text. Returns whether the session changed.
 pub fn narration(store: &Store, session_id: &str, transcript: &Path) -> bool {
@@ -129,7 +129,7 @@ fn split(text: &str, texts: &[String]) -> Vec<(bool, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrier_core::{AgentKind, Session, ToolCall};
+    use lary_core::{AgentKind, Session, ToolCall};
 
     fn signature(kind: &str) -> String {
         use base64::Engine;
@@ -147,7 +147,7 @@ mod tests {
         Part::Reasoning { text: t.into(), duration_ms: Some(900) }
     }
 
-    /// Thoughts Larrier recorded live before 0.1.33: narration alone, joined
+    /// Thoughts Lary recorded live before 0.1.33: narration alone, joined
     /// after or before real thinking, and in a subagent; real thinking and a
     /// thought that only mentions a narration line in passing stay thoughts.
     #[test]

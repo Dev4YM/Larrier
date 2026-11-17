@@ -1,9 +1,9 @@
 # Agents
 
-Larrier calls everything that runs a chat a **harness**: each agent's own
-program, and Larrier Chat, which talks to model APIs itself. It runs the
+Lary calls everything that runs a chat a **harness**: each agent's own
+program, and Lary Chat, which talks to model APIs itself. It runs the
 harness and translates what it streams into one transcript. Your
-agents keep their own logins, settings and session stores; Larrier reads
+agents keep their own logins, settings and session stores; Lary reads
 those and, when you continue a chat with an agent, writes only what that
 agent needs to resume.
 
@@ -27,21 +27,21 @@ agent needs to resume.
 | Aider | `aider` | plain text | — |
 | Grok Build | `grok` | ACP (`grok agent stdio`) | Depends on Grok |
 | Custom | any command | ACP or one of the stream protocols above | Depends |
-| Larrier Chat | — | HTTP: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, OpenAI-compatible | — |
+| Lary Chat | — | HTTP: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, OpenAI-compatible | — |
 
-**Settings → Harnesses → ‹agent› → How it runs** shows the ways Larrier can
+**Settings → Harnesses → ‹agent› → How it runs** shows the ways Lary can
 run each agent, with the exact command and what each can do, and marks the
-one its maker documents for an app like Larrier: Claude Code's CLI with
+one its maker documents for an app like Lary: Claude Code's CLI with
 streaming JSON (the channel the Claude Agent SDK uses for approvals) or the
 Claude Agent SDK over ACP; Codex's app server or its ACP adapter; for most
 others their own headless mode or ACP, where they can ask. Where an agent
-can't ask while Larrier runs it, Larrier says what it refused and lets you
+can't ask while Lary runs it, Lary says what it refused and lets you
 change the permission mode.
 
 ## Modes and permissions
 
 Each agent's real modes (plan, ask, auto-accept, …) and permission settings
-are offered in the composer. Larrier passes them to the agent the way the
+are offered in the composer. Lary passes them to the agent the way the
 agent takes them (flags, ACP modes, app-server policies); it never widens
 what you picked.
 
@@ -54,14 +54,14 @@ chat can switch in the model picker. An account is one of:
 - **Current sign-in:** whatever the agent is signed into on this computer
   (its subscription or login).
 - **Separate sign-in:** an isolated config folder of its own
-  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …). Sign in once from Larrier; it runs
+  (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …). Sign in once from Lary; it runs
   the agent's own login in a terminal.
 - **Existing folder:** a folder an agent already signs in from.
 - **API:** a provider's API (Anthropic, OpenAI, OpenRouter, Ollama, any
   OpenAI-compatible endpoint, a gateway) with its key in the OS keychain.
-  Larrier points Claude Code, Codex, OpenCode, Droid and Hermes at it for
+  Lary points Claude Code, Codex, OpenCode, Droid and Hermes at it for
   the runs that use it, without changing their own settings; other agents
-  get the key in the variable they read (`OPENAI_API_KEY`, …). Larrier
+  get the key in the variable they read (`OPENAI_API_KEY`, …). Lary
   Chat's accounts are all API accounts, each with the models it offers.
 
 Each account shows whether it is signed in or has its key saved, and how
@@ -75,7 +75,7 @@ agent records them (Claude Code, Codex, Cursor, Gemini CLI).
 
 ## Models
 
-Larrier reads each agent's own model list and defaults (Claude Code's model
+Lary reads each agent's own model list and defaults (Claude Code's model
 menu, Codex's model list, Cursor's enabled models, OpenCode and Hermes
 providers, …), so the picker shows exactly what the agent offers. A model's
 **Edit** sets its options where the agent has them: reasoning effort,
@@ -95,7 +95,7 @@ one its makers have published, read only from where they publish it:
 | GitHub releases | Hermes Agent, Goose |
 | PyPI | Kimi, Aider |
 
-Larrier looks the versions up shortly after it starts, every six hours and
+Lary looks the versions up shortly after it starts, every six hours and
 on demand. An outdated agent shows **Update to vX**, a missing one
 **Install**; the agents page in Settings counts updates and the Settings
 button gets a dot.
@@ -105,7 +105,7 @@ Updates use the agent's own updater where it has one (`claude update`,
 `droid update`, `grok update`); otherwise npm (when npm installed it) or the official
 installer again. Installs use the official installer for your system:
 PowerShell installers on Windows, the shell installers (`curl … | sh`) on
-macOS and Linux. Larrier shows the exact command first and its output as it
+macOS and Linux. Lary shows the exact command first and its output as it
 runs.
 
 Not covered: Goose has no official Windows installer, and Aider is updated

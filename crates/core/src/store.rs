@@ -1,7 +1,7 @@
 //! On-disk store for sessions and configuration.
 //!
-//! Layout (under `%APPDATA%\Larrier`, `~/Library/Application Support/Larrier`
-//! or `~/.local/share/larrier`, overridable with `LARRIER_HOME`):
+//! Layout (under `%APPDATA%\Lary`, `~/Library/Application Support/Lary`
+//! or `~/.local/share/lary`, overridable with `LARY_HOME`):
 //!
 //! ```text
 //! config.json            settings, agents, accounts, providers, workspaces
@@ -23,17 +23,86 @@ use crate::config::Config;
 use crate::lsf::{Session, SessionSummary, LSF_EXT_JSONL};
 
 pub fn data_root() -> PathBuf {
-    if let Ok(p) = std::env::var("LARRIER_HOME") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
+    // `LARRIER_HOME` from before the rename still works.
+    for var in ["LARY_HOME", "LARRIER_HOME"] {
+        if let Ok(p) = std::env::var(var) {
+            if !p.is_empty() {
+                return PathBuf::from(p);
+            }
         }
     }
+    default_root("lary", "Lary")
+}
+
+/// `%APPDATA%\<Name>`, `~/Library/Application Support/<Name>` or
+/// `~/.local/share/<name>`.
+fn default_root(linux: &str, other: &str) -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
-    if cfg!(target_os = "linux") {
-        base.join("larrier")
-    } else {
-        base.join("Larrier")
+    base.join(if cfg!(target_os = "linux") { linux } else { other })
+}
+
+/// Lary was called Larrier: the first time Lary runs, the folder Larrier
+/// kept its data in becomes Lary's. Paths saved inside it (worktrees, the
+/// wallpapers and project pictures, the per-account folders) are pointed at
+/// the new place, and git worktrees moved with it are repaired. Nothing
+/// happens with a folder set by `LARY_HOME` / `LARRIER_HOME`, or once
+/// Lary's own folder exists. Returns what happened, for the log.
+pub fn migrate_from_larrier() -> Option<String> {
+    if ["LARY_HOME", "LARRIER_HOME"].iter().any(|v| std::env::var(v).is_ok_and(|p| !p.is_empty())) {
+        return None;
     }
+    migrate_dir(&default_root("larrier", "Larrier"), &data_root())
+}
+
+/// Move `old` to `new` and point the paths saved inside at the new place
+/// (see [`migrate_from_larrier`]).
+fn migrate_dir(old: &Path, new: &Path) -> Option<String> {
+    if new.exists() || !old.is_dir() {
+        return None;
+    }
+    if let Err(e) = std::fs::rename(old, new) {
+        return Some(format!("couldn't move {} to {}: {e}", old.display(), new.display()));
+    }
+    let (from, to) = (old.display().to_string(), new.display().to_string());
+    // As saved in JSON (backslashes doubled on Windows) and with forward
+    // slashes.
+    let pairs = [
+        (from.replace('\\', "\\\\"), to.replace('\\', "\\\\")),
+        (from.replace('\\', "/"), to.replace('\\', "/")),
+    ];
+    let fix = |text: &str| pairs.iter().fold(text.to_string(), |t, (a, b)| t.replace(a.as_str(), b.as_str()));
+    for name in ["config.json", "index.json"] {
+        let p = new.join(name);
+        if let Ok(t) = std::fs::read_to_string(&p) {
+            let fixed = fix(&t);
+            if fixed != t {
+                let _ = std::fs::write(&p, fixed);
+            }
+        }
+    }
+    // A session's header line holds where it runs (a worktree's path);
+    // its messages are left as they were.
+    if let Ok(rd) = std::fs::read_dir(new.join("sessions")) {
+        for e in rd.flatten() {
+            let Ok(t) = std::fs::read_to_string(e.path()) else { continue };
+            let (head, rest) = t.split_once('\n').unwrap_or((t.as_str(), ""));
+            let fixed = fix(head);
+            if fixed != head {
+                let _ = std::fs::write(e.path(), format!("{fixed}\n{rest}"));
+            }
+        }
+    }
+    // Worktrees moved with the folder: git finds them again.
+    let mut repaired = 0;
+    for project in std::fs::read_dir(new.join("worktrees")).into_iter().flatten().flatten() {
+        for tree in std::fs::read_dir(project.path()).into_iter().flatten().flatten() {
+            if tree.path().join(".git").is_file() {
+                let ok = std::process::Command::new("git").arg("-C").arg(tree.path()).args(["worktree", "repair"]).output().is_ok_and(|o| o.status.success());
+                repaired += ok as usize;
+            }
+        }
+    }
+    Some(format!("moved {from} to {to}; {repaired} worktrees repaired"))
 }
 
 /// Fingerprint of an imported native session so re-imports update in place.
@@ -44,16 +113,16 @@ pub struct ImportRecord {
     pub source_mtime: i64,
     #[serde(default)]
     pub source_len: u64,
-    /// The native session is driven by Larrier itself (we ran the agent or
+    /// The native session is driven by Lary itself (we ran the agent or
     /// exported into it); sync must never re-import it as a new session.
     #[serde(default)]
     pub linked: bool,
-    /// The user deleted the Larrier copy: never import this native session
+    /// The user deleted the Lary copy: never import this native session
     /// again (its own files are left untouched).
     #[serde(default)]
     pub deleted: bool,
     /// Version of the importer that produced the session; sessions from an
-    /// older one are imported again (see `larrier_formats::IMPORTER_VERSION`).
+    /// older one are imported again (see `lary_formats::IMPORTER_VERSION`).
     #[serde(default)]
     pub importer: u32,
 }
@@ -122,7 +191,7 @@ impl Store {
         let before = cfg.version;
         cfg.migrate();
         // Written once in this version's form, so what the migration made
-        // (accounts and their ids) stays put; what the older Larrier wrote
+        // (accounts and their ids) stays put; what the older Lary wrote
         // is kept beside it.
         if before < cfg.version && p.exists() {
             let _ = std::fs::copy(&p, self.root.join(format!("config.v{before}.json")));
@@ -315,8 +384,35 @@ mod tests {
     use crate::lsf::Message;
 
     #[test]
+    fn larriers_folder_becomes_larys_with_its_paths() {
+        let base = std::env::temp_dir().join(format!("lary-migrate-{}", crate::lsf::new_id()));
+        let (old, new) = (base.join("Larrier"), base.join("Lary"));
+        std::fs::create_dir_all(old.join("sessions")).unwrap();
+        let o = old.display().to_string();
+        let esc = |p: &str| p.replace('\\', "\\\\");
+        std::fs::write(old.join("config.json"), format!(r#"{{"home_bg":{{"image":"{}"}}}}"#, esc(&format!("{o}/wallpapers/a.png")))).unwrap();
+        let head = format!(r#"{{"kind":"session","environment":{{"type":"worktree","path":"{}"}}}}"#, esc(&format!("{o}/worktrees/web/agent-1")));
+        let msg = format!(r#"{{"kind":"message","text":"{}"}}"#, esc(&o));
+        std::fs::write(old.join("sessions/s.lsf.jsonl"), format!("{head}\n{msg}\n")).unwrap();
+
+        assert!(migrate_dir(&old, &new).is_some());
+        assert!(!old.exists() && new.join("config.json").exists());
+        let n = new.display().to_string();
+        let config = std::fs::read_to_string(new.join("config.json")).unwrap();
+        assert!(config.contains(&esc(&format!("{n}/wallpapers/a.png"))), "{config}");
+        let session = std::fs::read_to_string(new.join("sessions/s.lsf.jsonl")).unwrap();
+        let (h, rest) = session.split_once('\n').unwrap();
+        assert!(h.contains(&esc(&format!("{n}/worktrees"))), "{h}");
+        assert!(rest.contains(&esc(&o)), "messages stay as they were");
+        // Once Lary's folder is there, nothing moves again.
+        std::fs::create_dir_all(&old).unwrap();
+        assert!(migrate_dir(&old, &new).is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn save_list_delete() {
-        let dir = std::env::temp_dir().join(format!("larrier-test-{}", crate::lsf::new_id()));
+        let dir = std::env::temp_dir().join(format!("lary-test-{}", crate::lsf::new_id()));
         let store = Store::open(&dir).unwrap();
         let mut s = Session::new(AgentKind::Codex, None);
         s.push(Message::user_text("hello"));
@@ -332,11 +428,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// A config an older Larrier wrote is saved once in today's form, with
+    /// A config an older Lary wrote is saved once in today's form, with
     /// the old file kept beside it, so the accounts it became keep their ids.
     #[test]
     fn migrated_config_is_saved_once() {
-        let dir = std::env::temp_dir().join(format!("larrier-test-{}", crate::lsf::new_id()));
+        let dir = std::env::temp_dir().join(format!("lary-test-{}", crate::lsf::new_id()));
         let store = Store::open(&dir).unwrap();
         let old = r#"{"version": 3, "agents": [{"kind": "codex", "endpoints": [{"id": "e1", "name": "Local", "kind": "open_ai_compatible", "base_url": "http://localhost:8000/v1"}]}]}"#;
         std::fs::write(dir.join("config.json"), old).unwrap();

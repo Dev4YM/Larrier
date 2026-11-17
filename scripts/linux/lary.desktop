@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=Larrier
+Name=Lary
 GenericName=Coding agents
 Comment=One desktop app for every coding agent and AI chat
-Exec=larrier %U
-Icon=larrier
+Exec=lary %U
+Icon=lary
 Terminal=false
 Categories=Development;IDE;
-StartupWMClass=larrier
+StartupWMClass=lary
 Keywords=agent;ai;chat;claude;codex;cursor;

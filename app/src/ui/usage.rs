@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local, NaiveDate, Utc};
 use dioxus::prelude::*;
-use larrier_agents::Detected;
-use larrier_core::{AgentKind, Config, SessionSummary};
+use lary_agents::Detected;
+use lary_core::{AgentKind, Config, SessionSummary};
 
 use crate::icons::{Icon, I};
 use crate::logos::{agent_logo, model_logo, Logo};
@@ -599,14 +599,14 @@ fn check(app: App, fresh: bool, gap: Duration) {
     });
 }
 
-/// Keep the plan limits current while Larrier is open: every two minutes
+/// Keep the plan limits current while Lary is open: every two minutes
 /// while an agent works or a plan panel is open, every five otherwise, and
 /// soon after a turn ends. A check that couldn't reach an account waits
 /// longer before the next (up to fifteen minutes), so a busy usage service
 /// isn't asked again and again.
 pub fn keep_fresh(app: App) {
-    // LARRIER_LIMITS_EVERY (seconds) sets one pace for tests.
-    let pace = std::env::var("LARRIER_LIMITS_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10);
+    // LARY_LIMITS_EVERY (seconds) sets one pace for tests.
+    let pace = std::env::var("LARY_LIMITS_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10);
     dioxus::core::spawn_forever(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(10)).await;
@@ -1419,7 +1419,7 @@ fn Heatmap(heat: Vec<u32>) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrier_core::{SessionStatus, Usage, WorkspaceRef};
+    use lary_core::{SessionStatus, Usage, WorkspaceRef};
 
     fn sum(id: &str, agent: AgentKind, ws: Option<&str>, at: DateTime<Utc>) -> SessionSummary {
         SessionSummary {

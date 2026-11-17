@@ -14,7 +14,7 @@ pub mod pi;
 pub mod plain;
 pub mod process;
 
-use larrier_core::{PlanEntry, PlanStatus, Protocol, ToolCall, ToolKind, Usage};
+use lary_core::{PlanEntry, PlanStatus, Protocol, ToolCall, ToolKind, Usage};
 use serde_json::Value;
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -32,7 +32,7 @@ pub async fn run(req: TurnRequest, sink: EventSink, control: UnboundedReceiver<T
         Protocol::QwenStream => claude::run_qwen(req, sink, control).await,
         // Codex itself runs through its app server (live approvals); other
         // agents speaking exec's protocol keep it.
-        Protocol::CodexExec if req.agent == larrier_core::AgentKind::Codex => codex_app::run(req, sink, control).await,
+        Protocol::CodexExec if req.agent == lary_core::AgentKind::Codex => codex_app::run(req, sink, control).await,
         Protocol::CodexExec => codex::run(req, sink, control).await,
         Protocol::CursorStream => cursor::run(req, sink, control).await,
         Protocol::GeminiStream => gemini::run(req, sink, control).await,

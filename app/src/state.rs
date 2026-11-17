@@ -8,21 +8,21 @@ use std::time::{Duration, Instant};
 use dioxus::prelude::*;
 use dioxus::core::spawn_forever;
 use serde::{Deserialize, Serialize};
-use larrier_agents::{
+use lary_agents::{
     engine::TurnRecorder, events::PermissionRequest, git, AgentEvent, Detected, Reply, TurnControl, TurnHandle,
 };
-use larrier_core::{
+use lary_core::{
     lsf::{new_id, MediaSource},
     store::{import_key, ImportRecord},
     AccountAuth, AgentKind, BusySend, Config, Environment, Message, Part, Role, Session, SessionStatus, SessionSummary, Store,
     Theme, WorkspaceRef,
 };
-use larrier_formats::ExportFormat;
+use lary_formats::ExportFormat;
 
 static STORE: OnceLock<Store> = OnceLock::new();
 
 pub fn store() -> &'static Store {
-    STORE.get_or_init(|| Store::open_default().expect("cannot open Larrier data directory"))
+    STORE.get_or_init(|| Store::open_default().expect("cannot open Lary data directory"))
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -150,7 +150,7 @@ pub enum Modal {
     AddWorkspace,
     /// A project: a new one (its folder, when known), or one to edit (its id).
     Project(Option<String>, Option<String>),
-    /// A release's notes; `true` when Larrier was just updated to it.
+    /// A release's notes; `true` when Lary was just updated to it.
     WhatsNew(String, bool),
 }
 
@@ -176,7 +176,7 @@ pub struct Ui {
     pub maximized: bool,
     /// Session context menu at a window position.
     pub ctx: Option<CtxMenu>,
-    /// Larrier's own right-click menu for everything else.
+    /// Lary's own right-click menu for everything else.
     pub gctx: Option<GlobalCtx>,
     /// Back / forward navigation.
     pub history: Vec<View>,
@@ -194,8 +194,8 @@ pub struct Ui {
     /// the visible composer picks up.
     pub attach_inbox: Vec<Part>,
     /// What Customize opens on (from `/mcp`): a kind of item, an agent.
-    pub customize_focus: Option<(Option<larrier_agents::harness::ItemKind>, Option<AgentKind>)>,
-    /// Agents that were interrupted when Larrier last closed.
+    pub customize_focus: Option<(Option<lary_agents::harness::ItemKind>, Option<AgentKind>)>,
+    /// Agents that were interrupted when Lary last closed.
     pub interrupted: Vec<String>,
     /// Text to insert into a composer: (session, text); `None` is the new
     /// agent composer.
@@ -295,7 +295,7 @@ impl EditState {
     }
 }
 
-/// Where updating Larrier stands.
+/// Where updating Lary stands.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub enum UpdateState {
     #[default]
@@ -427,7 +427,7 @@ pub struct App {
     /// Session being dragged (sidebar row or tab), for the drop targets.
     pub drag: Signal<Option<String>>,
     /// Sessions another app (a terminal CLI, an IDE) is writing right now:
-    /// id → when Larrier first saw it live. See `crate::live`.
+    /// id → when Lary first saw it live. See `crate::live`.
     pub live: Signal<HashMap<String, Instant>>,
     /// Running sessions whose agent finished its reply while background work
     /// (subagents, commands) keeps the turn open: not "generating".
@@ -438,7 +438,7 @@ pub struct App {
     pub update: Signal<UpdateState>,
     /// Each agent's own models and defaults, by agent id (see
     /// `crate::agent_models`).
-    pub native_models: Signal<HashMap<String, larrier_agents::models::AgentModels>>,
+    pub native_models: Signal<HashMap<String, lary_agents::models::AgentModels>>,
     /// Agents whose models are being re-read.
     pub models_refreshing: Signal<HashSet<String>>,
 }
@@ -464,7 +464,7 @@ impl App {
     pub fn new() -> App {
         let cfg = store().load_config();
         // Accounts with a folder of their own: their sessions are read too.
-        larrier_formats::set_account_homes(account_homes(&cfg));
+        lary_formats::set_account_homes(account_homes(&cfg));
         let draft = Draft {
             agent: cfg.settings.default_agent.clone(),
             model: None,
@@ -630,14 +630,14 @@ impl App {
     }
 
     /// Mid-turn in the agent's own app (a terminal CLI, Claude's or Cursor's
-    /// app), not run by Larrier: Larrier can't reach that process, and
+    /// app), not run by Lary: Lary can't reach that process, and
     /// running the agent here at the same time would fork the conversation.
     pub fn running_elsewhere(&self, id: &str) -> bool {
         !self.is_running(id) && self.is_active(id)
     }
 
     /// Whether an agent is working on this session right now — run by
-    /// Larrier, or mid-turn in its own app (a terminal CLI, an IDE) as seen
+    /// Lary, or mid-turn in its own app (a terminal CLI, an IDE) as seen
     /// through live sync. Everything that shows "running" uses this.
     pub fn is_active(&self, id: &str) -> bool {
         if self.is_running(id) {
@@ -729,7 +729,7 @@ impl App {
         save_async(s.clone());
     }
 
-    /// A session changed outside Larrier (live sync, already saved): show the
+    /// A session changed outside Lary (live sync, already saved): show the
     /// new contents wherever it is open and update its sidebar row.
     pub fn apply_external(mut self, s: Session) {
         let sum = s.summary();
@@ -827,7 +827,7 @@ impl App {
         }
     }
 
-    /// Bring back where the window was when Larrier closed: the chat or
+    /// Bring back where the window was when Lary closed: the chat or
     /// page shown (its side panel and browser with it), its tabs, the chat
     /// beside it, the way back and forward, the sidebar and a prompt being
     /// edited. Chats deleted since are left out.
@@ -1310,7 +1310,7 @@ impl App {
         }
 
         let cfg = self.config.read().clone();
-        let request = self.peek_session(&id, |s| larrier_agents::build_request(&cfg, s, &agent)).expect("loaded");
+        let request = self.peek_session(&id, |s| lary_agents::build_request(&cfg, s, &agent)).expect("loaded");
         let mut recorder = self.mutate_session(&id, |s| TurnRecorder::begin(s, agent.clone(), model, account)).expect("loaded");
         if let Some(text) = notice {
             self.mutate_session(&id, |s| recorder.apply(s, &AgentEvent::Notice { text }));
@@ -1320,7 +1320,7 @@ impl App {
                 if let Some(h) = &req.handoff {
                     tracing::info!("handing {} chars of context to {}", h.len(), agent.display_name());
                 }
-                let handle = larrier_agents::start_turn(req);
+                let handle = lary_agents::start_turn(req);
                 self.running.write().insert(id.clone(), handle.control.clone());
                 self.persist(&id);
                 self.drive(id, handle, recorder);
@@ -1463,7 +1463,7 @@ impl App {
                             AgentEvent::NativeSession { id: native, .. } => {
                                 // A session imported from this very native
                                 // session keeps syncing from it (the agent
-                                // writes Larrier's turn there too); any other
+                                // writes Lary's turn there too); any other
                                 // native session is this one's own.
                                 if s.origin.native_id.as_deref() != Some(native.as_str()) {
                                     store().set_import_record(&import_key(&rec.agent, native), ImportRecord::linked(&id));
@@ -1627,7 +1627,7 @@ impl App {
         self.idle.write().remove(id);
     }
 
-    /// Write every running chat as it is now: Larrier is closing, and the
+    /// Write every running chat as it is now: Lary is closing, and the
     /// agents' latest words can't wait for the next save.
     pub fn save_running(&self) {
         let ids: Vec<String> = self.running.peek().keys().cloned().collect();
@@ -1677,7 +1677,7 @@ impl App {
     /// the queue, or sent now after stopping the agent.
     pub fn send_while_busy(mut self, id: &str, text: String, attachments: Vec<Part>, how: BusySend) {
         let agent = self.peek_session(id, |s| s.agent.clone()).unwrap_or(AgentKind::ClaudeCode);
-        let steerable = larrier_agents::can_steer(&agent, &self.config.read());
+        let steerable = lary_agents::can_steer(&agent, &self.config.read());
         let item = Queued { id: rand_id(), text, attachments };
         match how {
             BusySend::Steer | BusySend::Interrupt if steerable => {
@@ -1779,7 +1779,7 @@ impl App {
         let mut s = Session::new(d.agent.clone(), ws.clone());
         s.model = d.model.clone();
         s.effort = d.effort.clone();
-        s.fast = d.fast && larrier_agents::request::takes_fast(&d.agent);
+        s.fast = d.fast && lary_agents::request::takes_fast(&d.agent);
         s.mode = d.mode.clone();
         s.permission = d.permission.clone();
         s.account_id = d.account_id.clone();
@@ -1794,7 +1794,7 @@ impl App {
                     s.environment = Environment::Worktree { path: t.path, branch, base: w.branch.clone() };
                 } else if git::is_repo(&repo) {
                     let short = &s.id[s.id.len() - 6..];
-                    let branch = format!("larrier/agent-{short}");
+                    let branch = format!("lary/agent-{short}");
                     let base_dir = self
                         .config
                         .read()
@@ -1916,7 +1916,7 @@ impl App {
 
     /// Edit Home: its name, look, agents and where its chats run.
     pub fn edit_home(mut self) {
-        self.ui.write().modal = Some(Modal::Project(Some(larrier_core::config::HOME_PROJECT.into()), None));
+        self.ui.write().modal = Some(Modal::Project(Some(lary_core::config::HOME_PROJECT.into()), None));
     }
 
     /// Edit the project at `path` (a folder that isn't one yet opens as a
@@ -1975,18 +1975,18 @@ impl App {
         // Found on its own: download it now unless the user only wants to
         // be told.
         let mode = self.config.peek().settings.updates;
-        if fresh && quiet && matches!(mode, larrier_core::UpdateMode::Download | larrier_core::UpdateMode::Install) {
+        if fresh && quiet && matches!(mode, lary_core::UpdateMode::Download | lary_core::UpdateMode::Install) {
             self.download_update();
         }
         true
     }
 
-    /// Put a downloaded release in place when Larrier closes (the Install
+    /// Put a downloaded release in place when Lary closes (the Install
     /// mode): it waits for this process to end, replaces it, and stays
     /// closed. Called by every way of closing (once).
     pub fn install_on_exit(self) {
         static HANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if self.config.peek().settings.updates != larrier_core::UpdateMode::Install {
+        if self.config.peek().settings.updates != lary_core::UpdateMode::Install {
             return;
         }
         if let UpdateState::Ready { path, .. } = self.update.peek().clone() {
@@ -2079,7 +2079,8 @@ impl App {
         // Clean up a worktree we created (one that was there before stays).
         if let Some(s) = self.peek_session(id, |s| s.clone()).or_else(|| store().load(id).ok()) {
             if let (Environment::Worktree { path, branch, .. }, Some(ws)) = (&s.environment, &s.workspace) {
-                if branch.starts_with("larrier/") {
+                // Larrier (Lary's old name) made `larrier/` branches.
+                if branch.starts_with("lary/") || branch.starts_with("larrier/") {
                     let _ = git::remove_worktree(&PathBuf::from(&ws.path), &PathBuf::from(path));
                 }
             }
@@ -2124,9 +2125,9 @@ impl App {
                 return;
             }
             let from = s.agent.display_name();
-            if larrier_formats::supports_native_export(&target2) {
+            if lary_formats::supports_native_export(&target2) {
                 let home = account_home(&cfg, &target2, s.account_id.as_deref());
-                match larrier_formats::export_native(s, &target2, home.as_deref()) {
+                match lary_formats::export_native(s, &target2, home.as_deref()) {
                     Ok(link) => {
                         store().set_import_record(&import_key(&target2, &link.id), ImportRecord::linked(&s.id));
                         store().flush_imports();
@@ -2197,7 +2198,7 @@ impl App {
                 return;
             }
             let home = account_home(&cfg, &agent, Some(&account));
-            match larrier_formats::supports_native_export(&agent).then(|| larrier_formats::export_native(s, &agent, home.as_deref())) {
+            match lary_formats::supports_native_export(&agent).then(|| lary_formats::export_native(s, &agent, home.as_deref())) {
                 Some(Ok(link)) => {
                     store().set_import_record(&import_key(&agent, &link.id), ImportRecord::linked(&s.id));
                     store().flush_imports();
@@ -2221,7 +2222,7 @@ impl App {
             return;
         }
         let Some(s) = self.peek_session(id, |s| s.clone()) else { return };
-        let text = match larrier_formats::export_string(&s, format) {
+        let text = match lary_formats::export_string(&s, format) {
             Ok(t) => t,
             Err(e) => return self.toast_err(e.to_string()),
         };
@@ -2240,7 +2241,7 @@ impl App {
     /// Open the session in the agent's own CLI in a terminal window.
     /// Sign `account` in: its agent's login in a terminal, in its own folder.
     /// The browser decides which account it signs in to.
-    pub fn sign_in(self, account: &larrier_core::Account) {
+    pub fn sign_in(self, account: &lary_core::Account) {
         let Some(login) = account.agent.spec().login_command else {
             return self.toast(format!("{} signs in from its own app", account.agent.display_name()));
         };
@@ -2286,7 +2287,7 @@ impl App {
     pub fn detect_agents(mut self) {
         let cfg = self.config.read().clone();
         spawn_forever(async move {
-            let found = larrier_agents::detect_all(&cfg).await;
+            let found = lary_agents::detect_all(&cfg).await;
             self.detected.set(found);
         });
     }
@@ -2294,14 +2295,14 @@ impl App {
     pub fn sync_imports(mut self, quiet: bool) {
         let agents: Vec<AgentKind> = {
             let cfg = self.config.read();
-            larrier_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect()
+            lary_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect()
         };
         self.sync_status.set("Importing sessions…".into());
         spawn_forever(async move {
             // Chats running here are left alone; the changed ones are loaded
             // off the UI thread and swapped into any open view.
             let report = tokio::task::spawn_blocking(move || {
-                let r = larrier_formats::sync_skipping(store(), &agents, &crate::live::is_busy);
+                let r = lary_formats::sync_skipping(store(), &agents, &crate::live::is_busy);
                 let fresh: Vec<Session> = r.changed.iter().filter_map(|id| store().load(id).ok()).collect();
                 (r, fresh)
             })
@@ -2341,7 +2342,7 @@ impl App {
             let Some(files) = files else { return };
             let mut count = 0;
             for f in files {
-                match larrier_formats::import_file(f.path()) {
+                match lary_formats::import_file(f.path()) {
                     Ok(list) => {
                         count += list.len();
                         let _ = store().save_many(&list);
@@ -2392,7 +2393,7 @@ impl App {
 impl App {
     /// Edit a past prompt in place: the prompt and everything after it are
     /// replaced by the new one, and the agent's own session follows as far
-    /// as the agent allows ([`larrier_formats::Rewind`]). Where it can't, the
+    /// as the agent allows ([`lary_formats::Rewind`]). Where it can't, the
     /// reply says so.
     pub fn edit_and_resend(self, session_id: &str, message_id: &str, text: String, attachments: Vec<Part>) {
         if (text.trim().is_empty() && attachments.is_empty()) || !self.ensure_loaded(session_id) {
@@ -2406,37 +2407,37 @@ impl App {
             let idx = s.messages.iter().position(|m| m.id == message_id)?;
             let home = account_home(&cfg, &s.agent, s.account_id.as_deref());
             let old_link = s.native_link(&s.agent).map(|l| l.id.clone());
-            Some((idx, larrier_formats::rewind(s, idx, home.as_deref()), s.agent.clone(), old_link))
+            Some((idx, lary_formats::rewind(s, idx, home.as_deref()), s.agent.clone(), old_link))
         });
         let Some(Some((idx, rewind, agent, old_link))) = found else { return };
         let name = agent.display_name();
         let notice = match &rewind {
-            larrier_formats::Rewind::ResumeAt(_) | larrier_formats::Rewind::Fresh => None,
-            larrier_formats::Rewind::Copy(_) => Some(format!("{name} can't rewind its own session: it continues from a copy written up to this prompt.")),
-            larrier_formats::Rewind::Handoff if old_link.is_some() => {
+            lary_formats::Rewind::ResumeAt(_) | lary_formats::Rewind::Fresh => None,
+            lary_formats::Rewind::Copy(_) => Some(format!("{name} can't rewind its own session: it continues from a copy written up to this prompt.")),
+            lary_formats::Rewind::Handoff if old_link.is_some() => {
                 Some(format!("{name} can't rewind its own chat: it continues in a new one, with the conversation before this prompt as context."))
             }
-            larrier_formats::Rewind::Handoff => None,
+            lary_formats::Rewind::Handoff => None,
         };
         // Whatever the agent writes to its old session no longer belongs here.
         if let Some(old) = &old_link {
             store().set_import_record(&import_key(&agent, old), ImportRecord::linked(session_id));
         }
-        if let larrier_formats::Rewind::Copy(link) = &rewind {
+        if let lary_formats::Rewind::Copy(link) = &rewind {
             store().set_import_record(&import_key(&agent, &link.id), ImportRecord::linked(session_id));
         }
         store().flush_imports();
         self.update_session(session_id, move |s| {
             s.messages.truncate(idx);
             match rewind {
-                larrier_formats::Rewind::ResumeAt(at) => {
+                lary_formats::Rewind::ResumeAt(at) => {
                     if let Some(l) = s.native_link_mut(&agent) {
                         l.resume_at = Some(at);
                         l.synced_messages = idx;
                     }
                 }
-                larrier_formats::Rewind::Copy(link) => s.set_native_link(link),
-                larrier_formats::Rewind::Fresh | larrier_formats::Rewind::Handoff => s.native.retain(|l| l.agent != agent),
+                lary_formats::Rewind::Copy(link) => s.set_native_link(link),
+                lary_formats::Rewind::Fresh | lary_formats::Rewind::Handoff => s.native.retain(|l| l.agent != agent),
             }
             s.recompute_usage();
         });
@@ -2466,8 +2467,8 @@ impl App {
             return self.toast("This agent has no folder");
         };
         for editor in ["cursor", "code"] {
-            if let Some(bin) = larrier_agents::detect::which_program(editor) {
-                let (prog, prefix) = larrier_agents::request::unwrap_shim(&bin);
+            if let Some(bin) = lary_agents::detect::which_program(editor) {
+                let (prog, prefix) = lary_agents::request::unwrap_shim(&bin);
                 let mut c = std::process::Command::new(prog);
                 c.args(prefix).arg(&dir);
                 #[cfg(windows)]
@@ -2542,7 +2543,7 @@ impl App {
             match image_bytes(&src).await {
                 Ok((bytes, ext)) => {
                     use sha2::Digest;
-                    let name = format!("larrier-image-{}.{ext}", hex_short(&sha2::Sha256::digest(&bytes)));
+                    let name = format!("lary-image-{}.{ext}", hex_short(&sha2::Sha256::digest(&bytes)));
                     let path = std::env::temp_dir().join(name);
                     match std::fs::write(&path, &bytes) {
                         Ok(()) => {
@@ -2600,7 +2601,7 @@ fn saver() -> &'static Mutex<mpsc::Sender<SaveMsg>> {
     TX.get_or_init(|| {
         let (tx, rx) = mpsc::channel::<SaveMsg>();
         std::thread::Builder::new()
-            .name("larrier-save".into())
+            .name("lary-save".into())
             .spawn(move || {
                 while let Ok(first) = rx.recv() {
                     // Coalesce: only the newest snapshot of each session is written.
@@ -2709,7 +2710,7 @@ pub fn waits_on_subagents(m: &Message) -> bool {
     let mut running = false;
     for p in m.parts.iter().rev() {
         match p {
-            Part::Tool(t) if t.is_subagent() => running |= matches!(t.status, larrier_core::lsf::ToolStatus::Running | larrier_core::lsf::ToolStatus::Pending),
+            Part::Tool(t) if t.is_subagent() => running |= matches!(t.status, lary_core::lsf::ToolStatus::Running | lary_core::lsf::ToolStatus::Pending),
             Part::Tool(_) => return false,
             _ => break,
         }
@@ -2835,7 +2836,7 @@ pub fn account_homes(cfg: &Config) -> Vec<(AgentKind, PathBuf, String)> {
 /// `cmd` as typed in a terminal, run as `account` when it signs in from a
 /// folder of its own (that folder's variable set first). Keys never go on a
 /// command line.
-pub fn as_account(agent: &AgentKind, account: Option<&larrier_core::Account>, cmd: &str) -> String {
+pub fn as_account(agent: &AgentKind, account: Option<&lary_core::Account>, cmd: &str) -> String {
     match (account.map(|a| &a.auth), agent.spec().home_env) {
         (Some(AccountAuth::ConfigDir { path }), Some(var)) => {
             if cfg!(windows) {
@@ -2849,7 +2850,7 @@ pub fn as_account(agent: &AgentKind, account: Option<&larrier_core::Account>, cm
 }
 
 /// Whether an account is signed in, and as whom when the agent says.
-pub fn signed_in_as(account: &larrier_core::Account) -> (bool, Option<String>) {
+pub fn signed_in_as(account: &lary_core::Account) -> (bool, Option<String>) {
     let home = dirs::home_dir().unwrap_or_default();
     let dir = match &account.auth {
         AccountAuth::ConfigDir { path } => Some(PathBuf::from(path)),
@@ -2924,10 +2925,10 @@ pub fn sanitize_filename(s: &str) -> String {
     }
 }
 
-/// A call to Larrier's browser tools (`mcp__larrier_browser__navigate`,
-/// or an ACP agent's "larrier_browser: …").
-fn is_browser_tool(t: &larrier_core::ToolCall) -> bool {
-    let n = larrier_agents::browser::SERVER_NAME;
+/// A call to Lary's browser tools (`mcp__lary_browser__navigate`,
+/// or an ACP agent's "lary_browser: …").
+fn is_browser_tool(t: &lary_core::ToolCall) -> bool {
+    let n = lary_agents::browser::SERVER_NAME;
     t.name.contains(n) || t.title.as_deref().is_some_and(|x| x.contains(n))
 }
 

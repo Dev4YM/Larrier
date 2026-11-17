@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in Larrier doesn't work as it should.
+description: Something in Lary doesn't work as it should.
 labels: [bug]
 body:
   - type: textarea
@@ -16,9 +16,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: Larrier version
-      description: Settings → About, or `Larrier.exe --version`.
-      placeholder: Larrier 0.1.32 (c513e06, 2026-11-01)
+      label: Lary version
+      description: Settings → About, or `Lary.exe --version`.
+      placeholder: Lary 0.1.32 (c513e06, 2026-11-01)
     validations:
       required: true
   - type: input

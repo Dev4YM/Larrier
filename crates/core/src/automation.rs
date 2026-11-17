@@ -150,7 +150,7 @@ impl Automation {
 
     /// When the next scheduled run is due, computed from the last run (or the
     /// creation time for a new automation). `None` for event-driven and
-    /// manual triggers. A run that was missed while Larrier was closed is
+    /// manual triggers. A run that was missed while Lary was closed is
     /// due immediately, once — missed runs are never replayed one by one.
     pub fn next_due(&self, now: DateTime<Local>) -> Option<DateTime<Local>> {
         let _ = now;
@@ -308,7 +308,7 @@ suite, and make sure everything passes. Summarize the tests you added and anythi
             action: "Writes digest",
             prompt: "Summarize what changed in this repository in the last 24 hours across all branches \
 (`git log --all --since=\"24 hours ago\" --stat`). Group by theme, call out risky changes, migrations, dependency bumps \
-and anything that needs a reviewer's attention. Write the digest to `.larrier/digests/<today's date>.md` (create the \
+and anything that needs a reviewer's attention. Write the digest to `.lary/digests/<today's date>.md` (create the \
 folder if needed) and also reply with the summary.",
             icon: "mail",
             color: "#9b3b8f",
@@ -366,7 +366,7 @@ summarize what you changed. Skip anything that would need a design decision and 
             action: "Writes report",
             prompt: "Find all TODO, FIXME, HACK and XXX comments in this repository. Group them by area, rank them by risk \
 (security, data loss, correctness, cleanup), and note which look stale. Write the result to \
-`.larrier/triage/todos.md` and reply with the top ten.",
+`.lary/triage/todos.md` and reply with the top ten.",
             icon: "list-todo",
             color: "#c08532",
         },
@@ -380,7 +380,7 @@ summarize what you changed. Skip anything that would need a design decision and 
             action: "Writes changelog",
             prompt: "Draft release notes for the changes since the most recent git tag (`git describe --tags --abbrev=0`, then \
 `git log <tag>..HEAD`). Group into Highlights, Features, Fixes and Internal, written for users rather than developers. \
-Save the draft to `.larrier/CHANGELOG-draft.md` and reply with it.",
+Save the draft to `.lary/CHANGELOG-draft.md` and reply with it.",
             icon: "scroll-text",
             color: "#3a6a9f",
         },

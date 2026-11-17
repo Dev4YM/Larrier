@@ -89,14 +89,14 @@ fn code_block(info: &str, text: &str) -> String {
 fn local_image(url: &str) -> Option<String> {
     let u = url.trim();
     let path = if u.starts_with("file://") {
-        larrier_formats::util::file_url_path(u)
+        lary_formats::util::file_url_path(u)
     } else if u.len() > 2 && u.as_bytes()[1] == b':' && u.as_bytes()[0].is_ascii_alphabetic() || u.starts_with('/') && !u.starts_with("//") {
         u.to_string()
     } else {
         return None;
     };
-    let mime = larrier_formats::util::image_mime(&path)?;
-    let part = larrier_core::Part::Image { mime: Some(mime), source: larrier_core::lsf::MediaSource::Path { path } };
+    let mime = lary_formats::util::image_mime(&path)?;
+    let part = lary_core::Part::Image { mime: Some(mime), source: lary_core::lsf::MediaSource::Path { path } };
     crate::state::image_src(&part)
 }
 

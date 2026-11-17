@@ -18,8 +18,8 @@ pub struct Config {
     /// environments. Each belongs to one harness ([`Account::agent`]).
     #[serde(default)]
     pub accounts: Vec<Account>,
-    /// Chat providers as Larrier wrote them before accounts held every
-    /// credential: read once and turned into Larrier Chat accounts
+    /// Chat providers as Lary wrote them before accounts held every
+    /// credential: read once and turned into Lary Chat accounts
     /// ([`Config::migrate`]), never written.
     #[serde(default, skip_serializing)]
     pub providers: Vec<Provider>,
@@ -38,7 +38,7 @@ pub struct Config {
     pub profile: Profile,
 }
 
-/// The person using Larrier, as they describe themselves (Settings ->
+/// The person using Lary, as they describe themselves (Settings ->
 /// Profile). Empty fields fall back (the name to git's `user.name`).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct Profile {
@@ -53,7 +53,7 @@ pub struct Profile {
     pub website: Option<String>,
     #[serde(default)]
     pub about: String,
-    /// Their photo, kept in Larrier's data folder.
+    /// Their photo, kept in Lary's data folder.
     #[serde(default)]
     pub photo: Option<String>,
 }
@@ -90,7 +90,7 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Bring a config written by an older Larrier up to date.
+    /// Bring a config written by an older Lary up to date.
     pub fn migrate(&mut self) {
         if self.version < 2 {
             // 2: OpenCode and Hermes connect over ACP, where they can ask.
@@ -330,7 +330,7 @@ pub struct Settings {
     pub sidebar_closed: Vec<String>,
     #[serde(default = "yes")]
     pub notify_on_finish: bool,
-    /// Look for a newer release on GitHub (installed copies of Larrier).
+    /// Look for a newer release on GitHub (installed copies of Lary).
     /// Off turns `updates` off whatever it says (older configs).
     #[serde(default = "yes")]
     pub auto_update: bool,
@@ -396,7 +396,7 @@ pub struct Settings {
     /// does the other of steer and queue).
     #[serde(default)]
     pub busy_send: BusySend,
-    /// Agents get Larrier's browser as tools (shown live in the Browser tab).
+    /// Agents get Lary's browser as tools (shown live in the Browser tab).
     #[serde(default = "yes")]
     pub browser_tools: bool,
     /// A finished turn's steps fold under "Worked for …" (off: they stay open).
@@ -414,7 +414,7 @@ pub struct Settings {
 /// how it's drawn: it covers the top of the page and fades into it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct HomeBackground {
-    /// An image or GIF copied into Larrier's folder; empty: none.
+    /// An image or GIF copied into Lary's folder; empty: none.
     #[serde(default)]
     pub image: String,
     #[serde(default = "dither")]
@@ -498,7 +498,7 @@ pub struct Wallpaper {
     pub look: HomeBackground,
 }
 
-/// What Larrier does about new releases on its own.
+/// What Lary does about new releases on its own.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateMode {
@@ -509,7 +509,7 @@ pub enum UpdateMode {
     /// Also downloads it in the background; restarting installs it.
     #[default]
     Download,
-    /// Also installs it when Larrier closes.
+    /// Also installs it when Lary closes.
     Install,
 }
 
@@ -527,10 +527,10 @@ impl UpdateMode {
 
     pub fn description(self) -> &'static str {
         match self {
-            UpdateMode::Off => "Larrier never looks for new releases; check by hand below.",
+            UpdateMode::Off => "Lary never looks for new releases; check by hand below.",
             UpdateMode::Notify => "When a new release is out, the update button appears; downloading is up to you.",
             UpdateMode::Download => "New releases download in the background; Restart puts them in place.",
-            UpdateMode::Install => "New releases download in the background and are installed when Larrier closes.",
+            UpdateMode::Install => "New releases download in the background and are installed when Lary closes.",
         }
     }
 }
@@ -578,7 +578,7 @@ impl BusySend {
 }
 
 /// A model starred in the model picker: which harness runs it, and its id
-/// as the picker stores it (Larrier Chat's as `account/model`).
+/// as the picker stores it (Lary Chat's as `account/model`).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct FavoriteModel {
     pub agent: AgentKind,
@@ -640,7 +640,7 @@ fn default_sidebar_width() -> u32 {
 fn default_chat_width() -> u32 {
     560
 }
-/// How big Larrier's text is. One step sets every kind of text together,
+/// How big Lary's text is. One step sets every kind of text together,
 /// so sizes and line heights always fit each other.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -746,7 +746,7 @@ pub enum Theme {
     Dark,
 }
 
-/// Which releases Larrier updates to.
+/// Which releases Lary updates to.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateChannel {
@@ -779,11 +779,11 @@ pub enum SidebarSort {
     Name,
 }
 
-/// How much autonomy agents get when Larrier launches them.
+/// How much autonomy agents get when Lary launches them.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RunMode {
-    /// Agent's own defaults; permission prompts are surfaced in Larrier when the protocol supports it.
+    /// Agent's own defaults; permission prompts are surfaced in Lary when the protocol supports it.
     Ask,
     /// File edits are auto-approved, commands still ask.
     #[default]
@@ -835,7 +835,7 @@ pub struct AgentConfig {
     /// Reasoning effort for new sessions; `None` follows the agent's own.
     #[serde(default)]
     pub default_effort: Option<String>,
-    /// Models the agent features that the user hid from Larrier's picker.
+    /// Models the agent features that the user hid from Lary's picker.
     #[serde(default)]
     pub hidden_models: Vec<String>,
     /// Models the agent offers but doesn't feature, shown in the picker.
@@ -844,7 +844,7 @@ pub struct AgentConfig {
     /// Models the user added for this agent.
     #[serde(default)]
     pub custom_models: Vec<CustomModel>,
-    /// API endpoints as Larrier wrote them before they were accounts: read
+    /// API endpoints as Lary wrote them before they were accounts: read
     /// once and turned into this agent's API accounts, never written.
     #[serde(default, skip_serializing)]
     pub endpoints: Vec<AgentEndpoint>,
@@ -1002,7 +1002,7 @@ pub enum AccountAuth {
     /// A provider's API, or any endpoint that speaks it, with a key in the
     /// OS keychain.
     Api(ApiAccount),
-    /// An API key exported as one variable, as Larrier wrote it before API
+    /// An API key exported as one variable, as Lary wrote it before API
     /// accounts: read, then turned into [`AccountAuth::Api`].
     ApiKey { env_var: String, secret_ref: String },
     /// Arbitrary environment variables (values may reference secrets as `secret:<ref>`).
@@ -1035,7 +1035,7 @@ impl AccountAuth {
 }
 
 /// An API account: which API, where it is served, its key and, for
-/// Larrier Chat, the models it offers.
+/// Lary Chat, the models it offers.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ApiAccount {
     pub api: ApiKind,
@@ -1046,10 +1046,10 @@ pub struct ApiAccount {
     #[serde(default)]
     pub secret_ref: Option<String>,
     /// For a harness that reads its key from the environment: the variable
-    /// the key goes in. `None`: Larrier points the harness at the API itself.
+    /// the key goes in. `None`: Lary points the harness at the API itself.
     #[serde(default)]
     pub env_var: Option<String>,
-    /// The models it offers in Larrier Chat (agents list their own).
+    /// The models it offers in Lary Chat (agents list their own).
     #[serde(default)]
     pub models: Vec<String>,
 }
@@ -1124,7 +1124,7 @@ impl ApiKind {
         !matches!(self, ApiKind::Ollama)
     }
 
-    /// Models to start a Larrier Chat account with; the user edits the list.
+    /// Models to start a Lary Chat account with; the user edits the list.
     pub fn suggested_models(self) -> &'static [&'static str] {
         match self {
             ApiKind::Anthropic => &["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
@@ -1178,7 +1178,7 @@ impl From<EndpointKind> for ApiKind {
 }
 
 /// Before API accounts (config version 4): a model API for the built-in
-/// Chat agent, read only to become a Larrier Chat account.
+/// Chat agent, read only to become a Lary Chat account.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Provider {
     pub id: String,
@@ -1377,7 +1377,7 @@ mod tests {
         }
     }
 
-    /// Providers the user set up become Larrier Chat accounts with the same
+    /// Providers the user set up become Lary Chat accounts with the same
     /// ids and keys; the untouched built-in list leaves nothing behind.
     #[test]
     fn chat_providers_become_accounts() {

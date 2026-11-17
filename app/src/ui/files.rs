@@ -511,7 +511,7 @@ pub fn FilesPanel(session_id: String, cwd: Option<String>) -> Element {
                                 span { class: "fv-tab-name", "{name}" }
                                 button {
                                     class: "fv-x",
-                                    title: if dirty.contains(f) { "Close (unsaved changes stay until you close Larrier)" } else { "Close" },
+                                    title: if dirty.contains(f) { "Close (unsaved changes stay until you close Lary)" } else { "Close" },
                                     onclick: {
                                         let (s, f) = (sid_tabs.clone(), f.clone());
                                         move |e: MouseEvent| {
@@ -891,7 +891,7 @@ mod tests {
 
     #[test]
     fn files_load_text_binary_image() {
-        let dir = std::env::temp_dir().join(format!("larrier-fv-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lary-fv-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let t = dir.join("x.rs");
         std::fs::write(&t, "fn a() {}\nfn b() {}\n").unwrap();

@@ -1,11 +1,11 @@
 //! Chat app exports: ChatGPT `conversations.json` and claude.ai
-//! `conversations.json`. Imported conversations are continued with Larrier's
+//! `conversations.json`. Imported conversations are continued with Lary's
 //! built-in Chat agent.
 
 use std::collections::HashMap;
 
 use anyhow::Result;
-use larrier_core::{AgentKind, Part, Session, ToolCall};
+use lary_core::{AgentKind, Part, Session, ToolCall};
 use serde_json::Value;
 
 use crate::util::{self, content_text, finish_as, s, string, ts_value, Conv, Meta};

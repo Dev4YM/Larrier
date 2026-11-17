@@ -1,4 +1,4 @@
-//! LSF — the Larrier Session Format.
+//! LSF — the Lary Session Format.
 //!
 //! One portable representation for every agent conversation and AI chat.
 //! Sessions are stored as JSON Lines (`*.lsf.jsonl`): the first line is the
@@ -212,7 +212,7 @@ pub struct Origin {
 }
 
 impl Origin {
-    pub fn larrier(agent: AgentKind) -> Self {
+    pub fn lary(agent: AgentKind) -> Self {
         Origin { agent, native_id: None, path: None, imported_at: None, agent_version: None }
     }
 }
@@ -921,7 +921,7 @@ impl Session {
             run_as: None,
             workspace,
             environment: Environment::Local,
-            origin: Origin::larrier(agent),
+            origin: Origin::lary(agent),
             native: Vec::new(),
             parent: None,
             tags: Vec::new(),
@@ -1355,7 +1355,7 @@ pub struct SessionSummary {
 }
 
 impl SessionSummary {
-    /// Time of the latest activity (entries saved before Larrier recorded
+    /// Time of the latest activity (entries saved before Lary recorded
     /// it fall back to when they were last saved).
     pub fn activity(&self) -> DateTime<Utc> {
         self.active_at.unwrap_or(self.updated_at).max(self.created_at)
@@ -1561,7 +1561,7 @@ pub fn short_path(p: &str) -> String {
 }
 
 pub fn title_from_prompt(prompt: &str) -> String {
-    // Larrier's context tokens (`@agent:<id>`, `@git:diff`) aren't words.
+    // Lary's context tokens (`@agent:<id>`, `@git:diff`) aren't words.
     let word = |w: &&str| !w.starts_with("@agent:") && *w != "@git:diff";
     let line = prompt
         .lines()

@@ -1,9 +1,9 @@
 # Privacy and data
 
-Larrier runs on your computer. It has no account, no server of its own and
+Lary runs on your computer. It has no account, no server of its own and
 no telemetry.
 
-## What Larrier stores
+## What Lary stores
 
 In its data folder (see [install.md](install.md#your-data)):
 
@@ -14,7 +14,7 @@ In its data folder (see [install.md](install.md#your-data)):
 | `index.json` | Session summaries for fast listing. |
 | `imports.json` | Fingerprints of native sessions already imported. |
 | `kept.json` | Window state for restoring: open chats and tabs, side panels, browser addresses, the last 64 KB of each terminal's output, scroll positions, queued and half-typed messages. |
-| `accounts/<id>/` | Config folders of separate logins you create in Larrier. |
+| `accounts/<id>/` | Config folders of separate logins you create in Lary. |
 | `browser-engine/` | The Browser tab's profile on Windows: cookies and sign-ins, cache and site data of the pages you open, and the engine's log. |
 | `worktrees/` | Git worktrees for agents, when you use them. |
 
@@ -23,7 +23,7 @@ never to these files: Credential Manager on Windows, the Keychain on macOS,
 and the desktop's Secret Service on Linux (GNOME Keyring or KWallet, with
 the kernel keyring in front of it).
 
-## What Larrier reads
+## What Lary reads
 
 - **Agents' folders** (`~/.claude`, `~/.codex`, `~/.cursor`,
   `~/.local/share/opencode`, `~/.gemini`, `~/.pi`, `~/.hermes`,
@@ -34,7 +34,7 @@ the kernel keyring in front of it).
   Anthropic, never logged, shown or stored); Cursor's and Gemini CLI's from
   the account the CLI records.
 
-## What Larrier writes outside its folder
+## What Lary writes outside its folder
 
 - **Resuming a chat in an agent** that supports it (Claude Code, Codex,
   Gemini CLI, Pi) writes a session file into that agent's own session store.
@@ -43,14 +43,14 @@ the kernel keyring in front of it).
 
 ## Network
 
-Larrier itself connects to:
+Lary itself connects to:
 
 - **GitHub** (`api.github.com`, release downloads): checking for and
-  downloading Larrier updates, and once the browser engine (Windows),
+  downloading Lary updates, and once the browser engine (Windows),
   anonymously (no GitHub account or token).
 - **Where agents publish releases** (npm, PyPI, GitHub, the agents' install
   scripts): looking up agents' latest versions.
-- **The APIs of your API accounts:** Larrier Chat's messages, and a
+- **The APIs of your API accounts:** Lary Chat's messages, and a
   **Check** of an account's key when you press it.
 - **Anthropic's usage endpoint** for Claude Code plan limits, as above.
 - **The pages you open** in the Browser tab (an address bar search goes to

@@ -1,6 +1,6 @@
 [package]
-name = "larrier-core"
-description = "Larrier core: unified session format (LSF), agent catalog, accounts, workspaces and storage"
+name = "lary-core"
+description = "Lary core: unified session format (LSF), agent catalog, accounts, workspaces and storage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

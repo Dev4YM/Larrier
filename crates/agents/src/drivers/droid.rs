@@ -2,7 +2,7 @@
 //! [--auto medium|high] (-f prompt.md | <prompt>)`.
 //! Event shapes are taken from the droid 0.156 binary.
 
-use larrier_core::ToolStatus;
+use lary_core::ToolStatus;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -135,7 +135,7 @@ impl LineParser for DroidStream {
 mod tests {
     use super::*;
     use crate::drivers::testutil::collect;
-    use larrier_core::ToolKind;
+    use lary_core::ToolKind;
 
     #[test]
     fn maps_stream_json() {

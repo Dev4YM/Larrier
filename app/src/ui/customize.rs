@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use dioxus::prelude::*;
-use larrier_agents::harness::{self, HarnessItem, ItemKind, Scope, Status};
-use larrier_core::AgentKind;
+use lary_agents::harness::{self, HarnessItem, ItemKind, Scope, Status};
+use lary_core::AgentKind;
 
 use super::AgentGlyph;
 use crate::icons::{Icon, I};

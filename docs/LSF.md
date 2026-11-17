@@ -1,7 +1,7 @@
-# Larrier Session Format (LSF) 1.0
+# Lary Session Format (LSF) 1.0
 
 LSF is one portable file format for every coding-agent session and AI chat.
-Larrier stores every conversation in it. That covers sessions it runs itself,
+Lary stores every conversation in it. That covers sessions it runs itself,
 sessions imported from Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Pi,
 Hermes or Droid, and chats imported from ChatGPT and Claude.ai. Any of them
 can be continued with any agent.
@@ -13,7 +13,7 @@ can be continued with any agent.
 | JSON Lines | `.lsf.jsonl` | The storage form. Line 1 is the session header, and each following line is one message. Appending a turn means appending lines. |
 | Document | `.lsf.json` | `{ "lsf": "1.0", "session": { …, "messages": [ … ] } }`. Used for sharing and export. |
 
-Readers must accept both forms. `Session::from_any` in `larrier-core` detects
+Readers must accept both forms. `Session::from_any` in `lary-core` detects
 which one it was given.
 
 ## Header (line 1)
@@ -32,7 +32,7 @@ which one it was given.
   "mode": "agent",
   "account_id": "…",
   "workspace": { "path": "D:\\Code\\web", "name": "web", "branch": "main", "remote": "git@github.com:acme/web.git" },
-  "environment": { "type": "worktree", "path": "…\\worktrees\\web\\agent-3f9a1c", "branch": "larrier/agent-3f9a1c", "base": "main" },
+  "environment": { "type": "worktree", "path": "…\\worktrees\\web\\agent-3f9a1c", "branch": "lary/agent-3f9a1c", "base": "main" },
   "origin": { "agent": "codex", "native_id": "019a…", "path": "~/.codex/sessions/…", "imported_at": "…", "agent_version": "0.154.0" },
   "native": [
     { "agent": "codex", "id": "019a…", "path": "…", "synced_messages": 12 },
@@ -54,7 +54,7 @@ which one it was given.
   changes to review), `done` or `error`.
 * Agent ids are `claude-code`, `codex`, `cursor`, `opencode`, `gemini`, `pi`,
   `hermes`, `goose`, `amp`, `copilot`, `qwen`, `kimi`, `droid`, `aider`,
-  `chat` (Larrier's built-in API chat), `chatgpt`, `claude-ai`, and
+  `chat` (Lary's built-in API chat), `chatgpt`, `claude-ai`, and
   `custom:<id>`.
 
 ## Messages (lines 2…)
@@ -100,7 +100,7 @@ renderer and exporter therefore sees the call and its outcome together.
 Continuing a session with a different agent:
 
 1. **Native export.** This applies when the target can load external
-   sessions: Claude Code, Codex, Gemini CLI and Pi. Larrier writes a real
+   sessions: Claude Code, Codex, Gemini CLI and Pi. Lary writes a real
    session file into that agent's own store and records a `native` link. The
    agent then resumes with its normal mechanism (`--resume`, `exec resume`,
    `--session`), and the full history is in its context.
@@ -109,7 +109,7 @@ Continuing a session with a different agent:
    a compact transcript, which is sent once inside a
    `<conversation_history>` block ahead of the next prompt. Later turns
    resume natively through the agent's own session id.
-3. **API chat.** Larrier Chat replays the whole LSF history
+3. **API chat.** Lary Chat replays the whole LSF history
    to the model provider.
 
 Each agent's native session keeps growing on its own. LSF stays the single

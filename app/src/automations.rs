@@ -7,7 +7,7 @@ use std::time::Duration;
 use chrono::{Local, Utc};
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
-use larrier_core::automation::{Automation, Trigger};
+use lary_core::automation::{Automation, Trigger};
 
 use crate::state::{App, View};
 

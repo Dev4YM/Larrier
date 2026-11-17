@@ -7,14 +7,14 @@ default-members = ["app"]
 version = "0.1.46"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/Dev4YM/Larrier"
-authors = ["Larrier contributors"]
+repository = "https://github.com/Dev4YM/Lary"
+authors = ["Lary contributors"]
 rust-version = "1.85"
 
 [workspace.dependencies]
-larrier-core = { path = "crates/core" }
-larrier-formats = { path = "crates/formats" }
-larrier-agents = { path = "crates/agents" }
+lary-core = { path = "crates/core" }
+lary-formats = { path = "crates/formats" }
+lary-agents = { path = "crates/agents" }
 
 anyhow = "1"
 thiserror = "2"

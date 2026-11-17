@@ -1,4 +1,4 @@
-//! What Larrier keeps between visits and launches. Each chat: the message
+//! What Lary keeps between visits and launches. Each chat: the message
 //! being typed (text, objects, images and files), its follow-ups waiting
 //! to be sent, its side panel and what its tabs hold (browser pages,
 //! terminals, open files, the commit message, where it was scrolled to).
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
-use larrier_core::{AgentKind, Part};
+use lary_core::{AgentKind, Part};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -177,7 +177,7 @@ fn kept() -> &'static Mutex<Kept> {
 }
 
 fn file() -> std::path::PathBuf {
-    larrier_core::store::data_root().join("kept.json")
+    lary_core::store::data_root().join("kept.json")
 }
 
 fn write_now() {
@@ -213,7 +213,7 @@ fn save() {
     }
 }
 
-/// Write what's waiting at once (Larrier is closing).
+/// Write what's waiting at once (Lary is closing).
 pub fn flush() {
     write_now();
 }
@@ -332,7 +332,7 @@ pub fn set_layout(layout: &Layout) {
     save();
 }
 
-/// Follow-ups that were waiting to be sent when Larrier closed.
+/// Follow-ups that were waiting to be sent when Lary closed.
 pub fn queues() -> HashMap<String, Vec<Queued>> {
     kept().lock().ok().map(|k| k.queues.clone()).unwrap_or_default()
 }
@@ -411,7 +411,7 @@ mod tests {
         let i = Input::new(text, Vec::new(), vec![chip.clone(), crate::ui::mentions::MentionChip::page("Gone", "https://x.y", "")]);
         assert_eq!(i.mentions.len(), 1, "objects no longer in the text are dropped");
         assert!(i.title().starts_with("look at @"), "{}", i.title());
-        let pic = Input { attachments: vec![Part::Image { mime: None, source: larrier_core::lsf::MediaSource::Path { path: "a.png".into() } }], ..Default::default() };
+        let pic = Input { attachments: vec![Part::Image { mime: None, source: lary_core::lsf::MediaSource::Path { path: "a.png".into() } }], ..Default::default() };
         assert!(!pic.is_empty());
         assert_eq!(pic.title(), "Image");
         assert!(Input { text: "  \n".into(), ..Default::default() }.is_empty());
@@ -435,7 +435,7 @@ mod tests {
         };
         let back: Layout = serde_json::from_str(&serde_json::to_string(&l).unwrap()).unwrap();
         assert_eq!(back, l);
-        // What an older Larrier kept still reads (with the sidebar open).
+        // What an older Lary kept still reads (with the sidebar open).
         let old: Kept = serde_json::from_str(r#"{"inputs":{},"panels":{}}"#).unwrap();
         assert!(old.layout.is_none() && old.chats.is_empty());
         let none: Layout = serde_json::from_str("{}").unwrap();

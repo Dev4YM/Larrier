@@ -235,10 +235,10 @@ fn remove(session_id: &str, id: u64) {
 fn shell() -> (String, Vec<String>, String) {
     #[cfg(windows)]
     {
-        if let Some(p) = larrier_agents::detect::which_program("pwsh") {
+        if let Some(p) = lary_agents::detect::which_program("pwsh") {
             return (p.to_string_lossy().to_string(), vec!["-NoLogo".into()], "pwsh".into());
         }
-        if let Some(p) = larrier_agents::detect::which_program("powershell") {
+        if let Some(p) = lary_agents::detect::which_program("powershell") {
             return (p.to_string_lossy().to_string(), vec!["-NoLogo".into()], "powershell".into());
         }
         let cmd = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".into());
@@ -344,8 +344,8 @@ struct KeptTerm {
 }
 
 /// Keep every chat's terminals that are open now for the next launch
-/// (every few seconds, and as Larrier closes). Chats whose terminals
-/// weren't opened since Larrier started stay as they were kept.
+/// (every few seconds, and as Lary closes). Chats whose terminals
+/// weren't opened since Lary started stay as they were kept.
 pub fn keep_all() {
     let reg = registry();
     for (sid, s) in reg.iter() {
@@ -366,7 +366,7 @@ pub fn keep_all() {
     }
 }
 
-/// Bring back the terminals a chat had when Larrier last closed (once):
+/// Bring back the terminals a chat had when Lary last closed (once):
 /// each shows the end of what it printed, then a new shell in its folder.
 fn restore(session_id: &str) -> bool {
     static DONE: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
@@ -385,7 +385,7 @@ fn restore(session_id: &str) -> bool {
             if find(b"\x1b[?1049h") > find(b"\x1b[?1049l") {
                 history.extend_from_slice(b"\x1b[?1049l");
             }
-            history.extend_from_slice(b"\x1b[0m\r\n\x1b[2m-- Restored after Larrier restarted: a new shell --\x1b[0m\r\n");
+            history.extend_from_slice(b"\x1b[0m\r\n\x1b[2m-- Restored after Lary restarted: a new shell --\x1b[0m\r\n");
         }
         ids.push(open_terminal_with(session_id, kt.cwd, Some(kt.title), history, true).id);
     }
@@ -834,7 +834,7 @@ fn ensure_assets() {
     }
     let css = serde_json::to_string(XTERM_CSS).unwrap_or_default();
     let js = format!(
-        "if (!window.__larrierXterm) {{\n{XTERM_JS}\n;\n{FIT_JS}\n;\nconst st = document.createElement('style'); st.textContent = {css}; document.head.appendChild(st);\nwindow.__larrierXterm = true;\n}}"
+        "if (!window.__laryXterm) {{\n{XTERM_JS}\n;\n{FIT_JS}\n;\nconst st = document.createElement('style'); st.textContent = {css}; document.head.appendChild(st);\nwindow.__laryXterm = true;\n}}"
     );
     document::eval(&js);
 }
@@ -1103,17 +1103,17 @@ mod tests {
     #[ignore]
     fn spawns_shell_and_reads_prompt() {
         let t = open_terminal("test-session", None, None);
-        t.write(b"echo larrier-pty-ok\r");
+        t.write(b"echo lary-pty-ok\r");
         let mut seen = String::new();
         for _ in 0..100 {
             std::thread::sleep(Duration::from_millis(100));
             let (b, _) = t.read_since(0);
             seen = String::from_utf8_lossy(&b).to_string();
-            if seen.contains("larrier-pty-ok") && seen.matches("larrier-pty-ok").count() >= 2 {
+            if seen.contains("lary-pty-ok") && seen.matches("lary-pty-ok").count() >= 2 {
                 break;
             }
         }
-        assert!(seen.contains("larrier-pty-ok"), "output: {seen}");
+        assert!(seen.contains("lary-pty-ok"), "output: {seen}");
         assert_eq!(count("test-session"), 1);
         remove("test-session", t.id);
         assert_eq!(count("test-session"), 0);

@@ -1,8 +1,8 @@
-//! Larrier's browser: real browser pages laid over the Browser tab, one per
-//! page tab. On Windows they're Chromium's, run by Larrier itself (see
+//! Lary's browser: real browser pages laid over the Browser tab, one per
+//! page tab. On Windows they're Chromium's, run by Lary itself (see
 //! `browser_cef`); elsewhere the system's web views. Either way they have a
 //! profile of their own and a DevTools port, so agents drive the very pages
-//! the user sees (`Larrier mcp-browser` attaches to that port) and sites see
+//! the user sees (`Lary mcp-browser` attaches to that port) and sites see
 //! an ordinary browser, not a headless one.
 //!
 //! The pages are native child windows: placed over the tab's area as the
@@ -29,7 +29,7 @@ pub struct Tab {
     pub loading: bool,
     pub can_back: bool,
     pub can_forward: bool,
-    /// The page couldn't load (Chrome's error code): Larrier says so in its
+    /// The page couldn't load (Chrome's error code): Lary says so in its
     /// place.
     pub error: Option<String>,
     /// Its DevTools are open.
@@ -122,7 +122,7 @@ fn keep_devtools() {
     crate::browser_cef::set_tools_layout(l);
 }
 
-/// Larrier's theme, for what the engine draws itself.
+/// Lary's theme, for what the engine draws itself.
 pub fn set_dark(dark: bool) {
     #[cfg(windows)]
     crate::browser_cef::set_dark(dark);
@@ -189,7 +189,7 @@ fn note_closed(id: u64, owner: &str, why: &str) {
     log.drain(..extra);
 }
 
-/// Tabs of `owner`'s browser that closed since Larrier started, newest last.
+/// Tabs of `owner`'s browser that closed since Lary started, newest last.
 pub fn closed_tabs(owner: &str) -> Vec<Closed> {
     closed_log().iter().filter(|c| c.owner == owner).cloned().collect()
 }
@@ -200,7 +200,7 @@ fn restored() -> std::sync::MutexGuard<'static, std::collections::HashSet<String
     SET.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Bring back the tabs `owner`'s browser had when Larrier last closed, the
+/// Bring back the tabs `owner`'s browser had when Lary last closed, the
 /// first time it's shown or opens a page.
 pub fn restore(owner: &str) {
     if owner.is_empty() || !restored().insert(owner.to_string()) {
@@ -223,7 +223,7 @@ pub fn restore(owner: &str) {
 }
 
 /// Keep each chat's tabs for the next launch (those of chats not shown
-/// since Larrier started stay as they were kept).
+/// since Lary started stay as they were kept).
 pub fn keep() {
     let st = STATE.peek();
     let mut owners: Vec<String> = restored().iter().cloned().collect();
@@ -247,7 +247,7 @@ pub static SNAPSHOT: GlobalSignal<Option<String>> = Signal::global(|| None);
 /// Annotate mode is on in the tab shown.
 pub static ANNOTATING: GlobalSignal<bool> = Signal::global(|| false);
 
-/// Pages hear from Larrier's own annotate script only with this (each run's
+/// Pages hear from Lary's own annotate script only with this (each run's
 /// own), so a page can't post as it.
 fn annotate_token() -> &'static str {
     static TOKEN: OnceLock<String> = OnceLock::new();
@@ -358,7 +358,7 @@ pub fn prepare_engine() {
     }
 }
 
-/// On Windows the engine is Larrier's own Chromium (see `browser_cef`);
+/// On Windows the engine is Lary's own Chromium (see `browser_cef`);
 /// elsewhere the system's web views, for now.
 #[cfg(windows)]
 fn chrome() -> bool {
@@ -391,7 +391,7 @@ pub fn is_blank(url: &str) -> bool {
 
 /// The annotate script, with this run's token.
 fn annotate_script() -> String {
-    include_str!("browser_annotate.js").replace("__LARRIER_TOKEN__", annotate_token())
+    include_str!("browser_annotate.js").replace("__LARY_TOKEN__", annotate_token())
 }
 
 /// Run `js` in tab `id`'s page: its value.
@@ -400,7 +400,7 @@ fn eval(id: u64, js: &str) -> Option<serde_json::Value> {
     if chrome() {
         return crate::browser_cef::eval(id, js);
     }
-    use larrier_agents::browser::{view_running, view_target, Cdp};
+    use lary_agents::browser::{view_running, view_target, Cdp};
     let cdp = Cdp::connect(&view_running()?).ok()?;
     let target = view_target(&cdp, id)?;
     let r = cdp.call("Target.attachToTarget", serde_json::json!({"targetId": target, "flatten": true}), None).ok()?;
@@ -441,7 +441,7 @@ fn capture(id: u64, clip: Option<(f64, f64, f64, f64)>) -> Option<String> {
     if chrome() {
         return crate::browser_cef::capture(id, clip);
     }
-    larrier_agents::browser::view_capture(id, clip)
+    lary_agents::browser::view_capture(id, clip)
 }
 
 static EVENTS: OnceLock<tokio::sync::mpsc::UnboundedSender<Ev>> = OnceLock::new();
@@ -449,7 +449,7 @@ static EVENTS: OnceLock<tokio::sync::mpsc::UnboundedSender<Ev>> = OnceLock::new(
 /// The views' profile (shared with the agents' tools, which find their
 /// DevTools port there).
 fn data_dir() -> std::path::PathBuf {
-    larrier_agents::browser::view_dir()
+    lary_agents::browser::view_dir()
 }
 
 pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
@@ -618,8 +618,8 @@ fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {
 fn place(h: &Host) {
     #[cfg(windows)]
     if chrome() {
-        // A page that couldn't load steps aside for Larrier's own message,
-        // a new tab for Larrier's own New Tab.
+        // A page that couldn't load steps aside for Lary's own message,
+        // a new tab for Lary's own New Tab.
         let failed = h.active.is_some_and(|id| STATE.peek().tabs.iter().any(|t| t.id == id && (t.error.is_some() || is_blank(&t.url))));
         crate::browser_cef::place(h.area.filter(|_| !h.aside && !failed), h.active);
         return;
@@ -657,7 +657,7 @@ pub fn new_agent_tab(owner: &str, url: &str) -> Option<u64> {
 }
 
 /// Tab ids the engine gives pop-ups start here: kept ids below it are
-/// Larrier's own.
+/// Lary's own.
 const ENGINE_IDS: u64 = 1 << 40;
 
 /// Open a tab, as tab `want` if that id is free (a kept tab coming back);
@@ -780,8 +780,8 @@ fn build_pending() {
             made.with_additional_browser_args("--remote-debugging-port=0 --disable-blink-features=AutomationControlled --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection")
         };
         let made = made
-            // Which Larrier tab a page is in, for the agents' tools.
-            .with_initialization_script(format!("Object.defineProperty(window, '__larrierTab', {{ value: {id} }});"))
+            // Which Lary tab a page is in, for the agents' tools.
+            .with_initialization_script(format!("Object.defineProperty(window, '__laryTab', {{ value: {id} }});"))
             .with_initialization_script(annotate_script())
             .with_ipc_handler(move |req| {
                 let _ = t4.send(Ev::Annotate { id, body: req.body().clone() });
@@ -858,7 +858,7 @@ pub fn set_owner(owner: &str) {
 }
 
 pub fn close_tab(id: u64) {
-    close_tab_as(id, "it was closed in Larrier");
+    close_tab_as(id, "it was closed in Lary");
 }
 
 // ------------------------------------------------------ the agent's tabs
@@ -1120,7 +1120,7 @@ pub fn close_others(id: u64, right: bool) {
     let at = mine.iter().position(|t| *t == id).unwrap_or(0);
     for (i, t) in mine.into_iter().enumerate() {
         if t != id && (!right || i > at) {
-            close_tab_as(t, "it was closed in Larrier (Close Other Tabs)");
+            close_tab_as(t, "it was closed in Lary (Close Other Tabs)");
         }
     }
     activate(id);
@@ -1138,11 +1138,11 @@ pub fn devtools() {
 pub fn annotate(on: bool) {
     *ANNOTATING.write() = on;
     #[cfg(windows)]
-    if chrome_active(|id| crate::browser_cef::Cmd::Script { id, js: format!("window.__larrierAnnotate && window.__larrierAnnotate({on})") }) {
+    if chrome_active(|id| crate::browser_cef::Cmd::Script { id, js: format!("window.__laryAnnotate && window.__laryAnnotate({on})") }) {
         return;
     }
     active_view(|v| {
-        let _ = v.evaluate_script(&format!("window.__larrierAnnotate && window.__larrierAnnotate({on})"));
+        let _ = v.evaluate_script(&format!("window.__laryAnnotate && window.__laryAnnotate({on})"));
         if on {
             let _ = v.focus();
         }
@@ -1154,7 +1154,7 @@ pub fn annotate(on: bool) {
 /// picture and its details, the note as the text.
 fn annotated(id: u64, body: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else { return };
-    if v["larrier"].as_str() != Some(annotate_token()) {
+    if v["lary"].as_str() != Some(annotate_token()) {
         return;
     }
     match v["kind"].as_str() {
@@ -1185,7 +1185,7 @@ fn annotated(id: u64, body: &str) {
                         details.push_str(&format!("\nText: {t}"));
                     }
                     details.push_str(&format!("\nHTML:\n{}", item["html"].as_str().unwrap_or("")));
-                    parts.push(larrier_core::Part::File { path: format!("Element · {}", short.chars().take(60).collect::<String>()), mime: Some("text/plain".into()), text: Some(details) });
+                    parts.push(lary_core::Part::File { path: format!("Element · {}", short.chars().take(60).collect::<String>()), mime: Some("text/plain".into()), text: Some(details) });
                 }
                 let session = app.current_id();
                 let mut ui = app.ui.write();
@@ -1237,7 +1237,7 @@ pub fn set_area(area: Option<Area>, covered: bool) {
 
 /// Whether tab `id` can go back and forward.
 fn history(id: u64) -> Option<(bool, bool)> {
-    use larrier_agents::browser::{view_running, view_target, Cdp};
+    use lary_agents::browser::{view_running, view_target, Cdp};
     let cdp = Cdp::connect(&view_running()?).ok()?;
     let target = view_target(&cdp, id)?;
     let r = cdp.call("Target.attachToTarget", serde_json::json!({"targetId": target, "flatten": true}), None).ok()?;

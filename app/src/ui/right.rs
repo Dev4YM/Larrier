@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use dioxus::prelude::*;
-use larrier_agents::git::{self, FileStatus, PullRequest, RepoStatus};
-use larrier_core::{lsf::short_path, Environment, FileDiff};
+use lary_agents::git::{self, FileStatus, PullRequest, RepoStatus};
+use lary_core::{lsf::short_path, Environment, FileDiff};
 
 use super::{DragRegion, Dropdown, MenuItem};
 use crate::icons::{Icon, I};
@@ -458,11 +458,11 @@ fn ChangesTab(id: String, cwd: Option<String>) -> Element {
                                         run_git("Pull request", Box::new(move || {
                                             let p = Path::new(&c);
                                             if branch == base {
-                                                git::checkout_new_branch(p, &format!("larrier/{}", git::branch_slug(&t)))?;
+                                                git::checkout_new_branch(p, &format!("lary/{}", git::branch_slug(&t)))?;
                                             }
                                             if has_files { git::commit(p, &msg, true)?; }
                                             git::push(p)?;
-                                            git::create_pr(p, &t, &format!("{body}\n\n— Created with Larrier"), false)
+                                            git::create_pr(p, &t, &format!("{body}\n\n— Created with Lary"), false)
                                         }));
                                     }
                                 },
@@ -710,7 +710,7 @@ fn BrowserTab() -> Element {
     use crate::browser_host as host;
     let st = host::STATE();
     let active = st.active.and_then(|id| st.tabs.iter().find(|t| t.id == id).cloned());
-    // The chat's tabs from when Larrier last closed come back the first
+    // The chat's tabs from when Lary last closed come back the first
     // time its browser is shown.
     let owner = use_memo(|| host::STATE.read().owner.clone());
     use_hook(host::prepare_engine);
@@ -961,7 +961,7 @@ fn BrowserTab() -> Element {
                     rsx! {
                         div { class: "browser-empty browser-error",
                             Icon { i: I::Globe, size: 22 }
-                            div { class: "t", "Getting Larrier's browser ready" }
+                            div { class: "t", "Getting Lary's browser ready" }
                             if total > 0 {
                                 div { class: "d", "Its Chromium engine comes once: {mb(done)} of {mb(total)} MB." }
                             } else {
@@ -988,8 +988,8 @@ fn BrowserTab() -> Element {
                         div { class: "t", "New Tab" }
                         div { class: "d", "Type an address or search above." }
                     } else {
-                        div { class: "t", "Larrier's browser" }
-                        div { class: "d", if larrier_agents::browser::SUPPORTED { "Type an address above. Agents browse here with their browser tools, in the same pages you see." } else { "Type an address above to browse here." } }
+                        div { class: "t", "Lary's browser" }
+                        div { class: "d", if lary_agents::browser::SUPPORTED { "Type an address above. Agents browse here with their browser tools, in the same pages you see." } else { "Type an address above to browse here." } }
                     }
                 }
             }
@@ -1071,7 +1071,7 @@ fn tab_label(t: &crate::browser_host::Tab) -> String {
 }
 
 /// Latest diff per file from the agent's own tool calls.
-fn agent_diffs_of(session: &larrier_core::Session, cwd: Option<&str>) -> Vec<FileDiff> {
+fn agent_diffs_of(session: &lary_core::Session, cwd: Option<&str>) -> Vec<FileDiff> {
     let mut out: Vec<FileDiff> = Vec::new();
     for m in &session.messages {
         for t in m.tool_calls() {

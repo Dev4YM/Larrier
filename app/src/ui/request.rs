@@ -2,7 +2,7 @@
 //! a tool, answers to its questions, or a go-ahead for its plan.
 
 use dioxus::prelude::*;
-use larrier_agents::{PermissionRequest, Reply, RequestKind};
+use lary_agents::{PermissionRequest, Reply, RequestKind};
 
 use super::ask::{Opt, Question, QuestionList};
 use crate::icons::{Icon, I};

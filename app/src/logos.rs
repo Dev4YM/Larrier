@@ -4,7 +4,7 @@
 //! compiled in; every file is normalized to fill its container.
 
 use dioxus::prelude::*;
-use larrier_core::AgentKind;
+use lary_core::AgentKind;
 
 macro_rules! logos {
     ($($id:literal),* $(,)?) => {
@@ -25,7 +25,7 @@ logos!(
     "qwen", "qwen-mono", "nous", "huggingface", "lmstudio", "azure", "microsoft", "bedrock", "aws",
     "vertex", "inflection", "vercel", "github", "figma", "notion", "git", "npm", "node", "python", "rust",
     "docker", "linear", "bash", "vscodium", "droid", "aider", "vscode", "powershell", "terminal", "slack",
-    "larrier",
+    "lary",
 );
 
 /// Look up a bundled logo by its file id.
@@ -53,7 +53,7 @@ fn agent_logo_id(kind: &AgentKind) -> Option<&'static str> {
         AgentKind::Droid => "droid",
         AgentKind::Aider => "aider",
         AgentKind::Grok => "grok",
-        AgentKind::Chat => "larrier",
+        AgentKind::Chat => "lary",
         AgentKind::ChatGpt => "openai",
         AgentKind::ClaudeAi => "claude",
         AgentKind::Custom(_) => return None,
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn every_builtin_agent_has_a_logo() {
-        for spec in larrier_core::agent::catalog() {
+        for spec in lary_core::agent::catalog() {
             if matches!(spec.kind, AgentKind::Custom(_) | AgentKind::Chat) {
                 continue;
             }

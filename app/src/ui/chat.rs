@@ -6,9 +6,9 @@ use std::path::Path;
 
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
-use larrier_agents::git;
-use larrier_core::{Environment, Part, Session, ToolKind, ToolStatus};
-use larrier_formats::ExportFormat;
+use lary_agents::git;
+use lary_core::{Environment, Part, Session, ToolKind, ToolStatus};
+use lary_formats::ExportFormat;
 
 use super::composer::Composer;
 use super::right::RightPane;
@@ -32,7 +32,7 @@ pub fn change_key(s: &Session) -> usize {
 pub fn commit_message(title: &str, summary: &str) -> String {
     let mut subject: String = title.lines().next().unwrap_or("").trim().to_string();
     if subject.is_empty() {
-        subject = "Update from Larrier agent".into();
+        subject = "Update from Lary agent".into();
     }
     if subject.chars().count() > 72 {
         subject = subject.chars().take(71).collect::<String>().trim_end().to_string() + "…";
@@ -176,7 +176,7 @@ fn ChatColumn(id: String, input_id: &'static str) -> Element {
 /// What the session rail shows about a session.
 #[derive(Clone, PartialEq)]
 struct RailInfo {
-    agent: larrier_core::AgentKind,
+    agent: lary_core::AgentKind,
     model: Option<String>,
     /// The user's own agent the chat runs as (Claude Code's `--agent`).
     run_as: Option<String>,
@@ -194,7 +194,7 @@ struct RailInfo {
     cost: Option<f64>,
     /// Tokens in the model's context at the latest reply, and its window.
     context: Option<(u64, Option<u64>)>,
-    plan: Vec<(String, larrier_core::PlanStatus)>,
+    plan: Vec<(String, lary_core::PlanStatus)>,
     /// Latest tool steps: (title, running, failed).
     recent: Vec<(String, bool, bool)>,
     /// Changed files (name, path, +, -), most changed first, and the total.
@@ -215,21 +215,21 @@ fn model_of(s: &Session) -> Option<String> {
 pub fn context_of(s: &Session) -> Option<(u64, Option<u64>)> {
     let model = model_of(s);
     s.messages.iter().rev().find_map(|m| m.usage.as_ref().and_then(|u| u.context_tokens.map(|c| (c, u.context_window)))).or(s.usage.context_tokens.map(|c| (c, s.usage.context_window))).map(|(used, window)| {
-        (used, window.or_else(|| model.as_deref().and_then(larrier_core::models::lookup).and_then(|m| m.context)))
+        (used, window.or_else(|| model.as_deref().and_then(lary_core::models::lookup).and_then(|m| m.context)))
     })
 }
 
 /// What a chat cost: as the agent reported it, else from the model's price.
 pub fn cost_of(s: &Session) -> Option<f64> {
     s.usage.cost_usd.or_else(|| {
-        let price = larrier_core::models::price(model_of(s).as_deref()?)?;
+        let price = lary_core::models::price(model_of(s).as_deref()?)?;
         let u = &s.usage;
         Some(price.cost(u.input_tokens, u.output_tokens + u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens)).filter(|c| *c > 0.0)
     })
 }
 
 fn rail_info(s: &Session) -> RailInfo {
-    use larrier_core::{PlanStatus, Role};
+    use lary_core::{PlanStatus, Role};
     let model_raw = model_of(s);
     let context = context_of(s);
     let cost = cost_of(s);
@@ -241,7 +241,7 @@ fn rail_info(s: &Session) -> RailInfo {
         .flat_map(|m| m.parts.iter().rev())
         .find_map(|p| match p {
             Part::Plan { entries } => Some(entries.clone()),
-            Part::Tool(t) if t.kind == ToolKind::Todo => larrier_formats::util::plan_from(&t.input),
+            Part::Tool(t) if t.kind == ToolKind::Todo => lary_formats::util::plan_from(&t.input),
             _ => None,
         })
         .unwrap_or_default()
@@ -255,7 +255,7 @@ fn rail_info(s: &Session) -> RailInfo {
                 continue;
             }
             let title = t.title.clone().unwrap_or_else(|| t.describe());
-            recent.push((larrier_core::lsf::first_line(&title), t.is_active(), t.is_error || t.status == ToolStatus::Failed));
+            recent.push((lary_core::lsf::first_line(&title), t.is_active(), t.is_error || t.status == ToolStatus::Failed));
             if recent.len() == 5 {
                 break 'outer;
             }
@@ -272,13 +272,13 @@ fn rail_info(s: &Session) -> RailInfo {
             (name, f.path, f.added, f.removed)
         })
         .collect();
-    let tasks = larrier_core::lsf::active_tasks(&s.messages)
+    let tasks = lary_core::lsf::active_tasks(&s.messages)
         .into_iter()
         .map(|t| (t.agent_name.clone().or_else(|| t.title.clone()).unwrap_or_else(|| t.describe()), t.is_subagent()))
         .collect();
     RailInfo {
         agent: s.agent.clone(),
-        model: model_raw.as_deref().map(larrier_core::models::display_name),
+        model: model_raw.as_deref().map(lary_core::models::display_name),
         run_as: s.run_as.clone(),
         workspace: s.workspace.as_ref().map(|w| if w.name.is_empty() { w.path.clone() } else { w.name.clone() }),
         branch: s.workspace.as_ref().and_then(|w| w.branch.clone()),
@@ -333,7 +333,7 @@ fn SessionRail(id: String) -> Element {
 
 #[component]
 fn RailBody(id: String) -> Element {
-    use larrier_core::PlanStatus;
+    use lary_core::PlanStatus;
     let mut app = use_app();
     let id_m = id.clone();
     let info = use_memo(move || app.with_session(&id_m, rail_info));
@@ -643,7 +643,7 @@ fn SplitHeader(id: String) -> Element {
     let id_m = id.clone();
     let info = use_memo(move || app.sessions.read().iter().find(|s| s.id == id_m).map(|s| (s.title.clone(), s.agent.clone())));
     let running = app.is_active(&id);
-    let (title, agent) = info().unwrap_or_else(|| ("Agent".into(), larrier_core::AgentKind::ClaudeCode));
+    let (title, agent) = info().unwrap_or_else(|| ("Agent".into(), lary_core::AgentKind::ClaudeCode));
     let (a, b) = (id.clone(), id.clone());
     rsx! {
         div { class: "main-head split-head",
@@ -736,7 +736,7 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
         ),
         _ => None,
     };
-    let (title, agent, unread) = summary().unwrap_or_else(|| ("Agent".into(), larrier_core::AgentKind::ClaudeCode, false));
+    let (title, agent, unread) = summary().unwrap_or_else(|| ("Agent".into(), lary_core::AgentKind::ClaudeCode, false));
     let label = sub.clone().unwrap_or_else(|| title.clone());
     let tip = match &sub {
         Some(s) => format!("{s} · subagent of {title}{}", if tab.preview { "\nPreview — double-click to keep open" } else { "" }),
@@ -917,11 +917,11 @@ pub fn DockPills(id: String, card: Signal<Option<super::tasks::DockCard>>) -> El
                     _ => {
                         let branch = git::current_branch(p).unwrap_or_default();
                         if branch == git::default_branch(p) {
-                            git::checkout_new_branch(p, &format!("larrier/{}", git::branch_slug(&t)))?;
+                            git::checkout_new_branch(p, &format!("lary/{}", git::branch_slug(&t)))?;
                         }
                         git::commit(p, &msg, true)?;
                         git::push(p)?;
-                        git::create_pr(p, &t, &format!("{body}\n\n— Created with Larrier"), false)
+                        git::create_pr(p, &t, &format!("{body}\n\n— Created with Lary"), false)
                     }
                 }
             })
@@ -983,6 +983,6 @@ mod tests {
         let msg = commit_message(&"x".repeat(100), "");
         assert_eq!(msg.chars().count(), 72);
         assert!(msg.ends_with('…'));
-        assert_eq!(commit_message("", ""), "Update from Larrier agent");
+        assert_eq!(commit_message("", ""), "Update from Lary agent");
     }
 }

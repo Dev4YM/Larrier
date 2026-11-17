@@ -1,10 +1,10 @@
 //! The Files panel's code editor: Monaco (VS Code's editor), served from
-//! the program itself (see build.rs) and dressed in Larrier's look: the
+//! the program itself (see build.rs) and dressed in Lary's look: the
 //! theme's colors, the code theme chosen in Appearance for its tokens, the
 //! Text Size for its type. It edits any text file; Ctrl+S saves.
 //!
-//! Monaco loads on first use from `larrier://` (on Windows,
-//! `http://larrier.localhost/`); its workers start from blobs that load
+//! Monaco loads on first use from `lary://` (on Windows,
+//! `http://lary.localhost/`); its workers start from blobs that load
 //! their scripts from there.
 
 use std::borrow::Cow;
@@ -23,7 +23,7 @@ mod files {
 /// Open files changed in the editor and not saved yet.
 pub static DIRTY: GlobalSignal<HashSet<String>> = Signal::global(HashSet::new);
 
-/// The `larrier` protocol: the editor's files, at `monaco/<path>`.
+/// The `lary` protocol: the editor's files, at `monaco/<path>`.
 pub fn serve(req: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let path = req.uri().path().trim_start_matches('/');
     let file = path.strip_prefix("monaco/").and_then(|p| files::FILES.iter().find(|(n, _)| *n == p));
@@ -58,13 +58,13 @@ fn workers() -> Value {
 }
 
 /// The editor for one open file; the same editor shows each file in turn
-/// (every file keeps its own undo history and place while Larrier runs).
+/// (every file keeps its own undo history and place while Lary runs).
 #[component]
 pub fn CodeEditor(path: String, text: String) -> Element {
     let app = use_app();
     // Its messages: changes made or saved, saves asked for.
     use_hook(move || {
-        let mut ev = document::eval(&format!("{}\nwindow.__larrierEdSend = (m) => dioxus.send(m);\nwindow.__larrierEdWorkers = {};\nawait new Promise(() => {{}});", EDITOR_JS, workers()));
+        let mut ev = document::eval(&format!("{}\nwindow.__laryEdSend = (m) => dioxus.send(m);\nwindow.__laryEdWorkers = {};\nawait new Promise(() => {{}});", EDITOR_JS, workers()));
         spawn(async move {
             while let Ok(v) = ev.recv::<Value>().await {
                 let path = v["path"].as_str().unwrap_or("").to_string();
@@ -83,7 +83,7 @@ pub fn CodeEditor(path: String, text: String) -> Element {
                         let text = v["text"].as_str().unwrap_or("");
                         match std::fs::write(&path, text) {
                             Ok(()) => {
-                                document::eval(&format!("window.__larrierEdSaved && window.__larrierEdSaved({}, {})", json!(path), v["v"]));
+                                document::eval(&format!("window.__laryEdSaved && window.__laryEdSaved({}, {})", json!(path), v["v"]));
                             }
                             Err(e) => {
                                 let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(path.clone());
@@ -96,7 +96,7 @@ pub fn CodeEditor(path: String, text: String) -> Element {
             }
         });
     });
-    // Larrier's look: light or dark, the code theme's colors, wrapping and
+    // Lary's look: light or dark, the code theme's colors, wrapping and
     // the minimap as the user leaves them.
     let dark = app.ui.read().dark;
     let (light_theme, dark_theme) = {
@@ -109,14 +109,14 @@ pub fn CodeEditor(path: String, text: String) -> Element {
     let minimap = crate::keep::value::<bool>(crate::keep::WINDOW, "editor.minimap").unwrap_or(false);
     let look = json!({ "dark": dark, "tokens": tokens, "size": format!("{size:?}"), "wrap": wrap, "minimap": minimap, "gen": *LOOK.read() });
     use_effect(use_reactive!(|look| {
-        document::eval(&format!("window.__larrierEdLook && window.__larrierEdLook({look})"));
+        document::eval(&format!("window.__laryEdLook && window.__laryEdLook({look})"));
     }));
     let file = json!({ "path": path, "text": text });
     use_effect(use_reactive!(|file| {
-        document::eval(&format!("window.__larrierEdOpen && window.__larrierEdOpen({file})"));
+        document::eval(&format!("window.__laryEdOpen && window.__laryEdOpen({file})"));
     }));
     rsx! {
-        // Monaco's own right-click menu, not Larrier's.
+        // Monaco's own right-click menu, not Lary's.
         // `monaco-component` carries the editor's theme colors down to what
         // it draws beside the editor, like its right-click menu.
         div { id: "fv-editor", class: "fv-editor monaco-component", "data-ctx": "editor" }
@@ -150,14 +150,14 @@ pub fn minimap() -> bool {
 
 /// Save the file shown (what Ctrl+S does).
 pub fn save() {
-    document::eval("window.__larrierEdSave && window.__larrierEdSave()");
+    document::eval("window.__laryEdSave && window.__laryEdSave()");
 }
 
-/// Monaco's loader, Larrier's theme for it, and the editor's file handling.
+/// Monaco's loader, Lary's theme for it, and the editor's file handling.
 const EDITOR_JS: &str = r#"
-if (!window.__larrierEdReady) {
-  window.__larrierEdReady = true;
-  const base = (location.protocol === 'http:' || location.protocol === 'https:') ? location.protocol + '//larrier.localhost/monaco/' : 'larrier://localhost/monaco/';
+if (!window.__laryEdReady) {
+  window.__laryEdReady = true;
+  const base = (location.protocol === 'http:' || location.protocol === 'https:') ? location.protocol + '//lary.localhost/monaco/' : 'lary://localhost/monaco/';
   const st = { models: {}, views: {}, disk: {}, look: null };
   let loading = null;
   // Monaco, once: its styles, its loader, then the editor itself.
@@ -177,7 +177,7 @@ if (!window.__larrierEdReady) {
       window.require.config({ paths: { vs: base + 'vs' } });
       window.MonacoEnvironment = {
         getWorker: (_, label) => {
-          const f = (window.__larrierEdWorkers || {})[label];
+          const f = (window.__laryEdWorkers || {})[label];
           // No worker for it here (TypeScript's): one that never answers,
           // so those features stay quietly off.
           const src = f ? 'importScripts(' + JSON.stringify(base + f) + ');' : '';
@@ -216,7 +216,7 @@ if (!window.__larrierEdReady) {
   const v = (name) => hex('var(' + name + ')');
   const mix = (name, pct) => hex('color-mix(in srgb, var(' + name + ') ' + pct + '%, transparent)');
   const theme = (m, look) => {
-    m.editor.defineTheme('larrier', {
+    m.editor.defineTheme('lary', {
       base: look.dark ? 'vs-dark' : 'vs',
       inherit: true,
       rules: look.tokens.rules,
@@ -271,7 +271,7 @@ if (!window.__larrierEdReady) {
         'menu.border': v('--border'),
       },
     });
-    m.editor.setTheme('larrier');
+    m.editor.setTheme('lary');
   };
   // Type as the app's code: its font and the Text Size's code size.
   const type = () => {
@@ -296,7 +296,7 @@ if (!window.__larrierEdReady) {
     if (!host.__ed) {
       const ed = m.editor.create(host, {
         model: null,
-        theme: 'larrier',
+        theme: 'lary',
         automaticLayout: true,
         fixedOverflowWidgets: true,
         scrollBeyondLastLine: false,
@@ -318,7 +318,7 @@ if (!window.__larrierEdReady) {
       });
       host.__ed = ed;
       st.ed = ed;
-      ed.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.KeyS, () => window.__larrierEdSave());
+      ed.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.KeyS, () => window.__laryEdSave());
       ed.onDidChangeModelContent(() => changed(ed.getModel()));
     }
     const look = st.look || {};
@@ -337,7 +337,7 @@ if (!window.__larrierEdReady) {
     const dirty = model.getAlternativeVersionId() !== model.__saved;
     if (dirty !== !!model.__dirty) {
       model.__dirty = dirty;
-      window.__larrierEdSend({ t: 'dirty', path: model.__path, dirty });
+      window.__laryEdSend({ t: 'dirty', path: model.__path, dirty });
     }
   };
   const language = (path) => {
@@ -346,11 +346,11 @@ if (!window.__larrierEdReady) {
     if (name === 'cargo.lock' || name.endsWith('.toml')) return 'ini';
     return undefined;
   };
-  window.__larrierEdLook = async (look) => {
+  window.__laryEdLook = async (look) => {
     st.look = look;
     try { await editor(); } catch (e) {}
   };
-  window.__larrierEdOpen = async (file) => {
+  window.__laryEdOpen = async (file) => {
     let ed;
     try { ed = await editor(); } catch (e) {
       const host = document.getElementById('fv-editor');
@@ -385,13 +385,13 @@ if (!window.__larrierEdReady) {
       if (view) ed.restoreViewState(view);
     }
   };
-  window.__larrierEdSave = () => {
+  window.__laryEdSave = () => {
     const host = document.getElementById('fv-editor');
     const model = host && host.__ed && host.__ed.getModel();
     if (!model || !model.__path) return;
-    window.__larrierEdSend({ t: 'save', path: model.__path, text: model.getValue(), v: model.getAlternativeVersionId() });
+    window.__laryEdSend({ t: 'save', path: model.__path, text: model.getValue(), v: model.getAlternativeVersionId() });
   };
-  window.__larrierEdSaved = (path, v) => {
+  window.__laryEdSaved = (path, v) => {
     const model = st.models[path];
     if (!model) return;
     model.__saved = v;

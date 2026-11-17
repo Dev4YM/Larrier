@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use larrier_core::{AgentKind, NativeLink, Part, Role, Session, ToolCall, Usage};
+use lary_core::{AgentKind, NativeLink, Part, Role, Session, ToolCall, Usage};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -74,7 +74,7 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
     let mut s = parse(&text, Some(&info.path))?;
     if s.workspace.is_none() {
         if let Some(c) = &info.cwd {
-            s.workspace = Some(larrier_core::WorkspaceRef::from_path(c.clone()));
+            s.workspace = Some(lary_core::WorkspaceRef::from_path(c.clone()));
         }
     }
     Ok(s)
@@ -368,9 +368,9 @@ mod tests {
 
     #[test]
     fn export_roundtrip() {
-        let mut s = Session::new(AGENT, Some(larrier_core::WorkspaceRef::from_path("/tmp/x")));
-        s.push(larrier_core::Message::user_text("hello"));
-        let mut a = larrier_core::Message::assistant(AGENT, None);
+        let mut s = Session::new(AGENT, Some(lary_core::WorkspaceRef::from_path("/tmp/x")));
+        s.push(lary_core::Message::user_text("hello"));
+        let mut a = lary_core::Message::assistant(AGENT, None);
         a.push_text("world");
         s.push(a);
         let back = parse(&export_lines(&s, "SID", "/tmp/x", Utc::now()), None).unwrap();

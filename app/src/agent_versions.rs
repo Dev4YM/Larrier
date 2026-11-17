@@ -1,7 +1,7 @@
 //! Keeping agents current: the latest version each one has published
-//! (looked up soon after Larrier starts, every few hours, or when asked),
+//! (looked up soon after Lary starts, every few hours, or when asked),
 //! and installing or updating one from Settings → Agents the way its makers
-//! say to (see `larrier_agents::updates`), its output shown as it runs.
+//! say to (see `lary_agents::updates`), its output shown as it runs.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
-use larrier_agents::updates;
-use larrier_core::AgentKind;
+use lary_agents::updates;
+use lary_core::AgentKind;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::state::App;
@@ -35,7 +35,7 @@ pub struct Job {
 
 const LOG_LINES: usize = 400;
 
-/// Look the latest versions up a little after Larrier starts, then every
+/// Look the latest versions up a little after Lary starts, then every
 /// six hours.
 pub fn start() {
     spawn_forever(async move {
@@ -96,7 +96,7 @@ pub fn step(app: &App, kind: &AgentKind, install: bool) -> Option<updates::Step>
 /// found again afterwards and the outcome is told.
 pub fn run(app: App, kind: AgentKind, install: bool) {
     let Some(step) = step(&app, &kind, install) else {
-        app.toast_err(format!("Larrier can't {} {} itself: see its site", if install { "install" } else { "update" }, kind.display_name()));
+        app.toast_err(format!("Lary can't {} {} itself: see its site", if install { "install" } else { "update" }, kind.display_name()));
         return;
     };
     let id = kind.id();
@@ -175,7 +175,7 @@ pub fn run(app: App, kind: AgentKind, install: bool) {
         }
         // Found again, with the version it has now.
         let cfg = app.config.peek().clone();
-        let found = larrier_agents::detect_all(&cfg).await;
+        let found = lary_agents::detect_all(&cfg).await;
         let mut detected = app.detected;
         detected.set(found);
         let now = app.detected.peek().iter().find(|d| d.kind == kind && d.installed()).and_then(|d| d.version.clone());
@@ -183,7 +183,7 @@ pub fn run(app: App, kind: AgentKind, install: bool) {
         match (ok, now) {
             (true, Some(v)) if before.as_deref() != Some(v.as_str()) => app.toast(format!("{name} is now v{v}")),
             (true, Some(v)) => app.toast(format!("{name} v{v} is the version it has")),
-            (true, None) => app.toast(format!("{name}: done, but Larrier doesn't find it yet (a new terminal or sign-in may be needed)")),
+            (true, None) => app.toast(format!("{name}: done, but Lary doesn't find it yet (a new terminal or sign-in may be needed)")),
             (false, _) => app.toast_err(format!("{name}: the {} didn't go through — its output is in Settings → Agents", if install { "install" } else { "update" })),
         }
     });

@@ -1,4 +1,4 @@
-//! Settings → Profile: who's using Larrier (name, photo, role, about) and
+//! Settings → Profile: who's using Lary (name, photo, role, about) and
 //! their usage over the year: a calendar of every day's tokens,
 //! cost, prompts or sessions, by harness and model.
 
@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::{Datelike, Duration, Local, NaiveDate};
 use dioxus::prelude::*;
-use larrier_core::{lsf::MediaSource, AgentKind, Part, SessionSummary};
+use lary_core::{lsf::MediaSource, AgentKind, Part, SessionSummary};
 
 use super::usage::stats::{self, date_of, day_num, SessionStats};
 use super::usage::{fmt_cost, fmt_int, fmt_tokens};
@@ -50,9 +50,9 @@ fn mime_of(path: &str) -> &'static str {
     }
 }
 
-/// Where the photo is kept: Larrier's data folder.
+/// Where the photo is kept: Lary's data folder.
 fn photo_dir() -> std::path::PathBuf {
-    larrier_core::store::data_root().join("profile")
+    lary_core::store::data_root().join("profile")
 }
 
 /// Keep a picked photo in `dir` (the old one there goes).
@@ -63,7 +63,7 @@ fn keep_photo(from: &std::path::Path, old: Option<&str>, dir: &std::path::Path) 
         return Err("That picture is over 8 MB".into());
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let to = dir.join(format!("photo-{}.{ext}", larrier_core::lsf::new_id()));
+    let to = dir.join(format!("photo-{}.{ext}", lary_core::lsf::new_id()));
     std::fs::copy(from, &to).map_err(|e| e.to_string())?;
     if let Some(old) = old.map(std::path::Path::new).filter(|o| o.starts_with(dir)) {
         let _ = std::fs::remove_file(old);
@@ -328,7 +328,7 @@ pub fn ProfileView() -> Element {
             }
         });
     };
-    let field = move |get: fn(&mut larrier_core::Profile) -> &mut Option<String>, v: String| {
+    let field = move |get: fn(&mut lary_core::Profile) -> &mut Option<String>, v: String| {
         let mut app = app;
         *get(&mut app.config.write().profile) = Some(v).filter(|s| !s.trim().is_empty());
     };
@@ -336,7 +336,7 @@ pub fn ProfileView() -> Element {
     rsx! {
         style { {CSS} }
         h1 { "Profile" }
-        div { class: "sub", "How you show up in Larrier, and your usage over time." }
+        div { class: "sub", "How you show up in Lary, and your usage over time." }
 
         div { class: "set-card pf-card",
             div { class: "pf-photo",
@@ -393,7 +393,7 @@ pub fn ProfileView() -> Element {
             if let Some(w) = p.website.clone() {
                 button { class: "pf-meta pf-web", title: "Open in your browser", onclick: move |_| { let _ = open::that(web_url(&w)); }, Icon { i: I::Link, size: 12 } {p.website.clone().unwrap_or_default().trim_start_matches("https://").trim_start_matches("http://").to_string()} }
             }
-            if let Some(s) = since { span { class: "pf-meta", Icon { i: I::CalendarDays, size: 12 } "With Larrier since {s}" } }
+            if let Some(s) = since { span { class: "pf-meta", Icon { i: I::CalendarDays, size: 12 } "With Lary since {s}" } }
         }
 
         div { class: "pf-head",
@@ -603,7 +603,7 @@ mod tests {
     use super::stats::Use;
 
     fn session(agent: AgentKind) -> SessionSummary {
-        larrier_core::Session::new(agent, None).summary()
+        lary_core::Session::new(agent, None).summary()
     }
 
     #[test]
@@ -639,8 +639,8 @@ mod tests {
     }
 
     #[test]
-    fn a_photo_is_kept_in_larriers_folder() {
-        let root = std::env::temp_dir().join(format!("larrier-photo-{}", std::process::id()));
+    fn a_photo_is_kept_in_larys_folder() {
+        let root = std::env::temp_dir().join(format!("lary-photo-{}", std::process::id()));
         let dir = root.join("profile");
         std::fs::create_dir_all(&root).unwrap();
         let pic = root.join("me.PNG");

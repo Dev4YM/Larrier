@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, Timelike, Utc};
-use larrier_core::{SessionSummary, Usage};
+use lary_core::{SessionSummary, Usage};
 use serde::{Deserialize, Serialize};
 
 use crate::state::store;
@@ -283,7 +283,7 @@ pub fn load_all(list: &[SessionSummary]) -> Arc<HashMap<String, SessionStats>> {
 /// Public API list prices per million tokens: (input, output, cache read,
 /// cache write). Only used when the agent reports no cost itself.
 pub fn price(model: &str) -> Option<(f64, f64, f64, f64)> {
-    if let Some(p) = larrier_core::models::price(model) {
+    if let Some(p) = lary_core::models::price(model) {
         return Some((p.input, p.output, p.cache_read.unwrap_or(p.input * 0.1), p.cache_write.unwrap_or(p.input * 1.25)));
     }
     let m = model.to_lowercase();
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(use_cost(&reported), Some(2.0));
     }
 
-    /// `LARRIER_HOME=<store> cargo test -p larrier-app real_store_timing -- --ignored --nocapture`
+    /// `LARY_HOME=<store> cargo test -p lary-app real_store_timing -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn real_store_timing() {
@@ -380,13 +380,13 @@ mod tests {
         eprintln!("from memory: {:?}", t.elapsed());
         let today = chrono::Local::now().date_naive();
         let t = std::time::Instant::now();
-        let r = crate::ui::usage::build_report(&list, &m, &larrier_core::Config::default(), crate::ui::usage::Range::All, "all", today);
+        let r = crate::ui::usage::build_report(&list, &m, &lary_core::Config::default(), crate::ui::usage::Range::All, "all", today);
         eprintln!("report (all time): {:?} · {} buckets · tokens {} · cost ${:.2} · sessions {}", t.elapsed(), r.buckets.len(), r.cur.tokens(), r.cur.cost, r.cur.sessions);
     }
 
     #[test]
     fn compute_spreads_session_totals() {
-        let dir = std::env::temp_dir().join(format!("larrier-usage-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lary-usage-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("s.jsonl");
         let lines = [
@@ -401,10 +401,10 @@ mod tests {
         let sum = SessionSummary {
             id: "s".into(),
             title: "s".into(),
-            agent: larrier_core::AgentKind::Codex,
-            origin: larrier_core::AgentKind::Codex,
+            agent: lary_core::AgentKind::Codex,
+            origin: lary_core::AgentKind::Codex,
             model: None,
-            status: larrier_core::SessionStatus::Done,
+            status: lary_core::SessionStatus::Done,
             workspace: None,
             environment: "Local".into(),
             worktree_path: None,

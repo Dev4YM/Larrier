@@ -1,6 +1,6 @@
 //! Gemini CLI: `gemini -o stream-json [-m] [--approval-mode] [-r id] -p <prompt>`.
 
-use larrier_core::{ToolKind, ToolStatus};
+use lary_core::{ToolKind, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 

@@ -1,30 +1,30 @@
-//! `larrier` — command line access to the Larrier session store.
+//! `lary` — command line access to the Lary session store.
 //!
 //! ```text
-//! larrier agents                      list agents and whether they're installed
-//! larrier sessions [--agent X]        list sessions in the store
-//! larrier discover [--agent X]        list native sessions found on this machine
-//! larrier sync                        import new/changed native sessions
-//! larrier import <file>...            import LSF / native files / chat exports
-//! larrier export <id> --format F      print a session in another format
-//! larrier port <id> --to <agent>      write a native resumable session for an agent
-//! larrier show <id>                   print a session as Markdown
-//! larrier run --agent X [--cwd D] <prompt>   run one turn and record it
+//! lary agents                      list agents and whether they're installed
+//! lary sessions [--agent X]        list sessions in the store
+//! lary discover [--agent X]        list native sessions found on this machine
+//! lary sync                        import new/changed native sessions
+//! lary import <file>...            import LSF / native files / chat exports
+//! lary export <id> --format F      print a session in another format
+//! lary port <id> --to <agent>      write a native resumable session for an agent
+//! lary show <id>                   print a session as Markdown
+//! lary run --agent X [--cwd D] <prompt>   run one turn and record it
 //! ```
 
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use larrier_agents::{build_request, engine::TurnRecorder, start_turn, AgentEvent};
-use larrier_core::{
+use lary_agents::{build_request, engine::TurnRecorder, start_turn, AgentEvent};
+use lary_core::{
     store::{import_key, ImportRecord},
     AgentKind, Message, Session, Store, WorkspaceRef,
 };
-use larrier_formats::ExportFormat;
+use lary_formats::ExportFormat;
 
 #[derive(Parser)]
-#[command(name = "larrier", version, about = "Manage and port agent sessions with the Larrier Session Format")]
+#[command(name = "lary", version, about = "Manage and port agent sessions with the Lary Session Format")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -34,7 +34,7 @@ struct Cli {
 enum Cmd {
     /// List known agents and detection status.
     Agents,
-    /// List sessions stored in Larrier.
+    /// List sessions stored in Lary.
     Sessions {
         #[arg(long)]
         agent: Option<String>,
@@ -113,7 +113,7 @@ async fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Agents => {
             let cfg = store.load_config();
-            for d in larrier_agents::detect_all(&cfg).await {
+            for d in lary_agents::detect_all(&cfg).await {
                 let spec = d.kind.spec();
                 match &d.path {
                     Some(p) => println!("✓ {:<14} {:<10} {}", spec.name, d.version.clone().unwrap_or_default(), p.display()),
@@ -135,8 +135,8 @@ async fn main() -> Result<()> {
         }
         Cmd::Discover { agent } => {
             let list = match agent {
-                Some(a) => larrier_formats::discover(&AgentKind::from_id(&a)),
-                None => larrier_formats::discover_all(),
+                Some(a) => lary_formats::discover(&AgentKind::from_id(&a)),
+                None => lary_formats::discover_all(),
             };
             for n in &list {
                 println!(
@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
             eprintln!("{} native sessions", list.len());
         }
         Cmd::Sync => {
-            let r = larrier_formats::sync(&store, &larrier_formats::importable_agents());
+            let r = lary_formats::sync(&store, &lary_formats::importable_agents());
             println!("imported {}, updated {}, unchanged {}", r.imported, r.updated, r.skipped);
             for e in r.errors.iter().take(20) {
                 eprintln!("  ! {e}");
@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
         Cmd::Import { files } => {
             let mut n = 0;
             for f in files {
-                let list = larrier_formats::import_file(&f).with_context(|| format!("importing {}", f.display()))?;
+                let list = lary_formats::import_file(&f).with_context(|| format!("importing {}", f.display()))?;
                 n += list.len();
                 store.save_many(&list)?;
             }
@@ -167,7 +167,7 @@ async fn main() -> Result<()> {
         }
         Cmd::Export { id, format, out } => {
             let s = store.load(&resolve_id(&store, &id)?)?;
-            let text = larrier_formats::export_string(&s, parse_format(&format)?)?;
+            let text = lary_formats::export_string(&s, parse_format(&format)?)?;
             match out {
                 Some(p) => std::fs::write(&p, text)?,
                 None => print!("{text}"),
@@ -177,7 +177,7 @@ async fn main() -> Result<()> {
             let id = resolve_id(&store, &id)?;
             let mut s = store.load(&id)?;
             let agent = AgentKind::from_id(&to);
-            let link = larrier_formats::export_native(&s, &agent, None)?;
+            let link = lary_formats::export_native(&s, &agent, None)?;
             store.set_import_record(&import_key(&agent, &link.id), ImportRecord::linked(&s.id));
             store.flush_imports();
             println!("wrote {} session {}", agent.display_name(), link.id);

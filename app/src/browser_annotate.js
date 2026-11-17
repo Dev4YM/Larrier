@@ -1,20 +1,20 @@
-// Annotate mode for Larrier's browser (injected into every page, dormant
-// until Larrier turns it on). The user points at elements, a highlight
+// Annotate mode for Lary's browser (injected into every page, dormant
+// until Lary turns it on). The user points at elements, a highlight
 // glides to each, a click picks one (Shift+click adds more), they write a
 // note, and Enter sends the elements and the note to the agent's box.
 (() => {
-  if (window.top !== window || window.__larrierAnnotate) return;
-  const TOKEN = '__LARRIER_TOKEN__';
+  if (window.top !== window || window.__laryAnnotate) return;
+  const TOKEN = '__LARY_TOKEN__';
   const ACCENT = '#3b82f6';
   let on = false, host = null, root = null, hover = null, hoverLabel = null, bubble = null, input = null, frame = null;
   let picked = [];
   let last = null;
 
-  // Larrier's Chrome hears pages through a DevTools binding (it may come
+  // Lary's Chrome hears pages through a DevTools binding (it may come
   // after this script), its WebView2 through the view's own channel.
   const send = (msg) => {
-    const body = JSON.stringify(Object.assign({ larrier: TOKEN }, msg));
-    try { if (typeof window.__larrierPost === 'function') window.__larrierPost(body); else window.ipc.postMessage(body); } catch (e) {}
+    const body = JSON.stringify(Object.assign({ lary: TOKEN }, msg));
+    try { if (typeof window.__laryPost === 'function') window.__laryPost(body); else window.ipc.postMessage(body); } catch (e) {}
   };
   const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -159,7 +159,7 @@
         html: p.el.outerHTML.slice(0, 1500), rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
     });
     const note = input.value.trim();
-    // Out of the pictures Larrier takes of the elements.
+    // Out of the pictures Lary takes of the elements.
     host.style.visibility = 'hidden';
     document.documentElement.style.cursor = '';
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -183,7 +183,7 @@
     if (v === on) return;
     on = v;
     if (on) {
-      host = document.createElement('larrier-annotate');
+      host = document.createElement('lary-annotate');
       root = host.attachShadow({ mode: 'closed' });
       el('style').textContent = css;
       frame = el('div', 'frame');
@@ -218,5 +218,5 @@
     }
   };
 
-  Object.defineProperty(window, '__larrierAnnotate', { value: (v) => setOn(!!v) });
+  Object.defineProperty(window, '__laryAnnotate', { value: (v) => setOn(!!v) });
 })();

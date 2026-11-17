@@ -10,8 +10,8 @@ use std::sync::{LazyLock, Mutex};
 use base64::Engine;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
-use larrier_core::config::HOME_PROJECT;
-use larrier_core::{AgentKind, Workspace};
+use lary_core::config::HOME_PROJECT;
+use lary_core::{AgentKind, Workspace};
 
 use super::{AgentGlyph, Dropdown, MenuItem};
 use crate::icons::{Icon, Lucide, I};
@@ -26,7 +26,7 @@ const COMMON: &[&str] = &[
     "git-branch", "github", "gitlab", "figma", "chrome", "coffee", "pizza", "dog", "cat",
 ];
 
-/// Every Lucide icon bundled with Larrier: the common ones first, then the
+/// Every Lucide icon bundled with Lary: the common ones first, then the
 /// rest by name.
 static ALL_ICONS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     let all: Vec<&'static str> = crate::icons::SPRITE.split("id=\"lucide-").skip(1).filter_map(|s| s.split('"').next()).collect();
@@ -161,7 +161,7 @@ pub fn ProjectModal(id: Option<String>, path: Option<String>) -> Element {
             let Some(dir) = rfd::AsyncFileDialog::new().pick_folder().await else { return };
             let p = dir.path().to_string_lossy().to_string();
             let mut v = w.write();
-            let same = |a: &str| larrier_core::config::normalize_path(a) == larrier_core::config::normalize_path(&p);
+            let same = |a: &str| lary_core::config::normalize_path(a) == lary_core::config::normalize_path(&p);
             if same(&v.path) || v.folders.iter().any(|f| same(f)) {
                 return;
             }
@@ -254,7 +254,7 @@ pub fn ProjectModal(id: Option<String>, path: Option<String>) -> Element {
                                 div { class: "menu-label", "Chats start in the main folder; Claude Code and Codex can work in the others too" }
                                 div { class: "pjd-folder", title: "{cur.path}",
                                     Icon { i: I::Folder, size: 14, stroke: 1.5 }
-                                    span { class: "ellipsis", "{larrier_core::lsf::short_path(&cur.path)}" }
+                                    span { class: "ellipsis", "{lary_core::lsf::short_path(&cur.path)}" }
                                     span { class: "pj-tag", "Main" }
                                     if !cur.folders.is_empty() {
                                         button { class: "icon-btn sm", title: "Remove (the next one becomes the main folder)",
@@ -266,7 +266,7 @@ pub fn ProjectModal(id: Option<String>, path: Option<String>) -> Element {
                                 for (i, f) in cur.folders.iter().cloned().enumerate() {
                                     div { key: "{f}", class: "pjd-folder", title: "{f}",
                                         Icon { i: I::Folder, size: 14, stroke: 1.5 }
-                                        span { class: "ellipsis", "{larrier_core::lsf::short_path(&f)}" }
+                                        span { class: "ellipsis", "{lary_core::lsf::short_path(&f)}" }
                                         button { class: "pjd-make-main", title: "Make it the main folder",
                                             onclick: move |_| { let mut v = w.write(); let f = v.folders.remove(i); let old = std::mem::replace(&mut v.path, f); v.folders.insert(0, old); },
                                             "Main"
@@ -361,7 +361,7 @@ fn LookPicker(w: Signal<Workspace>) -> Element {
     let mut w = w;
     let cur = w.read().clone();
     // The icon it shows with none picked: Home's house, a project's folder.
-    let fallback: &'static str = if cur.id == larrier_core::config::HOME_PROJECT { "house" } else { "folder" };
+    let fallback: &'static str = if cur.id == lary_core::config::HOME_PROJECT { "house" } else { "folder" };
     let start = match look_of(cur.icon.as_deref(), fallback) {
         Look::Emoji(_) => 1,
         Look::Image(_) => 2,

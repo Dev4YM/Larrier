@@ -32,7 +32,7 @@ mod transcript;
 pub(crate) mod usage;
 
 use dioxus::prelude::*;
-use larrier_core::AgentKind;
+use lary_core::AgentKind;
 
 use crate::icons::{Icon, I};
 use crate::state::{use_ui, App, SettingsTab, View};
@@ -65,7 +65,7 @@ pub fn Root() -> Element {
         let h = homes();
         if *known.borrow() != h {
             *known.borrow_mut() = h.clone();
-            larrier_formats::set_account_homes(h);
+            lary_formats::set_account_homes(h);
             crate::live::restart(app);
             app.sync_imports(true);
         }
@@ -116,13 +116,13 @@ pub fn Root() -> Element {
         if !matches!(crate::install::current(), crate::install::Kind::Dev) {
             dioxus::core::spawn_forever(async move {
                 use std::time::{Duration, SystemTime};
-                // LARRIER_UPDATE_EVERY (seconds) shortens the wait for tests.
-                let every = std::env::var("LARRIER_UPDATE_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10).unwrap_or(600);
+                // LARY_UPDATE_EVERY (seconds) shortens the wait for tests.
+                let every = std::env::var("LARY_UPDATE_EVERY").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 10).unwrap_or(600);
                 tokio::time::sleep(Duration::from_secs(8)).await;
                 let mut due = SystemTime::now();
                 loop {
                     let s = app.config.peek().settings.clone();
-                    if s.auto_update && s.updates != larrier_core::UpdateMode::Off && SystemTime::now() >= due {
+                    if s.auto_update && s.updates != lary_core::UpdateMode::Off && SystemTime::now() >= due {
                         let asked = app.look_for_update(true).await;
                         due = SystemTime::now() + Duration::from_secs(if asked { every } else { every.min(300) });
                     }
@@ -130,9 +130,9 @@ pub fn Root() -> Element {
                 }
             });
         }
-        // Back where the window was when Larrier closed.
+        // Back where the window was when Lary closed.
         app.restore_layout();
-        // `larrier-desktop --open <session-id>` opens a session directly.
+        // `lary-desktop --open <session-id>` opens a session directly.
         let args: Vec<String> = std::env::args().collect();
         if let Some(id) = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1)) {
             app.open_session(id);
@@ -142,7 +142,7 @@ pub fn Root() -> Element {
         if let Some(prompt) = arg("--prompt") {
             let mut app = app;
             if let Some(a) = arg("--agent") {
-                app.draft.write().agent = larrier_core::AgentKind::from_id(&a);
+                app.draft.write().agent = lary_core::AgentKind::from_id(&a);
             }
             if let Some(dir) = arg("--cwd") {
                 app.draft.write().workspace = Some(dir);
@@ -163,7 +163,7 @@ pub fn Root() -> Element {
         }
     });
 
-    // The agents' browser tools reach Larrier's browser tabs through here.
+    // The agents' browser tools reach Lary's browser tabs through here.
     use_hook(move || {
         crate::browser_host::set_app(app);
         crate::browser_control::start();
@@ -197,7 +197,7 @@ pub fn Root() -> Element {
     use_future(move || async move {
         // Tooltips name shortcuts the way macOS writes them (⌘K, not Ctrl+K).
         if cfg!(target_os = "macos") {
-            document::eval(r#"window.__larrierKeys = (s) => s.replace(/Ctrl\+/g, '⌘').replace(/Shift\+/g, '⇧').replace(/Alt\+/g, '⌥');"#);
+            document::eval(r#"window.__laryKeys = (s) => s.replace(/Ctrl\+/g, '⌘').replace(/Shift\+/g, '⇧').replace(/Alt\+/g, '⌥');"#);
         }
         let mut ev = document::eval(
             r#"
@@ -208,8 +208,8 @@ pub fn Root() -> Element {
             // invisible marks, drawn as a pill by a copy of the text behind
             // the box. One Backspace or Delete takes it whole, the cursor
             // never lands inside one, and copies leave the marks out.
-            if (!window.__larrierTok) {
-              window.__larrierTok = true;
+            if (!window.__laryTok) {
+              window.__laryTok = true;
               const O = '⁣', C = '⁤', MARKS = /[⁣⁤]/g;
               const isTok = (el) => !!el && el.tagName === 'TEXTAREA' && el.classList.contains('tok-input');
               const backOf = (el) => el.parentElement && el.parentElement.querySelector(':scope > .tok-back');
@@ -330,8 +330,8 @@ pub fn Root() -> Element {
             // lines, down to three, so it never leaves a gap or hides its
             // words behind a picture. Drawn only (clip and shift): nothing
             // in the chat moves.
-            if (!window.__larrierPins) {
-              window.__larrierPins = true;
+            if (!window.__laryPins) {
+              window.__laryPins = true;
               const reset = (c) => { if (c.classList.contains('pinned')) { c.classList.remove('pinned', 'cut'); c.style.removeProperty('--pin-t'); c.style.removeProperty('--pin-vis'); c.style.removeProperty('--pin-cut'); } };
               const pin = (sc) => {
                 for (const msg of sc.querySelectorAll('.turn > .user-msg')) {
@@ -366,8 +366,8 @@ pub fn Root() -> Element {
               window.addEventListener('resize', all);
               document.addEventListener('click', () => setTimeout(all, 0), true);
             }
-            if (!window.__larrierBrowserArea) {
-              window.__larrierBrowserArea = true;
+            if (!window.__laryBrowserArea) {
+              window.__laryBrowserArea = true;
               const OVER = '.menu, .ctx-menu, #g-menu, .modal, .palette, .lightbox, .overlay, .menu-backdrop + .menu';
               let last = '';
               const tick = () => {
@@ -391,8 +391,8 @@ pub fn Root() -> Element {
             }
             // Copy buttons of code blocks (in rendered Markdown): the text
             // goes to the system clipboard through the app.
-            if (!window.__larrierCopy) {
-              window.__larrierCopy = true;
+            if (!window.__laryCopy) {
+              window.__laryCopy = true;
               document.addEventListener('click', (e) => {
                 const b = e.target && e.target.closest ? e.target.closest('.code-copy') : null;
                 if (!b) return;
@@ -414,8 +414,8 @@ pub fn Root() -> Element {
             // Menus stay inside the window whatever loads into them after
             // they open: each open menu is re-fitted whenever its size
             // changes (more results, a longer list).
-            if (!window.__larrierMenus) {
-              window.__larrierMenus = true;
+            if (!window.__laryMenus) {
+              window.__laryMenus = true;
               const pad = 8;
               const minTop = () => { const b = document.querySelector('.menubar'); return (b ? b.getBoundingClientRect().bottom : 0) + pad; };
               const set = (m, k, v) => { if (m.style[k] !== v) m.style[k] = v; };
@@ -521,15 +521,15 @@ pub fn Root() -> Element {
                 .observe(document.body, { childList: true, subtree: true });
               window.addEventListener('resize', () => document.querySelectorAll('.menu, .mention-menu').forEach(fit));
             }
-            // Fast typing: a field's text comes back from Larrier after each
+            // Fast typing: a field's text comes back from Lary after each
             // key, applied a frame later, so with quick keys an older text
             // lands on newer typing: it would eat characters and throw the
             // caret to the end (typing anywhere, not only at the end). Text
-            // the user has already typed past isn't put back. Larrier's own
+            // the user has already typed past isn't put back. Lary's own
             // changes, like clearing after sending or inserting an object,
             // still are: a field with data-gen bumps it with each of them.
-            if (!window.__larrierTypeGuard) {
-              window.__larrierTypeGuard = true;
+            if (!window.__laryTypeGuard) {
+              window.__laryTypeGuard = true;
               const guard = (el) => {
                 if (el.__lguard) return;
                 el.__lguard = true;
@@ -537,7 +537,7 @@ pub fn Root() -> Element {
                 if (!d || !d.set) return;
                 const typed = [];
                 const gen = () => el.getAttribute('data-gen');
-                // The data-gen the user typed after: a newer one is Larrier's change.
+                // The data-gen the user typed after: a newer one is Lary's change.
                 let seen = gen();
                 el.addEventListener('input', () => {
                   const now = performance.now();
@@ -556,7 +556,7 @@ pub fn Root() -> Element {
                     // An older text of the user's, while the field holds their latest.
                     const old = v !== cur && last && last.v === cur && typed.some((e) => e.v === v) && (v !== '' || gen() !== null);
                     if (!old || gen() !== seen) return put(v);
-                    // Larrier's change says so with data-gen, maybe later in this same update.
+                    // Lary's change says so with data-gen, maybe later in this same update.
                     if (gen() !== null) queueMicrotask(() => { if (gen() !== seen) put(v); });
                   },
                 });
@@ -566,14 +566,14 @@ pub fn Root() -> Element {
                 if (el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'search' || el.type === '')))) guard(el);
               }, true);
             }
-            // Larrier's own tooltips instead of the system's: a hovered
+            // Lary's own tooltips instead of the system's: a hovered
             // element's title moves to data-tip and shows in a small label.
             // The first one waits for the pointer to rest; moving on to a
             // neighbour right after shows the next at once. Rows (chats,
             // projects) wait longer and never chain, so running the pointer
             // down the sidebar doesn't flash a label on every row.
-            if (!window.__larrierTips) {
-              window.__larrierTips = true;
+            if (!window.__laryTips) {
+              window.__laryTips = true;
               const tip = document.createElement('div');
               tip.className = 'l-tip';
               tip.setAttribute('role', 'tooltip');
@@ -604,7 +604,7 @@ pub fn Root() -> Element {
               // 'Search (Ctrl+K)': the shortcut is set apart, dimmer.
               const KEY = /^([\s\S]*?)\s*\(((?:Ctrl|Cmd|Shift|Alt|Option|Esc|Tab|Enter|F\d|⌘|⌃|⌥|⇧)[^()]*)\)([\s\S]*)$/;
               const fill = (text) => {
-                const t = window.__larrierKeys ? window.__larrierKeys(text) : text;
+                const t = window.__laryKeys ? window.__laryKeys(text) : text;
                 const m = KEY.exec(t);
                 tip.textContent = m ? m[1] : t;
                 if (!m) return;
@@ -632,7 +632,7 @@ pub fn Root() -> Element {
                   if (target !== el || !el.isConnected) return;
                   // A menu is open: only what's in it gets a tooltip.
                   if (document.querySelector('.menu-backdrop') && !el.closest('.menu')) return;
-                  const root = document.querySelector('.larrier-root');
+                  const root = document.querySelector('.lary-root');
                   tip.classList.toggle('dark', !!root && root.getAttribute('data-theme') === 'dark');
                   tip.classList.toggle('still', !!root && root.classList.contains('no-motion'));
                   tip.classList.toggle('warm', chained);
@@ -684,7 +684,7 @@ pub fn Root() -> Element {
               // never made an attachment however long.
               if (e.shiftKey && k === 'v' && e.target && e.target.closest && e.target.closest('.composer, .user-msg.editing')) {
                 e.preventDefault();
-                window.__larrierCtx = null;
+                window.__laryCtx = null;
                 dioxus.send({ t: 'paste-plain' });
                 return;
               }
@@ -726,7 +726,7 @@ pub fn Root() -> Element {
                 }
                 // It lives outside the app's root: the theme's colors and font
                 // come along each time it shows.
-                const root = document.querySelector('.larrier-root');
+                const root = document.querySelector('.lary-root');
                 if (root) {
                   const cs = getComputedStyle(root);
                   for (const v of ['--card', '--card-2', '--menu-bg', '--fg', '--fg-2', '--border', '--hover']) pop.style.setProperty(v, cs.getPropertyValue(v));
@@ -811,7 +811,7 @@ pub fn Root() -> Element {
                 setTimeout(() => window.removeEventListener('click', eat, { capture: true }), 600);
               }
             }, true);
-            // Larrier's own right-click menu everywhere (never the browser's).
+            // Lary's own right-click menu everywhere (never the browser's).
             window.addEventListener('contextmenu', (e) => {
               e.preventDefault();
               let t = e.target instanceof Element ? e.target : document.body;
@@ -819,7 +819,7 @@ pub fn Root() -> Element {
               if (t.closest('.menu')) return;
               if (t.closest('[data-ctx]')) return; // components with their own menu
               const ed = t.closest('input, textarea, [contenteditable="true"]');
-              window.__larrierCtx = ed || null;
+              window.__laryCtx = ed || null;
               let sel = '';
               if (ed && typeof ed.selectionStart === 'number') sel = ed.value.substring(ed.selectionStart, ed.selectionEnd);
               else sel = String(window.getSelection() || '');
@@ -1065,7 +1065,7 @@ pub fn Root() -> Element {
         }
     }
     let mut class = String::from("app");
-    if st.density == larrier_core::Density::Compact {
+    if st.density == lary_core::Density::Compact {
         class.push_str(" compact");
     }
     if st.sidebar_right {
@@ -1075,9 +1075,9 @@ pub fn Root() -> Element {
         class.push_str(" no-motion");
     }
     match st.button_corners {
-        larrier_core::ButtonCorners::Solid => class.push_str(" corners-solid"),
-        larrier_core::ButtonCorners::Rounded => class.push_str(" corners-rounded"),
-        larrier_core::ButtonCorners::Balanced => {}
+        lary_core::ButtonCorners::Solid => class.push_str(" corners-solid"),
+        lary_core::ButtonCorners::Rounded => class.push_str(" corners-rounded"),
+        lary_core::ButtonCorners::Balanced => {}
     }
     if narrow {
         class.push_str(" narrow");
@@ -1090,10 +1090,10 @@ pub fn Root() -> Element {
         class.push_str(" side-closed");
     }
     // Not an inline `style`: Dioxus restores inline properties a new value
-    // leaves out, so removed colors (the Larrier preset, Reset) would stick.
-    let root_css = format!(".app.larrier-root[data-theme] {{ {style} }}");
+    // leaves out, so removed colors (the Lary preset, Reset) would stick.
+    let root_css = format!(".app.lary-root[data-theme] {{ {style} }}");
     rsx! {
-        div { class: "{class} larrier-root", "data-theme": "{theme}",
+        div { class: "{class} lary-root", "data-theme": "{theme}",
             style { "{root_css}" }
             crate::icons::IconSprite {}
             CodeStyles { light: code_themes.0.clone(), dark: code_themes.1.clone() }
@@ -1282,7 +1282,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
         Some("paste-text") => {
             let text = v["text"].as_str().unwrap_or("").to_string();
             let lines = text.lines().count();
-            app.ui.write().attach_inbox.push(larrier_core::Part::File {
+            app.ui.write().attach_inbox.push(lary_core::Part::File {
                 path: format!("Pasted text · {lines} lines"),
                 mime: Some("text/plain".into()),
                 text: Some(text),
@@ -1342,7 +1342,7 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                         // A misspelled word right-clicked is selected, so it's
                         // clear what a correction replaces.
                         if pick && found.is_some() {
-                            document::eval(&format!("const el = window.__larrierCtx; if (el) el.setSelectionRange({start}, {end});"));
+                            document::eval(&format!("const el = window.__laryCtx; if (el) el.setSelectionRange({start}, {end});"));
                         }
                         let mut g = g;
                         g.spell = found.map(|suggestions| crate::state::Misspelling { word: w, start, end, suggestions });
@@ -1427,7 +1427,7 @@ pub fn second_press(last: &mut Option<std::time::Instant>) -> bool {
 }
 
 /// CSS variables for the text sizes (Settings → Appearance → Text).
-pub fn text_size_vars(s: &larrier_core::Settings) -> String {
+pub fn text_size_vars(s: &lary_core::Settings) -> String {
     TypeScale::of(s).vars()
 }
 
@@ -1441,9 +1441,9 @@ pub struct TypeScale {
 }
 
 impl TypeScale {
-    pub fn of(s: &larrier_core::Settings) -> TypeScale {
+    pub fn of(s: &lary_core::Settings) -> TypeScale {
         let b = s.text_size.px() as f64;
-        let compact = s.density == larrier_core::Density::Compact;
+        let compact = s.density == lary_core::Density::Compact;
         let lh = |px: f64, ratio: f64, min: f64| (px * ratio).round().max(min);
         let (steps, code, note) = (b - 1.0, b - 2.0, b - 2.0);
         TypeScale {
@@ -1553,7 +1553,7 @@ fn Main() -> Element {
     }
 }
 
-/// Offer to continue agents that were running when Larrier closed.
+/// Offer to continue agents that were running when Lary closed.
 #[component]
 fn InterruptedBanner() -> Element {
     let mut app = crate::state::use_app();
@@ -1566,7 +1566,7 @@ fn InterruptedBanner() -> Element {
     rsx! {
         div { style: "display: flex; align-items: center; gap: 10px; margin: 8px 12px 0; padding: 8px 12px; border-radius: var(--r-lg); background: var(--amber-bg); color: var(--fg); font-size: var(--ui-sm); animation: rise-in var(--t-2) ease-out;",
             Icon { i: I::Alert, size: 14 }
-            span { style: "flex: 1;", if n == 1 { "1 agent was interrupted when Larrier closed." } else { "{n} agents were interrupted when Larrier closed." } }
+            span { style: "flex: 1;", if n == 1 { "1 agent was interrupted when Lary closed." } else { "{n} agents were interrupted when Lary closed." } }
             if n == 1 {
                 button { class: "ghost-btn", onclick: { let id = ids[0].clone(); move |_| app.open_session(&id) }, "Open" }
             }
@@ -1701,7 +1701,7 @@ fn SideToggle() -> Element {
         .sessions
         .read()
         .iter()
-        .filter(|s| !s.archived && s.unread && matches!(s.status, larrier_core::SessionStatus::Review | larrier_core::SessionStatus::Done))
+        .filter(|s| !s.archived && s.unread && matches!(s.status, lary_core::SessionStatus::Review | lary_core::SessionStatus::Done))
         .count();
     rsx! {
         button { class: if open { "icon-btn pane-toggle side on" } else { "icon-btn pane-toggle side" },
@@ -1724,7 +1724,7 @@ pub fn SidebarToggle() -> Element {
         .sessions
         .read()
         .iter()
-        .filter(|s| !s.archived && s.unread && matches!(s.status, larrier_core::SessionStatus::Review | larrier_core::SessionStatus::Done))
+        .filter(|s| !s.archived && s.unread && matches!(s.status, lary_core::SessionStatus::Review | lary_core::SessionStatus::Done))
         .count();
     let _ = review;
     if open {
@@ -2281,7 +2281,7 @@ pub fn place_sub_js(id: &str, focus: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::TypeScale;
-    use larrier_core::{Density, Settings, TextSize};
+    use lary_core::{Density, Settings, TextSize};
 
     fn scale(t: TextSize, d: Density) -> TypeScale {
         TypeScale::of(&Settings { text_size: t, density: d, ..Settings::default() })

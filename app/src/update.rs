@@ -1,16 +1,16 @@
 //! Updates from GitHub releases. A release carries each platform's program
-//! and its SHA-256 (`<asset>.sha256`): `Larrier-<version>-windows-x64.exe`,
-//! `…-macos-arm64.zip` / `…-macos-x64.zip` (Larrier.app) and
-//! `…-linux-x64.tar.gz`. Larrier downloads the newest one's, checks it, and
+//! and its SHA-256 (`<asset>.sha256`): `Lary-<version>-windows-x64.exe`,
+//! `…-macos-arm64.zip` / `…-macos-x64.zip` (Lary.app) and
+//! `…-linux-x64.tar.gz`. Lary downloads the newest one's, checks it, and
 //! on restart the new program takes the old one's place (on macOS the whole
-//! Larrier.app). No source code is involved.
+//! Lary.app). No source code is involved.
 //!
 //! The Stable channel follows the latest release; Preview also takes
 //! pre-releases (`0.3.0-beta.2`). Versions compare as Semantic Versions
 //! (see `crate::version`).
 //!
-//! The repository is `Dev4YM/Larrier` (`LARRIER_UPDATE_REPO` overrides it,
-//! `LARRIER_UPDATE_API` points at another API root, e.g. for tests). Its
+//! The repository is `Dev4YM/Lary` (`LARY_UPDATE_REPO` overrides it,
+//! `LARY_UPDATE_API` points at another API root, e.g. for tests). Its
 //! releases are public: no account or token is used.
 
 use std::path::{Path, PathBuf};
@@ -20,13 +20,13 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use larrier_core::UpdateChannel;
+use lary_core::UpdateChannel;
 
 use crate::install::{self, Kind, Scope};
 
-const REPO: &str = "Dev4YM/Larrier";
+const REPO: &str = "Dev4YM/Lary";
 
-/// A release newer than the running Larrier.
+/// A release newer than the running Lary.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
     pub version: String,
@@ -52,15 +52,15 @@ pub fn asset_suffix() -> Option<&'static str> {
 }
 
 fn api_root() -> String {
-    std::env::var("LARRIER_UPDATE_API").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "https://api.github.com".into())
+    std::env::var("LARY_UPDATE_API").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "https://api.github.com".into())
 }
 
 pub fn repo() -> String {
-    std::env::var("LARRIER_UPDATE_REPO").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| REPO.into())
+    std::env::var("LARY_UPDATE_REPO").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| REPO.into())
 }
 
 fn client() -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder().user_agent(concat!("Larrier/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(15)).build()?)
+    Ok(reqwest::Client::builder().user_agent(concat!("Lary/", env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(15)).build()?)
 }
 
 pub use crate::version::newer;
@@ -95,7 +95,7 @@ async fn get_json(path: &str) -> Result<Value> {
     resp.json().await.context("reading the releases")
 }
 
-/// The newest release on `channel`, when it is newer than this Larrier and
+/// The newest release on `channel`, when it is newer than this Lary and
 /// has a program for this platform.
 pub async fn check(channel: UpdateChannel) -> Result<Option<Release>> {
     let rel = match channel {
@@ -126,7 +126,7 @@ pub fn newest(list: &[Value]) -> Option<Release> {
 pub fn cache_dir() -> PathBuf {
     match install::current() {
         Kind::Installed(scope) => install::layout(scope).shared_dir.join("updates"),
-        Kind::App => dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("larrier").join("updates"),
+        Kind::App => dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("lary").join("updates"),
         _ => install::layout(Scope::User).shared_dir.join("updates"),
     }
 }
@@ -172,7 +172,7 @@ pub async fn download(rel: &Release, mut progress: impl FnMut(u64, u64)) -> Resu
 }
 
 /// macOS and Linux: unpack a downloaded archive with the system's own tools
-/// and return the program in it (inside Larrier.app on macOS).
+/// and return the program in it (inside Lary.app on macOS).
 fn unpack(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
     let archive = dir.join(name);
     std::fs::write(&archive, bytes)?;
@@ -180,9 +180,9 @@ fn unpack(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out)?;
     let (tool, args, program): (&str, Vec<&std::ffi::OsStr>, PathBuf) = if name.ends_with(".zip") {
-        ("ditto", vec!["-x".as_ref(), "-k".as_ref(), archive.as_os_str(), out.as_os_str()], out.join("Larrier.app/Contents/MacOS/Larrier"))
+        ("ditto", vec!["-x".as_ref(), "-k".as_ref(), archive.as_os_str(), out.as_os_str()], out.join("Lary.app/Contents/MacOS/Lary"))
     } else {
-        ("tar", vec!["-xzf".as_ref(), archive.as_os_str(), "-C".as_ref(), out.as_os_str()], out.join("larrier/larrier"))
+        ("tar", vec!["-xzf".as_ref(), archive.as_os_str(), "-C".as_ref(), out.as_os_str()], out.join("lary/lary"))
     };
     let ok = std::process::Command::new(tool).args(args).status().map(|s| s.success()).unwrap_or(false);
     if !ok || !program.exists() {
@@ -195,7 +195,7 @@ fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-/// Hand over to a downloaded program: it waits for this Larrier to close,
+/// Hand over to a downloaded program: it waits for this Lary to close,
 /// takes its place and starts. The caller then exits.
 pub fn restart_into(downloaded: &Path) -> Result<()> {
     let me = std::env::current_exe()?;
@@ -203,7 +203,7 @@ pub fn restart_into(downloaded: &Path) -> Result<()> {
     install::spawn(downloaded, &["--apply-update", &me.display().to_string(), "--pid", &pid])
 }
 
-/// Like [`restart_into`] for a Larrier that is closing: the new program
+/// Like [`restart_into`] for a Lary that is closing: the new program
 /// takes its place once it has exited, without starting it again.
 pub fn install_after_exit(downloaded: &Path) -> Result<()> {
     let me = std::env::current_exe()?;
@@ -212,36 +212,74 @@ pub fn install_after_exit(downloaded: &Path) -> Result<()> {
 }
 
 /// Run by the downloaded program (`--apply-update <target> --pid <n>`): wait
-/// for the old Larrier, replace it (asking for administrator rights when it
+/// for the old Lary, replace it (asking for administrator rights when it
 /// is installed for everyone), record the version and start it.
 pub fn apply(target: &Path, pid: Option<u32>, relaunch: bool) -> Result<()> {
     if let Some(pid) = pid {
         wait_for_exit(pid);
     }
-    let me = std::env::current_exe()?;
+    // Through a link (an old Larrier's updater finds this program under
+    // its old name): the program itself.
+    let me = std::env::current_exe().map(|p| std::fs::canonicalize(&p).unwrap_or(p))?;
+    // Updating Larrier (Lary's old name): installed as Lary in its place.
+    if let Some(scope) = install::larrier_scope(target) {
+        let exe = if install::can_install(scope) {
+            install::replace_larrier(scope)?
+        } else {
+            let code = install::run_elevated(&me, &["--replace-larrier".into(), install::scope_arg(scope).into()])?;
+            if code != 0 {
+                bail!("the update could not be put in place (code {code})");
+            }
+            install::layout(scope).exe()
+        };
+        if relaunch {
+            install::launch(&exe, &[])?;
+        }
+        return Ok(());
+    }
     let kind = install::kind_of(target);
-    // macOS: the whole Larrier.app is replaced, not just its program.
+    // macOS: the whole Lary.app is replaced, not just its program.
     #[cfg(target_os = "macos")]
     if let (Some(old), Some(new)) = (install::bundle_of(target), install::bundle_of(&me)) {
         install::replace_bundle(&new, &old)?;
+        // Larrier.app becomes Lary.app.
+        let mut target = target.to_path_buf();
+        if old.file_name().is_some_and(|n| n == "Larrier.app") {
+            let renamed = old.with_file_name("Lary.app");
+            if std::fs::rename(&old, &renamed).is_ok() {
+                target = renamed.join("Contents/MacOS/Lary");
+            }
+        }
         if relaunch {
-            install::launch(target, &[])?;
+            install::launch(&target, &[])?;
         }
         return Ok(());
     }
     let writable = target.parent().map(|d| {
-        let probe = d.join(".larrier-write-test");
+        let probe = d.join(".lary-write-test");
         let ok = std::fs::write(&probe, b"").is_ok();
         let _ = std::fs::remove_file(&probe);
         ok
     });
+    // Linux: `larrier` becomes `lary`, with its launcher entry and icon.
+    #[cfg(target_os = "linux")]
+    if writable == Some(true) && target.file_name().is_some_and(|n| n == "larrier") {
+        let new = target.with_file_name("lary");
+        install::replace_file(&me, &new)?;
+        let _ = std::fs::remove_file(target);
+        install::rename_linux_entry(&new);
+        if relaunch {
+            install::launch(&new, &[])?;
+        }
+        return Ok(());
+    }
     if writable == Some(true) {
         install::replace_file(&me, target)?;
         if let Kind::Installed(scope) = kind {
-            let _ = install::set_version(scope, larrier_core::APP_VERSION);
+            let _ = install::set_version(scope, lary_core::APP_VERSION);
         }
     } else if !cfg!(windows) {
-        bail!("Larrier can't write to {}: update it the way you installed it", target.parent().unwrap_or(target).display());
+        bail!("Lary can't write to {}: update it the way you installed it", target.parent().unwrap_or(target).display());
     } else {
         let code = install::run_elevated(&me, &["--replace".into(), target.display().to_string()])?;
         if code != 0 {
@@ -259,7 +297,7 @@ pub fn replace(target: &Path) -> Result<()> {
     let me = std::env::current_exe()?;
     install::replace_file(&me, target)?;
     if let Kind::Installed(scope) = install::kind_of(target) {
-        install::set_version(scope, larrier_core::APP_VERSION)?;
+        install::set_version(scope, lary_core::APP_VERSION)?;
     }
     Ok(())
 }
@@ -302,7 +340,7 @@ mod tests {
         let rel = |tag: &str, draft: bool| {
             let v = tag.trim_start_matches('v');
             serde_json::json!({ "tag_name": tag, "draft": draft, "html_url": "", "body": "",
-                "assets": [{ "name": format!("Larrier-{v}-windows-x64.exe"), "url": "a", "browser_download_url": "b", "size": 1 }] })
+                "assets": [{ "name": format!("Lary-{v}-windows-x64.exe"), "url": "a", "browser_download_url": "b", "size": 1 }] })
         };
         let list = vec![rel("v0.2.0", false), rel("v0.3.0-beta.2", false), rel("v0.3.0-beta.10", false), rel("v0.4.0", true), rel("v0.2.1", false)];
         if asset_suffix() == Some("-windows-x64.exe") {
@@ -313,20 +351,20 @@ mod tests {
     #[test]
     fn finds_this_platforms_program() {
         let v = serde_json::json!({
-            "tag_name": "v0.2.0", "html_url": "https://github.com/Dev4YM/Larrier/releases/tag/v0.2.0", "body": "Notes",
+            "tag_name": "v0.2.0", "html_url": "https://github.com/Dev4YM/Lary/releases/tag/v0.2.0", "body": "Notes",
             "assets": [
-                { "name": "Larrier-0.2.0-windows-x64.exe", "url": "api/1", "browser_download_url": "dl/1", "size": 10 },
-                { "name": "Larrier-0.2.0-windows-x64.exe.sha256", "url": "api/2", "browser_download_url": "dl/2", "size": 1 },
+                { "name": "Lary-0.2.0-windows-x64.exe", "url": "api/1", "browser_download_url": "dl/1", "size": 10 },
+                { "name": "Lary-0.2.0-windows-x64.exe.sha256", "url": "api/2", "browser_download_url": "dl/2", "size": 1 },
             ]
         });
         if asset_suffix() == Some("-windows-x64.exe") {
             let r = parse_release(&v).unwrap();
-            assert_eq!((r.version.as_str(), r.asset_name.as_str(), r.sha_url.as_deref()), ("0.2.0", "Larrier-0.2.0-windows-x64.exe", Some("dl/2")));
+            assert_eq!((r.version.as_str(), r.asset_name.as_str(), r.sha_url.as_deref()), ("0.2.0", "Lary-0.2.0-windows-x64.exe", Some("dl/2")));
         }
     }
 
     /// The published releases answer without a GitHub account or token
-    /// (`cargo test -p larrier-app public_releases_need_no_token -- --ignored`).
+    /// (`cargo test -p lary-app public_releases_need_no_token -- --ignored`).
     #[test]
     #[ignore]
     fn public_releases_need_no_token() {

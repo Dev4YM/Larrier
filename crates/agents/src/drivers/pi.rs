@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use larrier_core::{lsf::is_narration_block, FileDiff, ToolStatus};
+use lary_core::{lsf::is_narration_block, FileDiff, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -217,19 +217,19 @@ mod tests {
         ];
         let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
         let events = crate::drivers::testutil::collect(&mut PiStream::default(), &lines);
-        let mut s = larrier_core::Session::new(larrier_core::AgentKind::Pi, None);
-        s.push(larrier_core::Message::user_text("go"));
-        let mut rec = crate::engine::TurnRecorder::begin(&mut s, larrier_core::AgentKind::Pi, None, None);
+        let mut s = lary_core::Session::new(lary_core::AgentKind::Pi, None);
+        s.push(lary_core::Message::user_text("go"));
+        let mut rec = crate::engine::TurnRecorder::begin(&mut s, lary_core::AgentKind::Pi, None, None);
         for e in &events {
             rec.apply(&mut s, e);
         }
         let parts = &s.messages.last().unwrap().parts;
-        assert!(matches!(&parts[0], larrier_core::Part::Reasoning { text, .. } if text == "Read the handler first."), "{parts:?}");
-        assert!(matches!(&parts[1], larrier_core::Part::Text { text } if text == "I'll add the key."), "{parts:?}");
+        assert!(matches!(&parts[0], lary_core::Part::Reasoning { text, .. } if text == "Read the handler first."), "{parts:?}");
+        assert!(matches!(&parts[1], lary_core::Part::Text { text } if text == "I'll add the key."), "{parts:?}");
     }
     use super::*;
     use crate::drivers::testutil::collect;
-    use larrier_core::ToolKind;
+    use lary_core::ToolKind;
 
     #[test]
     fn maps_json_mode() {

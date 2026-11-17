@@ -1,4 +1,4 @@
-# Builds Larrier for Linux (x86_64) in a clean Ubuntu 22.04: the oldest
+# Builds Lary for Linux (x86_64) in a clean Ubuntu 22.04: the oldest
 # glibc a Linux release supports. Used by scripts/build.sh --docker and
 # for checking the Linux build from Windows or macOS.
 FROM ubuntu:22.04

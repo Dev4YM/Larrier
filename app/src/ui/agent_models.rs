@@ -1,12 +1,12 @@
 //! A harness's models (Settings → Harnesses → one agent): what the agent
-//! itself is set up with (synced from its own settings), Larrier's defaults,
+//! itself is set up with (synced from its own settings), Lary's defaults,
 //! which models the picker shows, and models the user adds, on the agent's
 //! own service or one of its API accounts.
 
 use dioxus::prelude::*;
-use larrier_agents::models::effort_label;
-use larrier_agents::request::takes_effort;
-use larrier_core::{AccountAuth, AgentKind, CustomModel};
+use lary_agents::models::effort_label;
+use lary_agents::request::takes_effort;
+use lary_core::{AccountAuth, AgentKind, CustomModel};
 
 use super::{Select, Toggle};
 use crate::agent_models::{self as am, Choice};
@@ -60,7 +60,7 @@ pub fn AgentModelsPanel(kind: AgentKind) -> Element {
         .collect();
     let total = list.len();
 
-    // Defaults: Larrier's, else the agent's own.
+    // Defaults: Lary's, else the agent's own.
     let r = am::resolve(&app, &kind, None, None);
     let agent_default = native.as_ref().and_then(|n| n.default_model.clone());
     let agent_default_name = agent_default.as_deref().map(|m| {
@@ -150,7 +150,7 @@ pub fn AgentModelsPanel(kind: AgentKind) -> Element {
         }
 
         // ---------------------------------------------------------- defaults
-        div { class: "set-group-title", "Defaults in Larrier" }
+        div { class: "set-group-title", "Defaults in Lary" }
         div { class: "set-card",
             div { class: "set-row",
                 div { class: "lbl",
@@ -266,7 +266,7 @@ fn ModelRow(kind: AgentKind, c: Choice) -> Element {
             for (b, cls) in badges { span { key: "{b}", class: "{cls}", "{b}" } }
             span { class: "id ellipsis", "{c.id}" }
             span { class: "eff", "{efforts}" }
-            span { class: "ctx", {c.context.map(larrier_core::models::tokens_short).unwrap_or_default()} }
+            span { class: "ctx", {c.context.map(lary_core::models::tokens_short).unwrap_or_default()} }
             if c.added {
                 button { class: "icon-btn", title: "Remove this model",
                     onclick: move |_| app.update_config(|cfg| { let a = cfg.agent_mut(&k1); a.custom_models.retain(|m| m.id != id1); a.extra_models.retain(|m| *m != id1); }),
@@ -297,7 +297,7 @@ fn AddModel(kind: AgentKind) -> Element {
     let mut id = use_signal(String::new);
     let mut label = use_signal(String::new);
     let mut via = use_signal(String::new);
-    // Its API accounts that Larrier points it at can serve a model.
+    // Its API accounts that Lary points it at can serve a model.
     let mut ep_opts: Vec<(String, String)> = vec![(String::new(), "Whatever the chat runs as".to_string())];
     ep_opts.extend(app.config.read().accounts_for(&kind).into_iter().filter_map(|a| match &a.auth {
         AccountAuth::Api(x) if x.env_var.is_none() => Some((a.id.clone(), format!("{} · {}", a.label, x.api.label()))),

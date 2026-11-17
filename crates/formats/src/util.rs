@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use larrier_core::{
+use lary_core::{
     lsf::{new_id, title_from_prompt, truncate_middle, MediaSource},
     AgentKind, FileDiff, Message, NativeLink, Origin, Part, PlanEntry, PlanStatus, Role, Session, SessionStatus, ToolCall,
     ToolKind, ToolStatus, Usage, WorkspaceRef,
@@ -531,7 +531,7 @@ pub fn plan_from_text(text: &str) -> Option<Vec<PlanEntry>> {
     (!entries.is_empty()).then_some(entries)
 }
 
-/// Split off the attachment list Larrier appends to a prompt for agents
+/// Split off the attachment list Lary appends to a prompt for agents
 /// that take files as @paths ("\n\nAttached files:\n- @path\n…"): the
 /// prompt's own text, and the attachments as parts (images by extension).
 /// Text without such a list at its end comes back unchanged.
@@ -593,7 +593,7 @@ impl Conv {
     }
 
     pub fn user_parts(&mut self, parts: Vec<Part>, ts: Option<DateTime<Utc>>) {
-        // The attachment list Larrier appends for agents that take files as
+        // The attachment list Lary appends for agents that take files as
         // @paths comes back from their transcripts as text: it's the
         // prompt's attachments again.
         let mut out: Vec<Part> = Vec::new();
@@ -993,7 +993,7 @@ pub fn write_new_file(path: &Path, content: &str) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    larrier_core::store::atomic_write(path, content.as_bytes())
+    lary_core::store::atomic_write(path, content.as_bytes())
 }
 
 pub fn image_part(mime: Option<String>, data: Option<&str>, url: Option<&str>) -> Option<Part> {
@@ -1025,7 +1025,7 @@ mod tests {
     /// back: the list becomes the prompt's attachments again.
     #[test]
     fn attachment_lists_come_back_as_attachments() {
-        let sent = "fix the icon hover\nso please fully ensure\n\nAttached files:\n- @C:\\Users\\me\\AppData\\Roaming\\Larrier\\attachments\\01a1.png\n- @D:\\proj\\notes.md\n";
+        let sent = "fix the icon hover\nso please fully ensure\n\nAttached files:\n- @C:\\Users\\me\\AppData\\Roaming\\Lary\\attachments\\01a1.png\n- @D:\\proj\\notes.md\n";
         let (text, parts) = split_attachment_list(sent);
         assert_eq!(text, "fix the icon hover\nso please fully ensure");
         assert!(matches!(&parts[0], Part::Image { mime: Some(m), source: MediaSource::Path { path } } if m == "image/png" && path.ends_with("01a1.png")));

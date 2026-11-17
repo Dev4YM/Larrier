@@ -1,14 +1,14 @@
-# Builds Larrier for Windows, macOS and Linux and publishes them on a
+# Builds Lary for Windows, macOS and Linux and publishes them on a
 # GitHub release.
 #
 # Push a tag that matches the app version (`v0.2.0` for version 0.2.0 in
 # Cargo.toml; scripts/release.ps1 makes both), or run it by hand with that
 # tag. The release gets each platform's program and its `.sha256`:
 #
-#   Larrier-<version>-windows-x64.exe    the app, which installs itself
-#   Larrier-<version>-macos-arm64.zip    Larrier.app for Apple silicon
-#   Larrier-<version>-macos-x64.zip      Larrier.app for Intel Macs
-#   Larrier-<version>-linux-x64.tar.gz   the program, its launcher entry and install.sh
+#   Lary-<version>-windows-x64.exe    the app, which installs itself
+#   Lary-<version>-macos-arm64.zip    Lary.app for Apple silicon
+#   Lary-<version>-macos-x64.zip      Lary.app for Intel Macs
+#   Lary-<version>-linux-x64.tar.gz   the program, its launcher entry and install.sh
 #
 # with the version's section of CHANGELOG.md as its notes. Versions with a
 # suffix (`-beta.1`) are published as previews. A program the release
@@ -52,10 +52,10 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 && exit 0
           version=${TAG#v}
           awk -v v="$version" '/^## /{p = ($2 == v)} p && !/^## /' CHANGELOG.md > notes.md
-          [ -s notes.md ] || echo "Larrier $version" > notes.md
+          [ -s notes.md ] || echo "Lary $version" > notes.md
           case "$version" in *-*) kind=--prerelease ;; *) kind=--latest ;; esac
           # scripts/release.ps1 creates it at the same moment; theirs is fine.
-          gh release create "$TAG" --title "Larrier $version" --notes-file notes.md $kind || gh release view "$TAG" >/dev/null
+          gh release create "$TAG" --title "Lary $version" --notes-file notes.md $kind || gh release view "$TAG" >/dev/null
 
   build:
     needs: release
@@ -122,4 +122,4 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" dist/Larrier-*-${{ matrix.name }}.* --clobber
+        run: gh release upload "$TAG" dist/Lary-*-${{ matrix.name }}.* --clobber

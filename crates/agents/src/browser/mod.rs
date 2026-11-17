@@ -1,7 +1,7 @@
-//! The browser Larrier shares with its agents: the real pages in Larrier's
+//! The browser Lary shares with its agents: the real pages in Lary's
 //! Browser tab (Google Chrome when it's installed, WebView2 otherwise, each
 //! with a profile of its own), driven over their DevTools port. Agents use
-//! them through `Larrier mcp-browser` (an MCP server on stdio, added to
+//! them through `Lary mcp-browser` (an MCP server on stdio, added to
 //! their runs), so the user sees and can use the very pages the agent works
 //! in.
 
@@ -15,15 +15,15 @@ use std::time::Duration;
 pub use cdp::{Cdp, Event};
 use serde_json::{json, Value};
 
-/// The MCP server's name as agents know it (`mcp__larrier_browser__…`).
-pub const SERVER_NAME: &str = "larrier_browser";
+/// The MCP server's name as agents know it (`mcp__lary_browser__…`).
+pub const SERVER_NAME: &str = "lary_browser";
 
 /// Agents can use the browser here: its pages need a DevTools port, which
 /// WebView2 and Chrome have (Windows) and macOS's and Linux's web engines
 /// don't.
 pub const SUPPORTED: bool = cfg!(windows);
 
-/// How an agent starts the browser server: Larrier's own program.
+/// How an agent starts the browser server: Lary's own program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Server {
     pub command: String,
@@ -38,7 +38,7 @@ pub fn register(exe: &std::path::Path) {
     let _ = SERVER.set(Server {
         command: exe.to_string_lossy().to_string(),
         args: vec!["mcp-browser".into()],
-        env: vec![("LARRIER_HOME".into(), larrier_core::store::data_root().to_string_lossy().to_string())],
+        env: vec![("LARY_HOME".into(), lary_core::store::data_root().to_string_lossy().to_string())],
     });
 }
 
@@ -88,13 +88,13 @@ impl Server {
 /// The Browser tab's folder: the agents' control file, and the profile of
 /// the system's web views where the tab uses them (macOS, Linux).
 pub fn view_dir() -> PathBuf {
-    larrier_core::store::data_root().join("browser-view")
+    lary_core::store::data_root().join("browser-view")
 }
 
-/// The profile of Larrier's own browser engine (Chromium, on Windows): its
+/// The profile of Lary's own browser engine (Chromium, on Windows): its
 /// pages' cookies and sign-ins, and the DevTools port file.
 pub fn engine_dir() -> PathBuf {
-    larrier_core::store::data_root().join("browser-engine")
+    lary_core::store::data_root().join("browser-engine")
 }
 
 /// A browser's DevTools port and websocket path, from the file it writes
@@ -109,7 +109,7 @@ fn devtools_at(file: PathBuf) -> Option<(u16, String)> {
     Some((port, path))
 }
 
-/// The DevTools websocket address of the browser behind Larrier's Browser
+/// The DevTools websocket address of the browser behind Lary's Browser
 /// tab (its Chromium engine, or the system's web views), when it's open.
 pub fn view_running() -> Option<String> {
     devtools_at(engine_dir().join("DevToolsActivePort"))
@@ -117,14 +117,14 @@ pub fn view_running() -> Option<String> {
         .or_else(|| devtools_at(view_dir().join("EBWebView").join("DevToolsActivePort")).map(|(port, path)| format!("ws://127.0.0.1:{port}{path}")))
 }
 
-/// The page target showing Larrier tab `tab` (each view tells its pages
-/// their tab as `window.__larrierTab`).
+/// The page target showing Lary tab `tab` (each view tells its pages
+/// their tab as `window.__laryTab`).
 pub fn view_target(cdp: &Cdp, tab: u64) -> Option<String> {
     for t in pages(cdp).ok()? {
         let Some(id) = t["targetId"].as_str() else { continue };
         let Ok(r) = cdp.call("Target.attachToTarget", json!({"targetId": id, "flatten": true}), None) else { continue };
         let Some(session) = r["sessionId"].as_str() else { continue };
-        let v = cdp.call("Runtime.evaluate", json!({"expression": "window.__larrierTab", "returnByValue": true}), Some(session));
+        let v = cdp.call("Runtime.evaluate", json!({"expression": "window.__laryTab", "returnByValue": true}), Some(session));
         let _ = cdp.call("Target.detachFromTarget", json!({"sessionId": session}), None);
         if v.ok().and_then(|v| v["result"]["value"].as_u64()) == Some(tab) {
             return Some(id.to_string());
@@ -133,7 +133,7 @@ pub fn view_target(cdp: &Cdp, tab: u64) -> Option<String> {
     None
 }
 
-/// A picture of Larrier tab `tab` as it looks now (base64 JPEG).
+/// A picture of Lary tab `tab` as it looks now (base64 JPEG).
 pub fn view_snapshot(tab: u64) -> Option<String> {
     view_capture(tab, None)
 }

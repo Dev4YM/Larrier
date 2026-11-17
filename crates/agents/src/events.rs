@@ -1,7 +1,7 @@
 //! Normalized runtime events every driver emits, and the controls a running
 //! turn accepts.
 
-use larrier_core::{FileDiff, Part, PlanEntry, ToolCall, ToolStatus, Usage};
+use lary_core::{FileDiff, Part, PlanEntry, ToolCall, ToolStatus, Usage};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 

@@ -6,8 +6,8 @@ use std::sync::{Mutex, OnceLock};
 
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
-use larrier_agents::harness::HarnessItem;
-use larrier_core::{lsf::short_path, AgentKind, BusySend, Part, Protocol};
+use lary_agents::harness::HarnessItem;
+use lary_core::{lsf::short_path, AgentKind, BusySend, Part, Protocol};
 
 use super::mentions::MentionChip;
 use super::{Dropdown, MenuItem};
@@ -18,7 +18,7 @@ use crate::state::{use_app, App, SettingsTab};
 mod insert_menu;
 use insert_menu::{Level, Sugg, SuggAct};
 
-/// Model choices of Larrier Chat (each API account's models, as
+/// Model choices of Lary Chat (each API account's models, as
 /// `account/model`) and custom agents.
 fn listed_models(app: &App, agent: &AgentKind) -> Option<Vec<String>> {
     let cfg = app.config.read();
@@ -27,7 +27,7 @@ fn listed_models(app: &App, agent: &AgentKind) -> Option<Vec<String>> {
             cfg.accounts_for(agent)
                 .into_iter()
                 .filter_map(|a| match &a.auth {
-                    larrier_core::AccountAuth::Api(api) => Some(api.models.iter().map(move |m| format!("{}/{}", a.id, m))),
+                    lary_core::AccountAuth::Api(api) => Some(api.models.iter().map(move |m| format!("{}/{}", a.id, m))),
                     _ => None,
                 })
                 .flatten()
@@ -100,13 +100,13 @@ fn plan_option(agent: &AgentKind) -> Option<&'static str> {
 }
 
 /// Model and effort for the composer button ("Opus 5.5", "Extra high"):
-/// the session's picks, else the defaults — the agent's own when Larrier
+/// the session's picks, else the defaults — the agent's own when Lary
 /// has none, so it reads what will really run.
 fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &Option<String>, fast: bool) -> (String, String) {
     use crate::agent_models as am;
     if agent.spec().protocol == Protocol::HttpChat {
         let name = match model {
-            Some(m) => larrier_core::models::lookup(m.split_once('/').map(|(_, b)| b).unwrap_or(m)).map(|i| i.short_name()).unwrap_or_else(|| larrier_core::models::pretty_name(m)),
+            Some(m) => lary_core::models::lookup(m.split_once('/').map(|(_, b)| b).unwrap_or(m)).map(|i| i.short_name()).unwrap_or_else(|| lary_core::models::pretty_name(m)),
             None => "Auto".into(),
         };
         return (name, String::new());
@@ -124,7 +124,7 @@ fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &
             extra.push(p.contexts.iter().find(|(v, _)| v == ctx).map(|(_, l)| l.clone()).unwrap_or_else(|| ctx.to_uppercase()));
         }
     }
-    extra.extend(r.effort.as_deref().map(larrier_agents::models::effort_label));
+    extra.extend(r.effort.as_deref().map(lary_agents::models::effort_label));
     if r.fast || (fast && offers_fast(app, agent, model.as_deref())) {
         extra.push("Fast".into());
     }
@@ -134,7 +134,7 @@ fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &
 /// Whether the model a chat runs offers a Fast switch of the chat's own
 /// (Claude Code's fast mode, Codex's priority tier).
 fn offers_fast(app: &App, agent: &AgentKind, model: Option<&str>) -> bool {
-    if !larrier_agents::request::takes_fast(agent) {
+    if !lary_agents::request::takes_fast(agent) {
         return false;
     }
     let r = crate::agent_models::resolve(app, agent, model, None);
@@ -145,7 +145,7 @@ fn offers_fast(app: &App, agent: &AgentKind, model: Option<&str>) -> bool {
 /// How a model choice reads in the picker: (label, note, "1M · $4 / $20",
 /// tooltip).
 fn model_row_text(m: &Option<String>) -> (String, String, String, String) {
-    use larrier_core::models::{self, money, tokens_short};
+    use lary_core::models::{self, money, tokens_short};
     let Some(id) = m.as_deref() else {
         return ("Auto".into(), "Agent's default".into(), String::new(), "Let the agent use its default model".into());
     };
@@ -195,7 +195,7 @@ const TIPS: &[&str] = &[
     "Ctrl+K searches every agent and chat you have",
     "Import ChatGPT and Claude.ai exports from File → Import File",
     "Multitask runs one prompt on several agents in parallel",
-    "Right-click anything for Larrier's menu",
+    "Right-click anything for Lary's menu",
     "Every session is a portable .lsf file — export it from the … menu",
 ];
 
@@ -212,7 +212,7 @@ struct SessInfo {
     worktree: bool,
     /// The worktree it runs in, when that was there before the chat.
     existing: Option<String>,
-    usage: larrier_core::Usage,
+    usage: lary_core::Usage,
     /// Context in use and the window, as last reported.
     context: Option<(u64, Option<u64>)>,
     cost: Option<f64>,
@@ -240,7 +240,7 @@ pub fn Composer(
         move || crate::keep::input(&k)
     });
     let mut text = use_signal(|| kept.text.clone());
-    // Bumped whenever Larrier itself changes the text (not the user typing):
+    // Bumped whenever Lary itself changes the text (not the user typing):
     // the box takes those writes, and drops older copies of what was typed
     // that reach it after the user moved on (they'd throw the caret to the end).
     let put_gen = use_signal(|| 0u64);
@@ -309,7 +309,7 @@ pub fn Composer(
         }
         let mut app = app;
         let mut text = text;
-        let mine: Vec<(MentionChip, Option<larrier_core::Part>)> = {
+        let mine: Vec<(MentionChip, Option<lary_core::Part>)> = {
             let mut ui = app.ui.write();
             let (m, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut ui.chip_inbox).into_iter().partition(|(sid, _, _)| *sid == sid_chip);
             ui.chip_inbox = rest;
@@ -427,9 +427,9 @@ pub fn Composer(
             permission: s.permission.clone(),
             effort: s.effort.clone(),
             fast: s.fast,
-            worktree: matches!(s.environment, larrier_core::Environment::Worktree { .. }),
+            worktree: matches!(s.environment, lary_core::Environment::Worktree { .. }),
             existing: match &s.environment {
-                larrier_core::Environment::Worktree { path, branch, .. } if !branch.starts_with("larrier/") => Some(path.clone()),
+                lary_core::Environment::Worktree { path, branch, .. } if !branch.starts_with("lary/") && !branch.starts_with("larrier/") => Some(path.clone()),
                 _ => None,
             },
             usage: s.usage.clone(),
@@ -456,7 +456,7 @@ pub fn Composer(
     let fr3 = file_root.clone();
     let branch = use_resource(use_reactive!(|fr3| async move {
         let root = fr3?;
-        tokio::task::spawn_blocking(move || larrier_agents::git::current_branch(std::path::Path::new(&root))).await.ok().flatten()
+        tokio::task::spawn_blocking(move || lary_agents::git::current_branch(std::path::Path::new(&root))).await.ok().flatten()
     }));
 
     // Current selections: from the session, or the new-agent draft.
@@ -640,7 +640,7 @@ pub fn Composer(
     };
     let set_mode = move |m: Option<String>, sid: Option<String>| set_pick(0, m, sid);
     let plan_k = plan_id;
-    let agent_k: &'static larrier_core::AgentSpec = agent.spec();
+    let agent_k: &'static lary_core::AgentSpec = agent.spec();
     let run_slash = move |cmd: &str, sid: Option<String>| {
         let mut app = app;
         match cmd {
@@ -649,14 +649,14 @@ pub fn Composer(
             "/ask" => if agent_k.mode_groups.first().and_then(|g| g.find("ask")).is_some() { set_mode(Some("ask".into()), sid) },
             "/new" => app.new_agent(),
             "/fork" => if let Some(id) = &sid { app.fork(id, None) },
-            "/export" => if let Some(id) = &sid { app.export(id, larrier_formats::ExportFormat::LsfJsonl) },
+            "/export" => if let Some(id) = &sid { app.export(id, lary_formats::ExportFormat::LsfJsonl) },
             "/terminal" => if let Some(id) = &sid { app.open_in_terminal(id) },
             "/worktree" => { let mut d = app.draft.write(); d.worktree = true; d.existing_worktree = None; }
             "/local" => { let mut d = app.draft.write(); d.worktree = false; d.existing_worktree = None; }
             "/settings" => app.open_settings(SettingsTab::General),
             "/usage" => app.open_settings(SettingsTab::Usage),
             "/mcp" => {
-                app.ui.write().customize_focus = Some((Some(larrier_agents::harness::ItemKind::Mcp), Some(agent_k.kind.clone())));
+                app.ui.write().customize_focus = Some((Some(lary_agents::harness::ItemKind::Mcp), Some(agent_k.kind.clone())));
                 app.navigate(crate::state::View::Customize);
             }
             _ => {}
@@ -764,7 +764,7 @@ pub fn Composer(
         let (m, e) = crate::agent_models::compose_with(&app, &agent, &family, e.as_deref(), fast, now.context.as_deref());
         // Picking the agent's own default model and effort keeps following it.
         let model_changed = Some(m.as_str()) != now.model.as_deref() || model.is_some();
-        let claude = larrier_agents::request::takes_fast(&agent);
+        let claude = lary_agents::request::takes_fast(&agent);
         match &sid {
             Some(id) => {
                 if model_changed {
@@ -833,7 +833,7 @@ pub fn Composer(
         };
         match sg.act {
             SuggAct::Chip(chip) => put(chip),
-            SuggAct::Larrier(cmd) => {
+            SuggAct::Lary(cmd) => {
                 drop_token();
                 run_slash(cmd, sid.clone());
             }
@@ -1058,7 +1058,7 @@ pub fn Composer(
     };
     // Projects matching the search in the project menu.
     let pj_q = pj_query.read().trim().to_lowercase();
-    let pj_shown: Vec<larrier_core::Workspace> = workspaces
+    let pj_shown: Vec<lary_core::Workspace> = workspaces
         .iter()
         .filter(|w| pj_q.is_empty() || w.name.to_lowercase().contains(&pj_q) || w.path.to_lowercase().contains(&pj_q))
         .cloned()
@@ -1387,7 +1387,7 @@ pub fn Composer(
                         id: "{input_id}",
                         class: "c-text tok-input",
                         dir: "auto",
-                        // Spelling is Larrier's own (underlined in the copy behind).
+                        // Spelling is Lary's own (underlined in the copy behind).
                         spellcheck: "false",
                         rows: if home { "3" } else { "1" },
                         placeholder: "{placeholder}",
@@ -1567,7 +1567,7 @@ pub fn Composer(
                         }
                         Dropdown { open: multi_menu, up: false,
                             div { class: "menu-label", "Run the prompt on several agents at once" }
-                            for spec in larrier_core::agent::runnable().filter(|s| app.config.read().agent(&s.kind).enabled && (s.binaries.is_empty() || detected.iter().any(|d| d.kind == s.kind && d.installed()))) {
+                            for spec in lary_core::agent::runnable().filter(|s| app.config.read().agent(&s.kind).enabled && (s.binaries.is_empty() || detected.iter().any(|d| d.kind == s.kind && d.installed()))) {
                                 {
                                     let k = spec.kind.clone();
                                     let on = multi_now.contains(&k);
@@ -1629,7 +1629,7 @@ pub(super) fn pickable_agents(app: &App, current: &AgentKind) -> Vec<(AgentKind,
     let cfg = app.config.read();
     let detected = app.detected.read();
     let mut out: Vec<(AgentKind, String, String)> = Vec::new();
-    for spec in larrier_core::agent::runnable() {
+    for spec in lary_core::agent::runnable() {
         let det = detected.iter().find(|d| d.kind == spec.kind);
         let api = spec.binaries.is_empty();
         let installed = api || det.map(|d| d.installed()).unwrap_or(false);
@@ -1660,7 +1660,7 @@ struct PickRow {
 }
 
 /// The picker's rows for an agent: its default, then the models shown in
-/// Larrier's picker, or every model it offers when `all` (search).
+/// Lary's picker, or every model it offers when `all` (search).
 fn pick_rows(app: &App, kind: &AgentKind, all: bool) -> Vec<PickRow> {
     use crate::agent_models as am;
     let mut rows = Vec::new();
@@ -1672,11 +1672,11 @@ fn pick_rows(app: &App, kind: &AgentKind, all: bool) -> Vec<PickRow> {
         }
         return rows;
     }
-    // The default row says what it is: Larrier's default, or the agent's own.
+    // The default row says what it is: Lary's default, or the agent's own.
     let r = am::resolve(app, kind, None, None);
     let mut def_note: Vec<String> = r.model.as_deref().map(|m| am::short_name(app, kind, r.family.as_deref().unwrap_or(m))).into_iter().collect();
-    def_note.extend(r.effort.as_deref().map(larrier_agents::models::effort_label));
-    let whose = if r.model_from_agent { format!("{}'s own default (from its settings)", kind.display_name()) } else { "Your default for this agent in Larrier".to_string() };
+    def_note.extend(r.effort.as_deref().map(lary_agents::models::effort_label));
+    let whose = if r.model_from_agent { format!("{}'s own default (from its settings)", kind.display_name()) } else { "Your default for this agent in Lary".to_string() };
     rows.push(PickRow { id: None, label: "Default".into(), note: def_note.join(" · "), meta: String::new(), tip: whose, logo_id: r.model.clone() });
     let choices = if all { am::choices(app, kind) } else { am::picker_choices(app, kind) };
     for c in choices {
@@ -1692,9 +1692,9 @@ fn pick_rows(app: &App, kind: &AgentKind, all: bool) -> Vec<PickRow> {
         } else if !reg_note.is_empty() && reg_note != "Default" && !c.id.contains('/') {
             note.push(reg_note);
         }
-        let meta = if meta.is_empty() { c.context.map(larrier_core::models::tokens_short).unwrap_or_default() } else { meta };
+        let meta = if meta.is_empty() { c.context.map(lary_core::models::tokens_short).unwrap_or_default() } else { meta };
         let tip = if c.efforts.is_empty() { reg_tip } else { format!("{reg_tip}
-Effort: {}", c.efforts.iter().map(|e| larrier_agents::models::effort_label(e)).collect::<Vec<_>>().join(", ")) };
+Effort: {}", c.efforts.iter().map(|e| lary_agents::models::effort_label(e)).collect::<Vec<_>>().join(", ")) };
         rows.push(PickRow { id: Some(c.id.clone()), label: c.name.trim_start_matches("Claude ").to_string(), note: note.join(" · "), meta, tip, logo_id: Some(c.id) });
     }
     rows
@@ -1803,7 +1803,7 @@ fn ModelPicker(
     let fav_groups: Vec<(AgentKind, String, Vec<PickRow>)> = {
         let mut out: Vec<(AgentKind, String, Vec<PickRow>)> = Vec::new();
         for (k, name, _) in agents.iter() {
-            let mine: Vec<&larrier_core::FavoriteModel> = favorites.iter().filter(|f| &f.agent == k).collect();
+            let mine: Vec<&lary_core::FavoriteModel> = favorites.iter().filter(|f| &f.agent == k).collect();
             if mine.is_empty() {
                 continue;
             }
@@ -1960,11 +1960,11 @@ fn ModelPicker(
                             "{cur_name}"
                             if !sub_now.is_empty() { span { class: "sub", "{sub_now}" } }
                         }
-                        // The accounts it can run as (Settings → Harnesses). Larrier
+                        // The accounts it can run as (Settings → Harnesses). Lary
                         // Chat's model already names its account.
                         {
                             let cfg = app.config.read();
-                            let accounts: Vec<larrier_core::Account> = if cur == agent && cur != AgentKind::Chat { cfg.accounts_for(&cur).into_iter().cloned().collect() } else { Vec::new() };
+                            let accounts: Vec<lary_core::Account> = if cur == agent && cur != AgentKind::Chat { cfg.accounts_for(&cur).into_iter().cloned().collect() } else { Vec::new() };
                             let using = account.clone().or_else(|| cfg.default_account(&cur).map(|a| a.id.clone()));
                             rsx! {
                                 if accounts.len() > 1 {
@@ -1979,7 +1979,7 @@ fn ModelPicker(
                                                 rsx! {
                                                     button { key: "{a.id}", class: if on { "mp-acct on" } else if ok { "mp-acct" } else { "mp-acct off" }, title: "{tip}",
                                                         onclick: move |e| { e.stop_propagation(); onaccount.call(id.clone()); },
-                                                        Icon { i: match a.auth { larrier_core::AccountAuth::Api(_) | larrier_core::AccountAuth::ApiKey { .. } => I::Key, larrier_core::AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 12 }
+                                                        Icon { i: match a.auth { lary_core::AccountAuth::Api(_) | lary_core::AccountAuth::ApiKey { .. } => I::Key, lary_core::AccountAuth::ConfigDir { .. } => I::Lock, _ => I::User }, size: 12 }
                                                         span { "{a.label}" }
                                                     }
                                                 }
@@ -2067,7 +2067,7 @@ fn ModelPicker(
                             } else if let Some(t) = context {
                                 div { class: "menu-label", "Context" }
                                 div { class: "menu-item checked static", title: "The model's context window",
-                                    span { "{larrier_core::models::tokens_short(t)}" }
+                                    span { "{lary_core::models::tokens_short(t)}" }
                                     span { class: "check", Icon { i: I::Check, size: 13 } }
                                 }
                             }
@@ -2081,9 +2081,9 @@ fn ModelPicker(
                                         let pick = pick.clone();
                                         rsx! {
                                             button { key: "{e}", class: if on { "menu-item checked" } else { "menu-item" },
-                                                title: larrier_agents::models::effort_note(&e).unwrap_or_default(),
+                                                title: lary_agents::models::effort_note(&e).unwrap_or_default(),
                                                 onclick: move |_| pick(Some(e2.clone()), sel_fast),
-                                                span { {larrier_agents::models::effort_label(&e)} }
+                                                span { {lary_agents::models::effort_label(&e)} }
                                                 span { class: "check", style: if on { "visibility: visible;" } else { "visibility: hidden;" }, Icon { i: I::Check, size: 13 } }
                                             }
                                         }
@@ -2170,7 +2170,7 @@ fn PickRowItem(
     }
 }
 
-/// Larrier changed the composer's text itself (see `put_gen`).
+/// Lary changed the composer's text itself (see `put_gen`).
 fn bump(mut g: Signal<u64>) {
     g += 1;
 }
@@ -2208,7 +2208,7 @@ fn ConfigMenu(session_id: Option<String>, agent: AgentKind, groups: Vec<ModeGrou
     let mut open = use_signal(|| false);
     let pinned = session_id.as_ref().is_some_and(|id| app.sessions.read().iter().any(|s| &s.id == id && s.pinned));
     let tip = groups.iter().map(|g| g.options.get(g.chosen).map(|o| o.label).unwrap_or("")).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" · ");
-    let mut customize = move |kind: larrier_agents::harness::ItemKind, k: AgentKind| {
+    let mut customize = move |kind: lary_agents::harness::ItemKind, k: AgentKind| {
         app.ui.write().customize_focus = Some((Some(kind), Some(k)));
         app.navigate(crate::state::View::Customize);
     };
@@ -2248,9 +2248,9 @@ fn ConfigMenu(session_id: Option<String>, agent: AgentKind, groups: Vec<ModeGrou
                     div { class: "menu-sep" }
                 }
                 MenuItem { label: "MCP servers".to_string(), icon: Some(I::Server), title: Some(format!("{}'s MCP servers, in Customize", agent.display_name())),
-                    onclick: { let k = agent.clone(); move |_| { open.set(false); customize(larrier_agents::harness::ItemKind::Mcp, k.clone()); } } }
+                    onclick: { let k = agent.clone(); move |_| { open.set(false); customize(lary_agents::harness::ItemKind::Mcp, k.clone()); } } }
                 MenuItem { label: "Skills".to_string(), icon: Some(I::Wand), title: Some(format!("{}'s skills, in Customize", agent.display_name())),
-                    onclick: { let k = agent.clone(); move |_| { open.set(false); customize(larrier_agents::harness::ItemKind::Skill, k.clone()); } } }
+                    onclick: { let k = agent.clone(); move |_| { open.set(false); customize(lary_agents::harness::ItemKind::Skill, k.clone()); } } }
                 if let Some(id) = session_id.clone() {
                     div { class: "menu-sep" }
                     {
@@ -2260,7 +2260,7 @@ fn ConfigMenu(session_id: Option<String>, agent: AgentKind, groups: Vec<ModeGrou
                             MenuItem { label: "Fork".to_string(), icon: Some(I::Fork), onclick: move |_| { open.set(false); app.fork(&b, None); } }
                             MenuItem { label: "Open in the agent's CLI".to_string(), icon: Some(I::Terminal), onclick: move |_| { open.set(false); app.open_in_terminal(&c); } }
                             super::SubMenu { label: "Export as", icon: I::Upload,
-                                for f in larrier_formats::ExportFormat::ALL.iter().copied() {
+                                for f in lary_formats::ExportFormat::ALL.iter().copied() {
                                     MenuItem { key: "{f.label()}", label: f.label().to_string(),
                                         onclick: { let d = d.clone(); move |_| { open.set(false); app.export(&d, f); } } }
                                 }
@@ -2315,30 +2315,30 @@ fn mode_icon(id: &str) -> I {
 /// then those a chat runs in, by the chat's name, and the rest, by their
 /// folder; each with its branch (or "detached") and commit.
 #[component]
-fn WorktreeList(trees: Option<Vec<larrier_agents::git::Worktree>>, query: Signal<String>, existing: Option<String>, onpick: EventHandler<String>) -> Element {
+fn WorktreeList(trees: Option<Vec<lary_agents::git::Worktree>>, query: Signal<String>, existing: Option<String>, onpick: EventHandler<String>) -> Element {
     let app = use_app();
     let mut query = query;
     let q = query.read().trim().to_lowercase();
     let sessions = app.sessions.read();
     // The chat running in a worktree: it says so (or made it: its branch
-    // is `larrier/agent-<the chat's id's end>`).
-    let user_of = |t: &larrier_agents::git::Worktree| {
+    // is `lary/agent-<the chat's id's end>`).
+    let user_of = |t: &lary_agents::git::Worktree| {
         let same = |a: &str, b: &str| a.replace('\\', "/").trim_end_matches('/').eq_ignore_ascii_case(b.replace('\\', "/").trim_end_matches('/'));
         sessions
             .iter()
             .find(|s| s.worktree_path.as_deref().is_some_and(|p| same(p, &t.path)))
-            .or_else(|| t.branch.as_deref().and_then(|b| b.strip_prefix("larrier/agent-")).and_then(|end| sessions.iter().find(|s| s.id.ends_with(end))))
+            .or_else(|| t.branch.as_deref().and_then(|b| b.strip_prefix("lary/agent-").or_else(|| b.strip_prefix("larrier/agent-"))).and_then(|end| sessions.iter().find(|s| s.id.ends_with(end))))
             .map(|s| s.title.clone())
     };
-    let rows: Vec<(larrier_agents::git::Worktree, Option<String>)> = trees.clone().unwrap_or_default().into_iter().map(|t| { let u = user_of(&t); (t, u) }).collect();
-    let folder = |t: &larrier_agents::git::Worktree| std::path::Path::new(&t.path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| t.path.clone());
-    let shown: Vec<(larrier_agents::git::Worktree, Option<String>)> = rows
+    let rows: Vec<(lary_agents::git::Worktree, Option<String>)> = trees.clone().unwrap_or_default().into_iter().map(|t| { let u = user_of(&t); (t, u) }).collect();
+    let folder = |t: &lary_agents::git::Worktree| std::path::Path::new(&t.path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| t.path.clone());
+    let shown: Vec<(lary_agents::git::Worktree, Option<String>)> = rows
         .into_iter()
         .filter(|(t, u)| q.is_empty() || [u.clone().unwrap_or_default(), folder(t), t.name()].iter().any(|s| s.to_lowercase().contains(&q)))
         .collect();
     let in_use: Vec<_> = shown.iter().filter(|(_, u)| u.is_some()).cloned().collect();
     let free: Vec<_> = shown.iter().filter(|(_, u)| u.is_none()).cloned().collect();
-    let row = move |t: larrier_agents::git::Worktree, user: Option<String>| {
+    let row = move |t: lary_agents::git::Worktree, user: Option<String>| {
         let title = user.unwrap_or_else(|| folder(&t));
         let at = format!("{} @ {}", t.branch.clone().unwrap_or_else(|| "detached".into()), t.head.clone().unwrap_or_default());
         let on = existing.as_deref() == Some(t.path.as_str());
@@ -2440,7 +2440,7 @@ fn BranchPicker(folder: Option<String>, current: Option<String>, new_tree: bool,
                         } else if let Some(f) = folder.clone() {
                             spawn(async move {
                                 let b2 = b.clone();
-                                let r = tokio::task::spawn_blocking(move || larrier_agents::git::switch(std::path::Path::new(&f), &b2)).await;
+                                let r = tokio::task::spawn_blocking(move || lary_agents::git::switch(std::path::Path::new(&f), &b2)).await;
                                 match r {
                                     Ok(Ok(())) => app.toast(format!("Switched to {b}")),
                                     Ok(Err(e)) => app.toast_err(format!("Couldn't switch to {b}: {e}")),
@@ -2495,7 +2495,7 @@ async fn refresh_branches(folder: String, mut list: Signal<Option<(Vec<String>, 
     let f = folder.clone();
     let got = tokio::task::spawn_blocking(move || {
         let p = std::path::Path::new(&f);
-        (larrier_agents::git::branches(p), larrier_agents::git::default_branch(p))
+        (lary_agents::git::branches(p), lary_agents::git::default_branch(p))
     })
     .await
     .ok();
@@ -2538,7 +2538,7 @@ fn EnvPicker(
     // (`None` while that runs), and at first when the chat runs in one, to
     // name it by its branch.
     let mut trees = use_signal(|| match (&existing, &folder) {
-        (Some(_), Some(f)) => Some(larrier_agents::git::worktrees(std::path::Path::new(f))),
+        (Some(_), Some(f)) => Some(lary_agents::git::worktrees(std::path::Path::new(f))),
         _ => Some(Vec::new()),
     });
     let mut tree_q = use_signal(String::new);
@@ -2568,7 +2568,7 @@ fn EnvPicker(
                             trees.set(None);
                             tree_q.set(String::new());
                             spawn(async move {
-                                let list = tokio::task::spawn_blocking(move || larrier_agents::git::worktrees(std::path::Path::new(&f))).await.unwrap_or_default();
+                                let list = tokio::task::spawn_blocking(move || lary_agents::git::worktrees(std::path::Path::new(&f))).await.unwrap_or_default();
                                 trees.set(Some(list));
                             });
                         }
@@ -2634,7 +2634,7 @@ fn harness_items(app: &App) -> Vec<HarnessItem> {
     if !STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         let ws: Vec<std::path::PathBuf> = app.config.read().workspaces.iter().map(|w| std::path::PathBuf::from(&w.path)).collect();
         std::thread::spawn(move || {
-            let items = larrier_agents::harness::discover(&ws);
+            let items = lary_agents::harness::discover(&ws);
             if let Some(c) = HARNESS.get() {
                 if let Ok(mut g) = c.lock() {
                     *g = Some(items);

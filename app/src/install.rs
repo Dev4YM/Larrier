@@ -1,14 +1,14 @@
-//! Larrier as an installed app (Windows): installed for everyone (the
+//! Lary as an installed app (Windows): installed for everyone (the
 //! program in Program Files, shared files in ProgramData, needs admin) or
 //! just for the current user (everything under the user's profile), with
 //! Start menu / Desktop shortcuts and an entry in Settings → Apps that runs
-//! Larrier's own uninstaller. Each user's sessions and settings always stay
-//! in their own profile (`larrier_core::store::data_root`).
+//! Lary's own uninstaller. Each user's sessions and settings always stay
+//! in their own profile (`lary_core::store::data_root`).
 //!
 //! The release binary is its own installer: run from anywhere else it
 //! offers to install itself (see `ui::setup`).
 //!
-//! macOS and Linux install programs by copying them: Larrier.app wherever
+//! macOS and Linux install programs by copying them: Lary.app wherever
 //! it was put, or the program `install.sh` placed in `~/.local/bin`. Such a
 //! copy is [`Kind::App`]; it updates where it is and never shows the setup.
 
@@ -18,8 +18,11 @@ use std::process::Command;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub const EXE_NAME: &str = "Larrier.exe";
-const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Larrier";
+pub const EXE_NAME: &str = "Lary.exe";
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Lary";
+/// Lary was called Larrier: where its installs went.
+const OLD_NAME: &str = "Larrier";
+const OLD_UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Larrier";
 const PUBLISHER: &str = "Dev4YM";
 
 /// Who an install is for.
@@ -32,7 +35,7 @@ pub enum Scope {
     User,
 }
 
-/// How this copy of Larrier is running.
+/// How this copy of Lary is running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Installed(Scope),
@@ -62,7 +65,7 @@ impl Layout {
     }
 
     fn shortcut(dir: &Path) -> PathBuf {
-        dir.join("Larrier.lnk")
+        dir.join("Lary.lnk")
     }
 
     fn registry_root(&self) -> &'static str {
@@ -82,15 +85,15 @@ pub fn layout(scope: Scope) -> Layout {
     match scope {
         Scope::Machine => Layout {
             scope,
-            bin_dir: env_dir("ProgramW6432").or_else(|| env_dir("ProgramFiles")).unwrap_or_else(|| PathBuf::from(r"C:\Program Files")).join("Larrier"),
-            shared_dir: env_dir("ProgramData").unwrap_or_else(|| PathBuf::from(r"C:\ProgramData")).join("Larrier"),
+            bin_dir: env_dir("ProgramW6432").or_else(|| env_dir("ProgramFiles")).unwrap_or_else(|| PathBuf::from(r"C:\Program Files")).join("Lary"),
+            shared_dir: env_dir("ProgramData").unwrap_or_else(|| PathBuf::from(r"C:\ProgramData")).join("Lary"),
             start_menu: env_dir("ProgramData").unwrap_or_else(|| PathBuf::from(r"C:\ProgramData")).join(r"Microsoft\Windows\Start Menu\Programs"),
             desktop: env_dir("PUBLIC").map(|p| p.join("Desktop")),
         },
         Scope::User => Layout {
             scope,
-            bin_dir: local.join("Programs").join("Larrier"),
-            shared_dir: local.join("Larrier"),
+            bin_dir: local.join("Programs").join("Lary"),
+            shared_dir: local.join("Lary"),
             start_menu: env_dir("APPDATA").or_else(dirs::config_dir).unwrap_or_default().join(r"Microsoft\Windows\Start Menu\Programs"),
             desktop: dirs::desktop_dir(),
         },
@@ -102,7 +105,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// How the running copy of Larrier is installed.
+/// How the running copy of Lary is installed.
 pub fn current() -> Kind {
     let Ok(exe) = std::env::current_exe() else { return Kind::Portable };
     kind_of(&exe)
@@ -152,7 +155,7 @@ pub fn existing() -> Option<Record> {
 /// for everyone needs admin).
 pub fn can_install(scope: Scope) -> bool {
     let dir = layout(scope).bin_dir;
-    let probe = dir.join(".larrier-write-test");
+    let probe = dir.join(".lary-write-test");
     let ok = std::fs::create_dir_all(&dir).is_ok() && std::fs::write(&probe, b"").is_ok();
     let _ = std::fs::remove_file(&probe);
     ok
@@ -161,7 +164,7 @@ pub fn can_install(scope: Scope) -> bool {
 /// Install the running binary for `scope`. Returns the installed program.
 pub fn install(scope: Scope, desktop_shortcut: bool) -> Result<PathBuf> {
     let l = layout(scope);
-    let me = std::env::current_exe().context("finding Larrier's own file")?;
+    let me = std::env::current_exe().context("finding Lary's own file")?;
     std::fs::create_dir_all(&l.bin_dir).with_context(|| format!("creating {}", l.bin_dir.display()))?;
     std::fs::create_dir_all(&l.shared_dir).with_context(|| format!("creating {}", l.shared_dir.display()))?;
     let exe = l.exe();
@@ -174,8 +177,8 @@ pub fn install(scope: Scope, desktop_shortcut: bool) -> Result<PathBuf> {
             shortcut(&Layout::shortcut(d), &exe, &l.bin_dir)?;
         }
     }
-    register(&l, &exe, larrier_core::APP_VERSION)?;
-    let rec = Record { scope, version: larrier_core::APP_VERSION.to_string(), exe: exe.clone(), installed_at: chrono::Utc::now() };
+    register(&l, &exe, lary_core::APP_VERSION)?;
+    let rec = Record { scope, version: lary_core::APP_VERSION.to_string(), exe: exe.clone(), installed_at: chrono::Utc::now() };
     std::fs::write(record_path(&l), serde_json::to_vec_pretty(&rec)?)?;
     Ok(exe)
 }
@@ -203,7 +206,7 @@ pub fn tidy() {
     }
 }
 
-/// `path` with `.<tag>` added to its name (`Larrier.exe.old`, `larrier.new`).
+/// `path` with `.<tag>` added to its name (`Lary.exe.old`, `lary.new`).
 fn sibling(path: &Path, tag: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".{tag}"));
@@ -213,7 +216,7 @@ fn sibling(path: &Path, tag: &str) -> PathBuf {
 /// Copy `from` over `to`, retrying while the old program is still closing.
 pub fn replace_file(from: &Path, to: &Path) -> Result<()> {
     let tmp = sibling(to, "new");
-    std::fs::copy(from, &tmp).with_context(|| format!("copying Larrier to {}", tmp.display()))?;
+    std::fs::copy(from, &tmp).with_context(|| format!("copying Lary to {}", tmp.display()))?;
     let mut last = None;
     for _ in 0..40 {
         // A running .exe can be renamed but not overwritten.
@@ -238,6 +241,24 @@ pub fn replace_file(from: &Path, to: &Path) -> Result<()> {
     Err(anyhow!("could not replace {}: {}", to.display(), last.map(|e| e.to_string()).unwrap_or_default()))
 }
 
+/// Linux: Larrier's launcher entry and icon become Lary's (`install.sh`
+/// put them in the user's data folder).
+#[cfg(target_os = "linux")]
+pub fn rename_linux_entry(exe: &Path) {
+    let Some(data) = dirs::data_dir() else { return };
+    let apps = data.join("applications");
+    let icons = data.join("icons/hicolor/256x256/apps");
+    if let Ok(t) = std::fs::read_to_string(apps.join("larrier.desktop")) {
+        let t = t.replace("Larrier", "Lary").lines().map(|l| if l.starts_with("Exec=") { format!("Exec={}", exe.display()) } else if l.starts_with("Icon=") { "Icon=lary".to_string() } else { l.to_string() }).collect::<Vec<_>>().join("\n");
+        if std::fs::write(apps.join("lary.desktop"), t + "\n").is_ok() {
+            let _ = std::fs::remove_file(apps.join("larrier.desktop"));
+        }
+    }
+    if std::fs::rename(icons.join("larrier.png"), icons.join("lary.png")).is_ok() {
+        let _ = Command::new("gtk-update-icon-cache").arg("-q").arg(data.join("icons/hicolor")).status();
+    }
+}
+
 /// macOS: the `.app` bundle a program runs from.
 pub fn bundle_of(exe: &Path) -> Option<PathBuf> {
     exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf)
@@ -256,7 +277,7 @@ pub fn replace_bundle(from: &Path, to: &Path) -> Result<()> {
     if !copied {
         let _ = std::fs::remove_dir_all(to);
         std::fs::rename(&old, to).ok();
-        return Err(anyhow!("could not copy the new Larrier.app to {}", to.display()));
+        return Err(anyhow!("could not copy the new Lary.app to {}", to.display()));
     }
     let _ = std::fs::remove_dir_all(&old);
     Ok(())
@@ -268,9 +289,9 @@ fn register(l: &Layout, exe: &Path, version: &str) -> Result<()> {
     let exe_s = exe.display().to_string();
     let script = format!(
         "$k = '{root}:\\{key}'; New-Item -Path $k -Force | Out-Null; \
-         $v = @{{ DisplayName = 'Larrier'; DisplayVersion = '{version}'; Publisher = '{publisher}'; DisplayIcon = '{exe},0'; \
+         $v = @{{ DisplayName = 'Lary'; DisplayVersion = '{version}'; Publisher = '{publisher}'; DisplayIcon = '{exe},0'; \
          InstallLocation = '{dir}'; UninstallString = '\"{exe}\" --uninstall'; QuietUninstallString = '\"{exe}\" --uninstall --quiet'; \
-         URLInfoAbout = 'https://github.com/Dev4YM/Larrier' }}; \
+         URLInfoAbout = 'https://github.com/Dev4YM/Lary' }}; \
          foreach ($n in $v.Keys) {{ New-ItemProperty -Path $k -Name $n -Value $v[$n] -PropertyType String -Force | Out-Null }}; \
          foreach ($n in 'NoModify','NoRepair') {{ New-ItemProperty -Path $k -Name $n -Value 1 -PropertyType DWord -Force | Out-Null }}; \
          New-ItemProperty -Path $k -Name EstimatedSize -Value {size_kb} -PropertyType DWord -Force | Out-Null",
@@ -281,7 +302,7 @@ fn register(l: &Layout, exe: &Path, version: &str) -> Result<()> {
         exe = ps_quote(&exe_s),
         dir = ps_quote(&l.bin_dir.display().to_string()),
     );
-    powershell(&script).context("registering Larrier in Settings → Apps")
+    powershell(&script).context("registering Lary in Settings → Apps")
 }
 
 /// Record a new version in the install's Settings → Apps entry and record.
@@ -316,30 +337,84 @@ fn shortcut(lnk: &Path, exe: &Path, dir: &Path) -> Result<()> {
     .with_context(|| format!("creating the shortcut {}", lnk.display()))
 }
 
-/// Remove an install: shortcuts, the Settings → Apps entry, its shared
-/// files, and (after Larrier exits) the program. `remove_data` also deletes
-/// the current user's sessions and settings.
-pub fn uninstall(scope: Scope, remove_data: bool) -> Result<()> {
-    let l = layout(scope);
-    let _ = std::fs::remove_file(Layout::shortcut(&l.start_menu));
-    if let Some(d) = &l.desktop {
-        let _ = std::fs::remove_file(Layout::shortcut(d));
+/// Larrier's install for `scope`: the same places under its old name.
+fn old_layout(scope: Scope) -> Layout {
+    let mut l = layout(scope);
+    l.bin_dir.set_file_name(OLD_NAME);
+    l.shared_dir.set_file_name(OLD_NAME);
+    l
+}
+
+/// The scope of the Larrier install a program sits in (Windows), if it's
+/// in one.
+pub fn larrier_scope(exe: &Path) -> Option<Scope> {
+    if !cfg!(windows) {
+        return None;
     }
-    // Shortcuts made for the user while it was a for-everyone install.
-    if let Some(d) = dirs::desktop_dir() {
-        let _ = std::fs::remove_file(Layout::shortcut(&d));
+    let dir = exe.parent()?;
+    [Scope::Machine, Scope::User].into_iter().find(|s| same_path(dir, &old_layout(*s).bin_dir))
+}
+
+/// Install this program as Lary for `scope` in place of Larrier: Lary's
+/// shortcuts (on the desktop too if Larrier had one there), Settings →
+/// Apps entry and record; then Larrier's shortcuts, entry and shared files
+/// go, and its program folder once it has exited. Returns Lary's program.
+pub fn replace_larrier(scope: Scope) -> Result<PathBuf> {
+    let old = old_layout(scope);
+    let lnk = |d: &Path| d.join(format!("{OLD_NAME}.lnk"));
+    let desktops: Vec<PathBuf> = [old.desktop.clone(), dirs::desktop_dir()].into_iter().flatten().collect();
+    let had_desktop = desktops.iter().any(|d| lnk(d).exists());
+    let exe = install(scope, had_desktop)?;
+    let _ = std::fs::remove_file(lnk(&old.start_menu));
+    for d in &desktops {
+        let _ = std::fs::remove_file(lnk(d));
     }
-    powershell(&format!("Remove-Item -Path '{}:\\{}' -Recurse -Force -ErrorAction SilentlyContinue", l.registry_root(), UNINSTALL_KEY))?;
-    let _ = std::fs::remove_dir_all(&l.shared_dir);
-    // The browser engine, kept in the user's own folder.
-    #[cfg(windows)]
-    let _ = std::fs::remove_dir_all(crate::browser_cef::root());
-    if remove_data {
-        let _ = std::fs::remove_dir_all(larrier_core::store::data_root());
+    let _ = powershell(&format!("Remove-Item -Path '{}:\\{}' -Recurse -Force -ErrorAction SilentlyContinue", old.registry_root(), OLD_UNINSTALL_KEY));
+    let _ = std::fs::remove_dir_all(&old.shared_dir);
+    remove_dir_later(&old.bin_dir)?;
+    Ok(exe)
+}
+
+/// Run from Larrier's install folder (its program was replaced by Lary's
+/// some other way than an update): install as Lary, start that and stop
+/// here. An install for everyone asks for administrator rights once.
+/// Returns the exit code when this process should end.
+pub fn migrate_from_larrier(args: &[String]) -> Option<i32> {
+    // Never inside the installer's own steps (they pass flags).
+    if args.iter().any(|a| a.starts_with("--")) {
+        return None;
     }
-    // The program can't delete itself while running: a detached shell does
-    // it once this process is gone.
-    let bin = l.bin_dir.display().to_string();
+    let me = std::env::current_exe().ok()?;
+    let scope = larrier_scope(&me)?;
+    let exe = if can_install(scope) {
+        replace_larrier(scope)
+    } else {
+        run_elevated(&me, &["--replace-larrier".into(), scope_arg(scope).into()]).and_then(|code| {
+            anyhow::ensure!(code == 0, "moving Larrier's install failed (code {code})");
+            Ok(layout(scope).exe())
+        })
+    };
+    match exe.and_then(|exe| launch(&exe, &[])) {
+        Ok(()) => Some(0),
+        Err(e) => {
+            tracing::warn!("couldn't install Larrier's copy as Lary: {e:#}");
+            None
+        }
+    }
+}
+
+/// How a scope is written on the command line.
+pub fn scope_arg(scope: Scope) -> &'static str {
+    match scope {
+        Scope::Machine => "machine",
+        Scope::User => "user",
+    }
+}
+
+/// Delete a folder once this process is gone (a running program can't
+/// delete itself): a detached shell does it.
+fn remove_dir_later(dir: &Path) -> Result<()> {
+    let bin = dir.display().to_string();
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -357,7 +432,32 @@ pub fn uninstall(scope: Scope, remove_data: bool) -> Result<()> {
     Ok(())
 }
 
-/// Run Larrier again with administrator rights (Windows asks the user) and
+/// Remove an install: shortcuts, the Settings → Apps entry, its shared
+/// files, and (after Lary exits) the program. `remove_data` also deletes
+/// the current user's sessions and settings.
+pub fn uninstall(scope: Scope, remove_data: bool) -> Result<()> {
+    let l = layout(scope);
+    let _ = std::fs::remove_file(Layout::shortcut(&l.start_menu));
+    if let Some(d) = &l.desktop {
+        let _ = std::fs::remove_file(Layout::shortcut(d));
+    }
+    // Shortcuts made for the user while it was a for-everyone install.
+    if let Some(d) = dirs::desktop_dir() {
+        let _ = std::fs::remove_file(Layout::shortcut(&d));
+    }
+    powershell(&format!("Remove-Item -Path '{}:\\{}' -Recurse -Force -ErrorAction SilentlyContinue", l.registry_root(), UNINSTALL_KEY))?;
+    let _ = std::fs::remove_dir_all(&l.shared_dir);
+    // The browser engine, kept in the user's own folder.
+    #[cfg(windows)]
+    let _ = std::fs::remove_dir_all(crate::browser_cef::root());
+    if remove_data {
+        let _ = std::fs::remove_dir_all(lary_core::store::data_root());
+    }
+    // The program can't delete itself while running.
+    remove_dir_later(&l.bin_dir)
+}
+
+/// Run Lary again with administrator rights (Windows asks the user) and
 /// wait for it. Returns its exit code.
 pub fn run_elevated(exe: &Path, args: &[String]) -> Result<i32> {
     let list = args.iter().map(|a| format!("'{}'", ps_quote(&format!("\"{a}\"")))).collect::<Vec<_>>().join(",");
@@ -369,7 +469,7 @@ pub fn run_elevated(exe: &Path, args: &[String]) -> Result<i32> {
     match st.code() {
         Some(1223) => Err(anyhow!("Administrator rights were not granted")),
         Some(c) => Ok(c),
-        None => Err(anyhow!("the elevated Larrier did not report back")),
+        None => Err(anyhow!("the elevated Lary did not report back")),
     }
 }
 
@@ -440,24 +540,24 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn knows_where_it_runs_from() {
-        assert_eq!(kind_of(Path::new(r"D:\src\Larrier\target\release\larrier-desktop.exe")), Kind::Dev);
+        assert_eq!(kind_of(Path::new(r"D:\src\Lary\target\release\lary-desktop.exe")), Kind::Dev);
         if !cfg!(debug_assertions) {
             assert_eq!(kind_of(&layout(Scope::User).exe()), Kind::Installed(Scope::User));
             assert_eq!(kind_of(&layout(Scope::Machine).exe()), Kind::Installed(Scope::Machine));
-            assert_eq!(kind_of(Path::new(r"C:\Users\me\Downloads\Larrier-0.2.0-windows-x64.exe")), Kind::Portable);
+            assert_eq!(kind_of(Path::new(r"C:\Users\me\Downloads\Lary-0.2.0-windows-x64.exe")), Kind::Portable);
         }
         let user = layout(Scope::User);
-        assert!(user.bin_dir.ends_with(r"Programs\Larrier") && user.shared_dir.ends_with("Larrier"));
+        assert!(user.bin_dir.ends_with(r"Programs\Lary") && user.shared_dir.ends_with("Lary"));
         assert!(layout(Scope::Machine).shared_dir.to_string_lossy().contains("ProgramData"));
     }
 
     #[test]
     #[cfg(not(windows))]
     fn knows_where_it_runs_from() {
-        assert_eq!(kind_of(Path::new("/home/me/src/larrier/target/release/larrier-desktop")), Kind::Dev);
+        assert_eq!(kind_of(Path::new("/home/me/src/lary/target/release/lary-desktop")), Kind::Dev);
         if !cfg!(debug_assertions) {
-            assert_eq!(kind_of(Path::new("/Applications/Larrier.app/Contents/MacOS/Larrier")), Kind::App);
-            assert_eq!(kind_of(Path::new("/home/me/.local/bin/larrier")), Kind::App);
+            assert_eq!(kind_of(Path::new("/Applications/Lary.app/Contents/MacOS/Lary")), Kind::App);
+            assert_eq!(kind_of(Path::new("/home/me/.local/bin/lary")), Kind::App);
         }
     }
 }

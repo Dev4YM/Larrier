@@ -1,4 +1,4 @@
-//! The windows Larrier shows instead of itself: the installer (the release
+//! The windows Lary shows instead of itself: the installer (the release
 //! program run from wherever it was downloaded) and the uninstaller (run by
 //! Settings → Apps).
 
@@ -40,7 +40,7 @@ fn quit() {
 
 fn theme() -> &'static str {
     match crate::state::store().load_config().settings.theme {
-        larrier_core::Theme::Dark => "dark",
+        lary_core::Theme::Dark => "dark",
         _ => "light",
     }
 }
@@ -49,7 +49,7 @@ fn theme() -> &'static str {
 fn Frame(children: Element) -> Element {
     rsx! {
         style { {CSS} }
-        div { class: "app larrier-root", "data-theme": theme(),
+        div { class: "app lary-root", "data-theme": theme(),
             div { class: "setup",
                 div { class: "setup-card",
                     {children}
@@ -102,7 +102,7 @@ pub fn SetupRoot() -> Element {
     let existing = use_hook(install::existing);
     let user = install::layout(Scope::User);
     let machine = install::layout(Scope::Machine);
-    let version = larrier_core::APP_VERSION;
+    let version = lary_core::APP_VERSION;
     let opt = |s: Scope, on: Scope| if s == on { "setup-opt on" } else { "setup-opt" };
     let go = move |_| {
         busy.set(true);
@@ -122,10 +122,10 @@ pub fn SetupRoot() -> Element {
     };
     rsx! {
         Frame {
-            Head { title: "Install Larrier".to_string(), sub: format!("Version {version} · one window for every coding agent") }
+            Head { title: "Install Lary".to_string(), sub: format!("Version {version} · one window for every coding agent") }
             if let Some(r) = existing {
                 div { class: "setup-note",
-                    {format!("Larrier {} is installed {}. Installing replaces it; your sessions and settings stay.", r.version, if r.scope == Scope::Machine { "for everyone" } else { "for you" })}
+                    {format!("Lary {} is installed {}. Installing replaces it; your sessions and settings stay.", r.version, if r.scope == Scope::Machine { "for everyone" } else { "for you" })}
                 }
             }
             div { class: "setup-opts",
@@ -174,7 +174,7 @@ pub fn SetupRoot() -> Element {
     }
 }
 
-/// The uninstaller: remove Larrier, and optionally this user's data.
+/// The uninstaller: remove Lary, and optionally this user's data.
 #[component]
 pub fn UninstallRoot() -> Element {
     let mut remove_data = use_signal(|| false);
@@ -182,18 +182,18 @@ pub fn UninstallRoot() -> Element {
     let mut done = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     let kind = install::current();
-    let data = larrier_core::store::data_root();
+    let data = lary_core::store::data_root();
     let go = move |_| {
         busy.set(true);
         error.set(None);
         let rm = remove_data();
         spawn(async move {
             let r = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-                let Kind::Installed(scope) = install::current() else { anyhow::bail!("This copy of Larrier isn't installed") };
+                let Kind::Installed(scope) = install::current() else { anyhow::bail!("This copy of Lary isn't installed") };
                 // This user's data goes from this (unelevated) process: an
                 // administrator's window may run as someone else.
                 if rm {
-                    let _ = std::fs::remove_dir_all(larrier_core::store::data_root());
+                    let _ = std::fs::remove_dir_all(lary_core::store::data_root());
                 }
                 if scope == Scope::Machine && !install::can_install(Scope::Machine) {
                     let me = std::env::current_exe()?;
@@ -218,13 +218,13 @@ pub fn UninstallRoot() -> Element {
         });
     };
     let what = match kind {
-        Kind::Installed(Scope::Machine) => "Larrier will be removed for everyone on this computer.",
-        Kind::Installed(Scope::User) => "Larrier will be removed from your user account.",
-        _ => "This copy of Larrier isn't installed.",
+        Kind::Installed(Scope::Machine) => "Lary will be removed for everyone on this computer.",
+        Kind::Installed(Scope::User) => "Lary will be removed from your user account.",
+        _ => "This copy of Lary isn't installed.",
     };
     rsx! {
         Frame {
-            Head { title: "Uninstall Larrier".to_string(), sub: format!("Version {}", larrier_core::APP_VERSION) }
+            Head { title: "Uninstall Lary".to_string(), sub: format!("Version {}", lary_core::APP_VERSION) }
             div { class: "setup-note", "{what}" }
             label { class: "setup-check",
                 input { r#type: "checkbox", checked: remove_data(), onchange: move |e| remove_data.set(e.checked()) }
@@ -234,7 +234,7 @@ pub fn UninstallRoot() -> Element {
                 div { class: "setup-error", "{e}" }
             }
             if done() {
-                div { class: "setup-done", Icon { i: I::CircleCheck, size: 15 } "Larrier was uninstalled." }
+                div { class: "setup-done", Icon { i: I::CircleCheck, size: 15 } "Lary was uninstalled." }
             }
             div { class: "setup-actions",
                 div { class: "grow" }

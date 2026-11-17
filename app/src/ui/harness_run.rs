@@ -1,14 +1,14 @@
 //! How a harness runs (Settings → Harnesses → one agent → How it runs):
-//! the ways Larrier can drive it, each with the command it runs and what
+//! the ways Lary can drive it, each with the command it runs and what
 //! it can do there, and the settings of its program.
 
 use dioxus::prelude::*;
-use larrier_core::{AgentKind, Config};
+use lary_core::{AgentKind, Config};
 
 use super::{Select, Toggle};
 use crate::state::use_app;
 
-/// One way Larrier runs a harness.
+/// One way Lary runs a harness.
 #[derive(Clone, PartialEq)]
 pub struct Way {
     /// Over the Agent Client Protocol (`prefer_acp`), else its own protocol.
@@ -18,13 +18,13 @@ pub struct Way {
     pub short: &'static str,
     pub command: String,
     pub detail: String,
-    /// What its maker documents for an app like Larrier.
+    /// What its maker documents for an app like Lary.
     pub recommended: bool,
 }
 
-const NO_ASKS: &str = "It can't ask while it runs: what would need asking is refused, and Larrier says so.";
+const NO_ASKS: &str = "It can't ask while it runs: what would need asking is refused, and Lary says so.";
 
-/// The harness's own protocol, as Larrier's driver runs it.
+/// The harness's own protocol, as Lary's driver runs it.
 fn native(kind: &AgentKind) -> Option<(&'static str, &'static str, &'static str, String)> {
     Some(match kind {
         AgentKind::ClaudeCode => (
@@ -47,12 +47,12 @@ fn native(kind: &AgentKind) -> Option<(&'static str, &'static str, &'static str,
         AgentKind::Droid => ("Exec mode", "exec mode", "droid exec -o stream-json", NO_ASKS.into()),
         AgentKind::Amp => ("Stream mode", "stream mode", "amp -x … --stream-json", NO_ASKS.into()),
         AgentKind::Qwen => ("Headless mode", "headless", "qwen -p … --output-format stream-json", NO_ASKS.into()),
-        AgentKind::Aider => ("One message at a time", "plain text", "aider --message …", "Larrier shows what it prints; it doesn't stream steps or ask.".into()),
+        AgentKind::Aider => ("One message at a time", "plain text", "aider --message …", "Lary shows what it prints; it doesn't stream steps or ask.".into()),
         _ => return None,
     })
 }
 
-/// Every way Larrier can run `kind`, its own protocol first.
+/// Every way Lary can run `kind`, its own protocol first.
 pub fn ways(kind: &AgentKind) -> Vec<Way> {
     let spec = kind.spec();
     let mut out = Vec::new();
@@ -126,7 +126,7 @@ pub fn RunPanel(kind: AgentKind) -> Element {
     }
     rsx! {
         if !all.is_empty() {
-            div { class: "hn-line", if all.len() > 1 { "How Larrier talks to {spec.name}. Pick one; new chats use it." } else { "How Larrier talks to {spec.name}." } }
+            div { class: "hn-line", if all.len() > 1 { "How Lary talks to {spec.name}. Pick one; new chats use it." } else { "How Lary talks to {spec.name}." } }
             div { class: "set-card hn-ways",
                 for w in all.clone() {
                     {

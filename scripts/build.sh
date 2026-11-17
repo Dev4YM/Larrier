@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build Larrier's program for this Mac or Linux machine into dist/, packaged
+# Build Lary's program for this Mac or Linux machine into dist/, packaged
 # and named the way releases are, with its SHA-256 (build.ps1 on Windows).
 #
 #   ./scripts/build.sh                                 # this machine's architecture
 #   ./scripts/build.sh --target x86_64-apple-darwin    # macOS: the Intel build on Apple silicon
 #   ./scripts/build.sh --docker                        # Linux: in a clean Ubuntu 22.04 container
 #
-#   macOS → dist/Larrier-<version>-macos-<arch>.zip      (Larrier.app)
-#   Linux → dist/Larrier-<version>-linux-<arch>.tar.gz   (larrier, larrier.desktop, larrier.png, install.sh)
+#   macOS → dist/Lary-<version>-macos-<arch>.zip      (Lary.app)
+#   Linux → dist/Lary-<version>-linux-<arch>.tar.gz   (lary, lary.desktop, lary.png, install.sh)
 set -eu
 cd "$(dirname "$0")/.."
 target="" docker=0
@@ -26,9 +26,9 @@ commit=$(git rev-parse --short=9 HEAD 2>/dev/null || echo unknown)
 date=$(git log -1 --format=%cs 2>/dev/null || true)
 
 if [ $docker -eq 1 ]; then
-    docker build -q -t larrier-linux-build -f scripts/linux/Dockerfile scripts/linux >/dev/null
-    exec docker run --rm -v "$PWD:/src" -v larrier-linux-target:/src/target -v larrier-cargo-registry:/root/.cargo/registry \
-        -e LARRIER_COMMIT="$commit" -e LARRIER_COMMIT_DATE="$date" larrier-linux-build ./scripts/build.sh ${target:+--target "$target"}
+    docker build -q -t lary-linux-build -f scripts/linux/Dockerfile scripts/linux >/dev/null
+    exec docker run --rm -v "$PWD:/src" -v lary-linux-target:/src/target -v lary-cargo-registry:/root/.cargo/registry \
+        -e LARY_COMMIT="$commit" -e LARY_COMMIT_DATE="$date" lary-linux-build ./scripts/build.sh ${target:+--target "$target"}
 fi
 
 os=$(uname -s)
@@ -42,8 +42,8 @@ esac
 
 # The oldest macOS the app says it runs on (Info.plist below).
 if [ "$os" = Darwin ]; then export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"; fi
-cargo build --release --locked -p larrier-app ${target:+--target "$target"}
-bin="target/${target:+$target/}release/larrier-desktop"
+cargo build --release --locked -p lary-app ${target:+--target "$target"}
+bin="target/${target:+$target/}release/lary-desktop"
 mkdir -p dist
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
@@ -52,15 +52,15 @@ sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 
 
 case "$os" in
     Darwin)
-        name="Larrier-$version-macos-$arch.zip"
-        app="$stage/Larrier.app"
+        name="Lary-$version-macos-$arch.zip"
+        app="$stage/Lary.app"
         mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-        cp "$bin" "$app/Contents/MacOS/Larrier"
-        cp app/assets/brand/larrier.icns "$app/Contents/Resources/Larrier.icns"
+        cp "$bin" "$app/Contents/MacOS/Lary"
+        cp app/assets/brand/lary.icns "$app/Contents/Resources/Lary.icns"
         plist="$app/Contents/Info.plist"
         plutil -create xml1 "$plist"
-        for kv in CFBundleName=Larrier CFBundleDisplayName=Larrier CFBundleIdentifier=com.dev4ym.larrier \
-                  CFBundleExecutable=Larrier CFBundleIconFile=Larrier CFBundlePackageType=APPL \
+        for kv in CFBundleName=Lary CFBundleDisplayName=Lary CFBundleIdentifier=com.dev4ym.lary \
+                  CFBundleExecutable=Lary CFBundleIconFile=Lary CFBundlePackageType=APPL \
                   CFBundleShortVersionString="$version" CFBundleVersion="$version" \
                   LSMinimumSystemVersion=11.0 LSApplicationCategoryType=public.app-category.developer-tools; do
             plutil -insert "${kv%%=*}" -string "${kv#*=}" "$plist"
@@ -68,19 +68,30 @@ case "$os" in
         plutil -insert NSHighResolutionCapable -bool true "$plist"
         # Not notarized: signed ad hoc so Apple silicon runs it.
         codesign --force --deep --sign - "$app"
+        # Lary was called Larrier: an old Larrier's updater looks for
+        # Larrier.app/Contents/MacOS/Larrier in the download. A bare folder
+        # beside the (signed, untouched) Lary.app points it at Lary, which
+        # then installs itself as Lary.app. Drop once Larrier is gone.
+        mkdir -p "$stage/Larrier.app/Contents/MacOS"
+        ln -sf ../../../Lary.app/Contents/MacOS/Lary "$stage/Larrier.app/Contents/MacOS/Larrier"
         rm -f "dist/$name"
-        ditto -c -k --keepParent "$app" "dist/$name"
+        ditto -c -k "$stage" "dist/$name"
         ;;
     Linux)
-        name="Larrier-$version-linux-$arch.tar.gz"
-        pkg="$stage/larrier"
+        name="Lary-$version-linux-$arch.tar.gz"
+        pkg="$stage/lary"
         mkdir -p "$pkg"
-        install -m 755 "$bin" "$pkg/larrier"
-        install -m 644 app/assets/brand/larrier-256.png "$pkg/larrier.png"
-        install -m 644 scripts/linux/larrier.desktop "$pkg/larrier.desktop"
+        install -m 755 "$bin" "$pkg/lary"
+        install -m 644 app/assets/brand/lary-256.png "$pkg/lary.png"
+        install -m 644 scripts/linux/lary.desktop "$pkg/lary.desktop"
         install -m 755 scripts/linux/install.sh "$pkg/install.sh"
         install -m 644 LICENSE "$pkg/LICENSE"
-        tar -C "$stage" -czf "dist/$name" larrier
+        # Lary was called Larrier: an old Larrier's updater looks for
+        # larrier/larrier in the download; links point it at Lary, which
+        # then installs itself as `lary`. Drop once Larrier is gone.
+        ln -sf lary "$pkg/larrier"
+        ln -sf lary "$stage/larrier"
+        tar -C "$stage" -czf "dist/$name" lary larrier
         ;;
     *) echo "build.sh: use scripts/build.ps1 on Windows" >&2; exit 1 ;;
 esac

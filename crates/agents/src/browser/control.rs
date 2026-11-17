@@ -1,5 +1,5 @@
-//! Asking Larrier about its browser tabs, from another process (the agents'
-//! tool server): Larrier listens on a local port named, with a token, in a
+//! Asking Lary about its browser tabs, from another process (the agents'
+//! tool server): Lary listens on a local port named, with a token, in a
 //! file only this user can read.
 
 use std::io::{BufRead, BufReader, Write};
@@ -10,20 +10,20 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 /// Names the chat an agent's browser tools work for (its tabs only).
-pub const OWNER_ENV: &str = "LARRIER_BROWSER_OWNER";
+pub const OWNER_ENV: &str = "LARY_BROWSER_OWNER";
 
 pub fn file() -> PathBuf {
-    super::view_dir().join("larrier-control")
+    super::view_dir().join("lary-control")
 }
 
 /// Send one request (`{"cmd": …}`) and wait for the answer.
 pub fn request(mut cmd: Value) -> Result<Value, String> {
-    let text = std::fs::read_to_string(file()).map_err(|_| "Larrier isn't running, so its browser isn't either.".to_string())?;
+    let text = std::fs::read_to_string(file()).map_err(|_| "Lary isn't running, so its browser isn't either.".to_string())?;
     let mut lines = text.lines();
     let port = lines.next().unwrap_or("").trim();
     let token = lines.next().unwrap_or("").trim();
-    let addr = format!("127.0.0.1:{port}").parse().map_err(|_| "Larrier's browser address is unreadable.".to_string())?;
-    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|_| "Larrier isn't running, so its browser isn't either.".to_string())?;
+    let addr = format!("127.0.0.1:{port}").parse().map_err(|_| "Lary's browser address is unreadable.".to_string())?;
+    let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|_| "Lary isn't running, so its browser isn't either.".to_string())?;
     let _ = s.set_read_timeout(Some(Duration::from_secs(30)));
     cmd["token"] = json!(token);
     // The chat whose browser this agent works in.
@@ -33,7 +33,7 @@ pub fn request(mut cmd: Value) -> Result<Value, String> {
     s.write_all(format!("{cmd}\n").as_bytes()).map_err(|e| e.to_string())?;
     let mut line = String::new();
     BufReader::new(s).read_line(&mut line).map_err(|e| e.to_string())?;
-    let v: Value = serde_json::from_str(line.trim()).map_err(|_| "Larrier gave no answer.".to_string())?;
+    let v: Value = serde_json::from_str(line.trim()).map_err(|_| "Lary gave no answer.".to_string())?;
     match v.get("error").and_then(|e| e.as_str()) {
         Some(e) => Err(e.to_string()),
         None => Ok(v),

@@ -2,9 +2,9 @@
 
 ## Versions
 
-Larrier follows [Semantic Versioning](https://semver.org). The version lives
+Lary follows [Semantic Versioning](https://semver.org). The version lives
 in `Cargo.toml` (`[workspace.package]`). Each build also records its commit
-and date: `Larrier.exe --version` prints `Larrier 0.2.0 (1a2b3c4d5,
+and date: `Lary.exe --version` prints `Lary 0.2.0 (1a2b3c4d5,
 2026-11-02)`.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org);
@@ -51,10 +51,10 @@ Each platform can also be built by hand with `scripts/build.ps1` or
 
 | Asset | What it is |
 |---|---|
-| `Larrier-<version>-windows-x64.exe` | The Windows app, which installs itself. |
-| `Larrier-<version>-macos-arm64.zip` | Larrier.app for Apple silicon (signed ad hoc, not notarized). |
-| `Larrier-<version>-macos-x64.zip` | Larrier.app for Intel Macs. |
-| `Larrier-<version>-linux-x64.tar.gz` | The Linux program, its launcher entry, icon and `install.sh`. |
+| `Lary-<version>-windows-x64.exe` | The Windows app, which installs itself. |
+| `Lary-<version>-macos-arm64.zip` | Lary.app for Apple silicon (signed ad hoc, not notarized). |
+| `Lary-<version>-macos-x64.zip` | Lary.app for Intel Macs. |
+| `Lary-<version>-linux-x64.tar.gz` | The Linux program, its launcher entry, icon and `install.sh`. |
 
 Each has a `.sha256` beside it; installed copies check the download against
 it before updating, and pick the asset for their own system.
@@ -67,8 +67,8 @@ The Mac app is signed ad hoc by `build.sh` (Apple silicon runs no unsigned
 code at all) and isn't notarized, so Gatekeeper asks once. Signing would
 take a code-signing certificate for Windows (`signtool` in `build.ps1`) and
 an Apple Developer ID with `notarytool` for macOS, each kept as a secret of
-the Release workflow. Until then [install.md](install.md#larrier-isnt-signed)
-tells people how to open Larrier and check what they downloaded.
+the Release workflow. Until then [install.md](install.md#lary-isnt-signed)
+tells people how to open Lary and check what they downloaded.
 
 - The version's changelog section as release notes. Versions with a suffix
   (`-beta.1`) are published as pre-releases and only reach the Preview

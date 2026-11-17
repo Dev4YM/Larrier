@@ -1,6 +1,6 @@
 # Building and testing
 
-Larrier builds on Windows, macOS and Linux from the same code. Each system
+Lary builds on Windows, macOS and Linux from the same code. Each system
 has the same set of scripts: PowerShell (`.ps1`) on Windows, Bash (`.sh`)
 on macOS and Linux.
 
@@ -47,9 +47,9 @@ all of this and says what's missing.
 Or with Cargo directly, on any system:
 
 ```bash
-cargo run -p larrier-app
+cargo run -p lary-app
 cargo test --workspace
-cargo build --release -p larrier-app
+cargo build --release -p lary-app
 ```
 
 On Windows the scripts put Visual Studio's Ninja on `PATH` themselves; before
@@ -62,9 +62,9 @@ running Cargo directly in a shell without Ninja, dot-source
 
 | System | Output |
 |---|---|
-| Windows | `dist/Larrier-<version>-windows-x64.exe` |
-| macOS | `dist/Larrier-<version>-macos-<arch>.zip` holding Larrier.app (signed ad hoc, not notarized) |
-| Linux | `dist/Larrier-<version>-linux-<arch>.tar.gz`: the program, `larrier.desktop`, the icon and `install.sh` |
+| Windows | `dist/Lary-<version>-windows-x64.exe` |
+| macOS | `dist/Lary-<version>-macos-<arch>.zip` holding Lary.app (signed ad hoc, not notarized) |
+| Linux | `dist/Lary-<version>-linux-<arch>.tar.gz`: the program, `lary.desktop`, the icon and `install.sh` |
 
 On an Apple silicon Mac, `./scripts/build.sh --target x86_64-apple-darwin`
 builds the Intel app too (after `rustup target add x86_64-apple-darwin`).
@@ -75,7 +75,7 @@ build.
 
 ## Working on the app without your own data
 
-`LARRIER_HOME` points Larrier at another data folder, so a development copy
+`LARY_HOME` points Lary at another data folder, so a development copy
 never touches your real sessions and settings. `./scripts/dev.ps1 -Sandbox`
 (or `./scripts/dev.sh --sandbox`) creates a fresh one for each run.
 
@@ -86,16 +86,16 @@ build the demo home:
 python scripts/demo/make_demo.py
 ```
 
-It makes four sample git repositories and a Larrier home whose Claude Code
+It makes four sample git repositories and a Lary home whose Claude Code
 is `scripts/demo/demo_agent.py`, a stand-in that plays scripted turns over
 Claude Code's protocol, so chats run live with no account. The script
-prints the environment to start Larrier with. Everything in it is invented.
+prints the environment to start Lary with. Everything in it is invented.
 
 ## Screenshots
 
 The README's hero image comes from the demo home:
 
-1. `python scripts/demo/make_demo.py`, then start Larrier with the printed
+1. `python scripts/demo/make_demo.py`, then start Lary with the printed
    environment.
 2. Send a prompt mentioning "idempotent" in **Make Stripe webhooks
    idempotent** and one mentioning "server components" in **Move dashboard
@@ -118,12 +118,12 @@ The README's hero image comes from the demo home:
 The `cef` crate downloads the Chromium Embedded Framework's SDK for the
 build; set `CEF_PATH` to a folder to keep that download between clean
 builds. The engine's runtime isn't built in: a build looks for it in
-`%LOCALAPPDATA%\Larrier\engine\<version>` and downloads it from the
-`engine-<version>` release when it isn't there. Set `LARRIER_CEF_DIR` to
+`%LOCALAPPDATA%\Lary\engine\<version>` and downloads it from the
+`engine-<version>` release when it isn't there. Set `LARY_CEF_DIR` to
 an unpacked runtime (the SDK's own folder works) to use that instead.
 
 ## Debugging the UI
 
-Set `LARRIER_DEVTOOLS_PORT` (for example `9333`) to open the WebView's
+Set `LARY_DEVTOOLS_PORT` (for example `9333`) to open the WebView's
 DevTools protocol on that port; any Chrome DevTools client can attach to
 inspect the DOM, run JavaScript or take screenshots.

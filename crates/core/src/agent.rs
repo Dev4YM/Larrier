@@ -1,4 +1,4 @@
-//! The agent catalog: every coding agent and chat source Larrier knows.
+//! The agent catalog: every coding agent and chat source Lary knows.
 
 use std::fmt;
 
@@ -25,7 +25,7 @@ pub enum AgentKind {
     Aider,
     /// xAI's Grok Build.
     Grok,
-    /// Larrier's built-in chat over a model provider API.
+    /// Lary's built-in chat over a model provider API.
     Chat,
     /// Imported ChatGPT conversations.
     ChatGpt,
@@ -139,7 +139,7 @@ impl<'de> Deserialize<'de> for AgentKind {
     }
 }
 
-/// How Larrier talks to an agent at runtime.
+/// How Lary talks to an agent at runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Protocol {
@@ -167,7 +167,7 @@ pub enum Protocol {
     Acp,
     /// Plain text one-shot command; stdout is the answer.
     PlainText,
-    /// Larrier's own HTTP chat client.
+    /// Lary's own HTTP chat client.
     HttpChat,
     /// Import only (no runtime).
     None,
@@ -204,7 +204,7 @@ pub struct AgentSpec {
     pub login_command: Option<&'static str>,
     pub can_run: bool,
     pub can_import: bool,
-    /// Larrier can write a native session file this agent resumes.
+    /// Lary can write a native session file this agent resumes.
     pub can_export_native: bool,
     pub session_location: &'static str,
 }
@@ -221,10 +221,10 @@ pub struct ModeOption {
     /// Instruction put before the prompt, for modes the CLI has no
     /// non-interactive flag for (Codex plan mode).
     pub prompt_prefix: Option<&'static str>,
-    /// Larrier's global autonomy levels (Settings → General) that pick this
+    /// Lary's global autonomy levels (Settings → General) that pick this
     /// option when neither the session nor the agent settings chose one.
     pub autonomy: &'static [RunMode],
-    /// Ids older Larrier versions stored for this option.
+    /// Ids older Lary versions stored for this option.
     pub aliases: &'static [&'static str],
 }
 
@@ -842,12 +842,12 @@ static CATALOG: [AgentSpec; 18] = [
     },
     AgentSpec {
         kind: AgentKind::Chat,
-        name: "Larrier Chat",
-        vendor: "Larrier",
-        tagline: "Larrier's own chat: any model, on your API accounts",
+        name: "Lary Chat",
+        vendor: "Lary",
+        tagline: "Lary's own chat: any model, on your API accounts",
         binaries: &[],
         install: &[],
-        homepage: "https://github.com/Dev4YM/Larrier",
+        homepage: "https://github.com/Dev4YM/Lary",
         color: "#3a6a9f",
         glyph: "✺",
         protocol: Protocol::HttpChat,
@@ -860,7 +860,7 @@ static CATALOG: [AgentSpec; 18] = [
         can_run: true,
         can_import: false,
         can_export_native: false,
-        session_location: "Larrier store",
+        session_location: "Lary store",
     },
     AgentSpec {
         kind: AgentKind::ChatGpt,

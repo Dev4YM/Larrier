@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Cut a Larrier release: bump the version, write its changelog section,
+  Cut a Lary release: bump the version, write its changelog section,
   commit and tag it, build and check the Windows program, and (with
   -Publish) push and publish it on GitHub. The tag starts the Release
   workflow, which adds the macOS and Linux programs.
@@ -135,7 +135,7 @@ function Release-Notes([string] $since, [string] $until = 'HEAD') {
 $ChangelogHeader = @'
 # Changelog
 
-Every Larrier release and what changed in it. Versions follow
+Every Lary release and what changed in it. Versions follow
 [Semantic Versioning](https://semver.org): the major number for breaking
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
@@ -180,7 +180,7 @@ if ($branch -ne 'main') { Fail "releases are cut from main (you're on $branch)" 
 if (& git tag --list $tag) { Fail "$tag already exists" }
 if ($last -and (Compare-Semver $next $last) -le 0) { Fail "$tag doesn't come after the last release ($last)" }
 
-Write-Host "Releasing Larrier $next$(if ($preview) { ' (preview)' }) — was $current, last release $(if ($last) { $last } else { 'none' })" -ForegroundColor Cyan
+Write-Host "Releasing Lary $next$(if ($preview) { ' (preview)' }) — was $current, last release $(if ($last) { $last } else { 'none' })" -ForegroundColor Cyan
 $body = Release-Notes $last
 
 # Version, lockfile, changelog.
@@ -192,27 +192,27 @@ if ($next -ne $current) {
     if ($LASTEXITCODE -ne 0) { Fail 'cargo update --workspace failed' }
 }
 Write-Changelog $next $body
-$msg = @("chore(release): $tag", '', "Larrier $next.") + $(if ($Trailer.Count) { @('') + $Trailer } else { @() })
+$msg = @("chore(release): $tag", '', "Lary $next.") + $(if ($Trailer.Count) { @('') + $Trailer } else { @() })
 $msgFile = New-TemporaryFile
 [IO.File]::WriteAllText($msgFile, ($msg -join "`n") + "`n")
 Invoke-Git add Cargo.toml Cargo.lock CHANGELOG.md | Out-Null
 Invoke-Git commit -q -F $msgFile | Out-Null
-$notesFile = Join-Path ([IO.Path]::GetTempPath()) "larrier-$tag-notes.md"
+$notesFile = Join-Path ([IO.Path]::GetTempPath()) "lary-$tag-notes.md"
 [IO.File]::WriteAllText($notesFile, $body + "`n")
 Invoke-Git tag -a $tag -F $notesFile | Out-Null
 Write-Host "Committed and tagged $tag" -ForegroundColor Green
 
 # Build and check the program.
 $dist = Join-Path (Get-Location) 'dist'
-$asset = "Larrier-$next-windows-x64.exe"
+$asset = "Lary-$next-windows-x64.exe"
 if (-not $SkipBuild) {
     # The browser engine's bindings build with CMake and Ninja.
     . "$PSScriptRoot/ninja.ps1"
-    & cargo build --release --locked -p larrier-app
+    & cargo build --release --locked -p lary-app
     if ($LASTEXITCODE -ne 0) { Fail 'the release build failed (the commit and tag are local; remove them with: git tag -d ' + $tag + '; git reset --hard HEAD~1)' }
-    $exe = 'target/release/larrier-desktop.exe'
+    $exe = 'target/release/lary-desktop.exe'
     $reported = (& $exe --version | Out-String).Trim()
-    if (-not $reported.StartsWith("Larrier $next ")) { Fail "the built program says '$reported', not Larrier $next" }
+    if (-not $reported.StartsWith("Lary $next ")) { Fail "the built program says '$reported', not Lary $next" }
     New-Item -ItemType Directory -Force $dist | Out-Null
     Copy-Item $exe (Join-Path $dist $asset) -Force
     $hash = (Get-FileHash (Join-Path $dist $asset) -Algorithm SHA256).Hash.ToLower()
@@ -238,10 +238,10 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -eq 0) {
         $ghArgs = @('release', 'upload', $tag, (Join-Path $dist $asset), (Join-Path $dist "$asset.sha256"), '--clobber')
     } else {
-        $ghArgs = @('release', 'create', $tag, (Join-Path $dist $asset), (Join-Path $dist "$asset.sha256"), '--title', "Larrier $next", '--notes-file', $notesFile, '--verify-tag')
+        $ghArgs = @('release', 'create', $tag, (Join-Path $dist $asset), (Join-Path $dist "$asset.sha256"), '--title', "Lary $next", '--notes-file', $notesFile, '--verify-tag')
         $ghArgs += $(if ($preview) { '--prerelease' } else { '--latest' })
     }
     & gh @ghArgs
     if ($LASTEXITCODE -ne 0) { Fail "gh release failed; the tag is pushed, so retry: gh $($ghArgs -join ' ')" }
 }
-Write-Host "Published Larrier $next" -ForegroundColor Green
+Write-Host "Published Lary $next" -ForegroundColor Green

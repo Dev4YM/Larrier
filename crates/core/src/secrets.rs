@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-const SERVICE: &str = "larrier";
+const SERVICE: &str = "lary";
+/// Where Larrier (Lary's old name) kept them: read once, then copied over.
+const OLD_SERVICE: &str = "larrier";
 
 fn fallback_path() -> PathBuf {
     crate::store::data_root().join("secrets.json")
@@ -56,12 +58,19 @@ pub fn get(reference: &str) -> Option<String> {
     if let Ok(v) = keyring::Entry::new(SERVICE, reference).and_then(|e| e.get_password()) {
         return Some(v);
     }
+    // Saved by Larrier: copied to Lary's entry the first time it's read.
+    if let Ok(v) = keyring::Entry::new(OLD_SERVICE, reference).and_then(|e| e.get_password()) {
+        let _ = keyring::Entry::new(SERVICE, reference).and_then(|e| e.set_password(&v));
+        return Some(v);
+    }
     read_fallback().get(reference).cloned()
 }
 
 pub fn delete(reference: &str) {
-    if let Ok(e) = keyring::Entry::new(SERVICE, reference) {
-        let _ = e.delete_credential();
+    for service in [SERVICE, OLD_SERVICE] {
+        if let Ok(e) = keyring::Entry::new(service, reference) {
+            let _ = e.delete_credential();
+        }
     }
     let mut map = read_fallback();
     if map.remove(reference).is_some() {

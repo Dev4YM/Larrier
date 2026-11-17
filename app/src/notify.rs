@@ -1,6 +1,6 @@
 //! System integration: native notifications, the completion chime, the
 //! system tray icon, window size / position restore and recovery of agents
-//! that were still running when Larrier closed (Settings → General:
+//! that were still running when Lary closed (Settings → General:
 //! Notifications, System Tray Icon, Completion Sound, Window Restoration;
 //! Settings → Agents: Continue Interrupted Agents).
 
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use dioxus::desktop::{LogicalPosition, LogicalSize, WindowBuilder};
 use dioxus::prelude::*;
-use larrier_core::{Message, Part, Role, SessionStatus, Settings, Store, ToolStatus};
+use lary_core::{Message, Part, Role, SessionStatus, Settings, Store, ToolStatus};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -21,10 +21,10 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 static FOCUSED: AtomicBool = AtomicBool::new(true);
-/// Set when a toast is clicked; the window tracker brings Larrier forward.
+/// Set when a toast is clicked; the window tracker brings Lary forward.
 static ACTIVATE: AtomicBool = AtomicBool::new(false);
 
-/// Record whether the Larrier window has keyboard focus (toasts only show
+/// Record whether the Lary window has keyboard focus (toasts only show
 /// while it doesn't). [`track_window`] keeps this up to date.
 pub fn set_focused(focused: bool) {
     FOCUSED.store(focused, Ordering::Relaxed);
@@ -61,9 +61,9 @@ pub fn agent_event(title: &str, body: &str, ok: bool) {
 /// Show a native notification now (regardless of focus / settings).
 pub fn show_notification(title: &str, body: &str) {
     let (title, body) = (title.to_string(), body.to_string());
-    let spawned = std::thread::Builder::new().name("larrier-toast".into()).spawn(move || {
+    let spawned = std::thread::Builder::new().name("lary-toast".into()).spawn(move || {
         let mut n = notify_rust::Notification::new();
-        n.summary(&title).body(&body).appname("Larrier");
+        n.summary(&title).body(&body).appname("Lary");
         #[cfg(windows)]
         {
             n.app_id(windows_app_id());
@@ -80,7 +80,7 @@ pub fn show_notification(title: &str, body: &str) {
             #[cfg(windows)]
             Ok(handle) => {
                 // Blocks this helper thread until the toast is clicked or
-                // goes away; a click brings the Larrier window forward.
+                // goes away; a click brings the Lary window forward.
                 let _ = handle.wait_for_response(|r: &notify_rust::NotificationResponse| {
                     if matches!(r, notify_rust::NotificationResponse::Default | notify_rust::NotificationResponse::Action(_)) {
                         ACTIVATE.store(true, Ordering::Relaxed);
@@ -106,7 +106,7 @@ pub fn show_notification(title: &str, body: &str) {
 /// notifications still appear (attributed to "Windows PowerShell").
 #[cfg(windows)]
 pub fn windows_app_id() -> &'static str {
-    pub const AUMID: &str = "Dev4YM.Larrier";
+    pub const AUMID: &str = "Dev4YM.Lary";
     const POWERSHELL: &str = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
     static ID: OnceLock<&'static str> = OnceLock::new();
     ID.get_or_init(|| {
@@ -120,8 +120,8 @@ pub fn windows_app_id() -> &'static str {
                 .map(|o| o.status.success())
                 .unwrap_or(false)
         };
-        if !reg("DisplayName", "Larrier") {
-            tracing::warn!("could not register the Larrier notification id; using PowerShell's");
+        if !reg("DisplayName", "Lary") {
+            tracing::warn!("could not register the Lary notification id; using PowerShell's");
             return POWERSHELL;
         }
         if let Some(icon) = icon_png_path() {
@@ -132,12 +132,12 @@ pub fn windows_app_id() -> &'static str {
     })
 }
 
-/// The Larrier mark as a PNG on disk (notification / AUMID icon).
+/// The Lary mark as a PNG on disk (notification / AUMID icon).
 #[cfg(not(target_os = "macos"))]
 fn icon_png_path() -> Option<PathBuf> {
     static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
     PATH.get_or_init(|| {
-        let p = crate::state::store().root().join("larrier-mark.png");
+        let p = crate::state::store().root().join("lary-mark.png");
         if !p.exists() {
             let n = 128;
             std::fs::write(&p, png_rgba(n, n, &app_icon_rgba(n))).ok()?;
@@ -154,7 +154,7 @@ fn icon_png_path() -> Option<PathBuf> {
 /// Two rising notes (E5 → A5), ~0.4 s, through WebAudio.
 pub const CHIME_JS: &str = r#"(() => { try {
   const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
-  const ctx = window.__larrierAudio || (window.__larrierAudio = new C());
+  const ctx = window.__laryAudio || (window.__laryAudio = new C());
   if (ctx.state === 'suspended') ctx.resume();
   const now = ctx.currentTime + 0.02;
   [[659.25, 0], [880.0, 0.12]].forEach(([f, t]) => {
@@ -171,7 +171,7 @@ pub const CHIME_JS: &str = r#"(() => { try {
 /// Two falling notes for failures / attention.
 pub const ALERT_JS: &str = r#"(() => { try {
   const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
-  const ctx = window.__larrierAudio || (window.__larrierAudio = new C());
+  const ctx = window.__laryAudio || (window.__laryAudio = new C());
   if (ctx.state === 'suspended') ctx.resume();
   const now = ctx.currentTime + 0.02;
   [[587.33, 0], [440.0, 0.14]].forEach(([f, t]) => {
@@ -235,11 +235,11 @@ pub fn preview_sound_file(custom: Option<&str>) {
 // Tray icon
 // ---------------------------------------------------------------------------
 
-pub const TRAY_SHOW: &str = "larrier.tray.show";
-pub const TRAY_NEW_AGENT: &str = "larrier.tray.new-agent";
-pub const TRAY_QUIT: &str = "larrier.tray.quit";
+pub const TRAY_SHOW: &str = "lary.tray.show";
+pub const TRAY_NEW_AGENT: &str = "lary.tray.new-agent";
+pub const TRAY_QUIT: &str = "lary.tray.quit";
 
-/// Create the tray icon (Show Larrier / New Agent / Quit). Must run inside
+/// Create the tray icon (Show Lary / New Agent / Quit). Must run inside
 /// a component (it provides the tray handle as context); call once.
 /// Left-clicking the icon shows the window (Dioxus default).
 pub fn init_tray() {
@@ -247,10 +247,10 @@ pub fn init_tray() {
     use dioxus::desktop::trayicon::{init_tray_icon, Icon};
     let menu = Menu::new();
     let added = menu.append_items(&[
-        &MenuItem::with_id(TRAY_SHOW, "Show Larrier", true, None),
+        &MenuItem::with_id(TRAY_SHOW, "Show Lary", true, None),
         &MenuItem::with_id(TRAY_NEW_AGENT, "New Agent", true, None),
         &PredefinedMenuItem::separator(),
-        &MenuItem::with_id(TRAY_QUIT, "Quit Larrier", true, None),
+        &MenuItem::with_id(TRAY_QUIT, "Quit Lary", true, None),
     ]);
     if let Err(e) = added {
         tracing::warn!("tray menu: {e}");
@@ -294,7 +294,7 @@ pub fn use_tray(on_new_agent: impl FnMut() + 'static) {
     });
 }
 
-/// Show, un-minimize and focus the Larrier window.
+/// Show, un-minimize and focus the Lary window.
 pub fn bring_to_front() {
     let w = dioxus::desktop::window();
     w.set_visible(true);
@@ -342,7 +342,7 @@ pub fn load_window_state() -> Option<WindowState> {
 
 pub fn save_window_state(s: &WindowState) {
     if let Ok(t) = serde_json::to_string_pretty(s) {
-        if let Err(e) = larrier_core::store::atomic_write(&window_state_path(), t.as_bytes()) {
+        if let Err(e) = lary_core::store::atomic_write(&window_state_path(), t.as_bytes()) {
             tracing::warn!("saving window state: {e}");
         }
     }
@@ -522,9 +522,9 @@ pub fn track_window() {
 // ---------------------------------------------------------------------------
 
 /// Prompt to send when the user chooses to continue an interrupted agent.
-pub const CONTINUE_PROMPT: &str = "Larrier was closed while you were working. Continue where you left off.";
+pub const CONTINUE_PROMPT: &str = "Lary was closed while you were working. Continue where you left off.";
 
-const INTERRUPTED_NOTICE: &str = "Interrupted when Larrier closed";
+const INTERRUPTED_NOTICE: &str = "Interrupted when Lary closed";
 
 /// Sessions left `Running` / `NeedsInput` by a previous run (crash or
 /// close). Call at startup, before any new turn starts.
@@ -578,7 +578,7 @@ pub fn mark_interrupted_in(store: &Store, ids: &[String]) -> usize {
 // Icon helpers
 // ---------------------------------------------------------------------------
 
-/// The Larrier mark (dark rounded square with a light "L") as RGBA pixels.
+/// The Lary mark (dark rounded square with a light "L") as RGBA pixels.
 pub fn app_icon_rgba(n: u32) -> Vec<u8> {
     crate::logo::mark_rgba(n)
 }
@@ -642,7 +642,7 @@ pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrier_core::{AgentKind, Session, ToolCall};
+    use lary_core::{AgentKind, Session, ToolCall};
 
     const MON: MonitorRect = MonitorRect { x: 0.0, y: 0.0, width: 1920.0, height: 1040.0 };
     const RIGHT: MonitorRect = MonitorRect { x: 1920.0, y: 0.0, width: 2560.0, height: 1400.0 };
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn interrupted_sessions_are_found_and_marked() {
-        let dir = std::env::temp_dir().join(format!("larrier-notify-{}", larrier_core::lsf::new_id()));
+        let dir = std::env::temp_dir().join(format!("lary-notify-{}", lary_core::lsf::new_id()));
         let store = Store::open(&dir).unwrap();
         let mk = |status: SessionStatus, running_tool: bool| {
             let mut s = Session::new(AgentKind::ClaudeCode, None);

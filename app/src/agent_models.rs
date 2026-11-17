@@ -1,5 +1,5 @@
 //! Each agent's own models, defaults and providers (read by
-//! `larrier_agents::models`), cached on disk so the picker has them at
+//! `lary_agents::models`), cached on disk so the picker has them at
 //! once. The agents' files are re-read at start and whenever their settings
 //! open; the slower CLI listings refresh every few hours.
 
@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
-use larrier_agents::models::{self, AgentModels};
-use larrier_core::AgentKind;
+use lary_agents::models::{self, AgentModels};
+use lary_core::AgentKind;
 
 use crate::state::{store, App};
 
@@ -79,7 +79,7 @@ impl App {
             for (kind, path) in targets {
                 let prev = self.native_models.peek().get(&kind.id()).cloned();
                 let stale = prev.as_ref().and_then(|p| p.listed_at).map(|t| chrono::Utc::now() - t > chrono::Duration::hours(LISTING_TTL_HOURS)).unwrap_or(true)
-                    // Listed before Larrier read Claude Code's commands.
+                    // Listed before Lary read Claude Code's commands.
                     || (kind == AgentKind::ClaudeCode && prev.as_ref().is_some_and(|p| p.commands.is_empty()));
                 let m = models::read(&kind, path.as_deref(), deep || stale, prev.as_ref()).await;
                 self.native_models.write().insert(kind.id().to_string(), m);
@@ -93,7 +93,7 @@ impl App {
 
 // ------------------------------------------------------------------ choices
 
-/// One model as Larrier offers it for an agent: the agent's own, or one the
+/// One model as Lary offers it for an agent: the agent's own, or one the
 /// user added.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Choice {
@@ -108,13 +108,13 @@ pub struct Choice {
     pub fast: bool,
     /// The agent's own custom model or provider.
     pub custom: bool,
-    /// Added in Larrier.
+    /// Added in Lary.
     pub added: bool,
     /// Name of the endpoint that serves it.
     pub endpoint: Option<String>,
     /// The agent features it in its own picker.
     pub featured: bool,
-    /// In Larrier's picker.
+    /// In Lary's picker.
     pub shown: bool,
     pub group: Option<String>,
     pub context: Option<u64>,
@@ -122,7 +122,7 @@ pub struct Choice {
     pub params: Option<models::ModelParams>,
 }
 
-/// Every model Larrier knows for `agent`, the agent's own first.
+/// Every model Lary knows for `agent`, the agent's own first.
 pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
     let ac = app.config.read().agent(agent);
     let native = app.agent_models(agent);
@@ -134,7 +134,7 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
             .models
             .iter()
             .filter(|id| !matches!(**id, "default" | "auto"))
-            .map(|id| models::AgentModel { id: id.to_string(), name: larrier_core::models::display_name(id), featured: true, ..Default::default() })
+            .map(|id| models::AgentModel { id: id.to_string(), name: lary_core::models::display_name(id), featured: true, ..Default::default() })
             .collect()
     });
     for m in from_native {
@@ -170,9 +170,9 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
             }
             None => out.push(Choice {
                 id: c.id.clone(),
-                name: c.name.clone().unwrap_or_else(|| larrier_core::models::display_name(&c.id)),
+                name: c.name.clone().unwrap_or_else(|| lary_core::models::display_name(&c.id)),
                 note: None,
-                efforts: if larrier_agents::request::takes_effort(agent) { native_efforts(native.as_ref()) } else { Vec::new() },
+                efforts: if lary_agents::request::takes_effort(agent) { native_efforts(native.as_ref()) } else { Vec::new() },
                 default_effort: None,
                 fast: false,
                 custom: true,
@@ -181,7 +181,7 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
                 featured: false,
                 shown: true,
                 group: Some("Added".into()),
-                context: larrier_core::models::lookup(&c.id).and_then(|i| i.context),
+                context: lary_core::models::lookup(&c.id).and_then(|i| i.context),
                 params: None,
             }),
         }
@@ -197,12 +197,12 @@ fn native_efforts(n: Option<&AgentModels>) -> Vec<String> {
     v
 }
 
-/// The models in Larrier's picker for `agent`.
+/// The models in Lary's picker for `agent`.
 pub fn picker_choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
     choices(app, agent).into_iter().filter(|c| c.shown).collect()
 }
 
-/// What a session runs: its own picks, else Larrier's defaults for the
+/// What a session runs: its own picks, else Lary's defaults for the
 /// agent, else the agent's own settings.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Resolved {
@@ -263,7 +263,7 @@ pub fn resolve(app: &App, agent: &AgentKind, model: Option<&str>, effort: Option
 
 /// Short name for a model id ("Opus 5.5", "GPT-6.1 Sol", "Kimi K2.7 Code").
 pub fn short_name(app: &App, agent: &AgentKind, id: &str) -> String {
-    use larrier_core::models as reg;
+    use lary_core::models as reg;
     let id = models::split_params(id).0;
     // The agent's own name for it ("Opus 5.5" for Claude Code's `opus`).
     if let Some(m) = app.agent_models(agent).as_ref().and_then(|n| n.model(id).filter(|m| m.listed).map(|m| m.name.clone())) {

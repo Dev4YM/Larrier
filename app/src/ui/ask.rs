@@ -7,7 +7,7 @@
 //! waits in the queue while the agent is still working).
 
 use dioxus::prelude::*;
-use larrier_core::{Role, ToolCall};
+use lary_core::{Role, ToolCall};
 use serde_json::Value;
 
 use crate::icons::{Icon, I};

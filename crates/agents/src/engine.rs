@@ -2,8 +2,8 @@
 //! the CLI so both record identical transcripts.
 
 use chrono::Utc;
-use larrier_core::lsf::{close_active_tools, find_tool_deep_mut};
-use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, SessionStatus, ToolCall, ToolStatus};
+use lary_core::lsf::{close_active_tools, find_tool_deep_mut};
+use lary_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, SessionStatus, ToolCall, ToolStatus};
 
 use crate::events::AgentEvent;
 
@@ -328,7 +328,7 @@ impl TurnRecorder {
     /// the whole session.
     fn find_tool<'a>(&self, session: &'a mut Session, id: &str) -> Option<&'a mut ToolCall> {
         let start = self.base_len.saturating_sub(1).min(session.messages.len());
-        if larrier_core::lsf::find_tool_path(&session.messages[start..], id).is_some() {
+        if lary_core::lsf::find_tool_path(&session.messages[start..], id).is_some() {
             return find_tool_deep_mut(&mut session.messages[start..], id);
         }
         find_tool_deep_mut(&mut session.messages, id)
@@ -501,7 +501,7 @@ pub fn has_unsynced(session: &Session, from: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrier_core::lsf::active_tasks;
+    use lary_core::lsf::active_tasks;
 
     fn sub(parent: &str, e: AgentEvent) -> AgentEvent {
         AgentEvent::Subagent { parent_tool_id: parent.into(), inner: Box::new(e) }
@@ -546,7 +546,7 @@ mod tests {
         let mut s = Session::new(AgentKind::ClaudeCode, None);
         s.push(Message::user_text("screenshot it"));
         let mut rec = TurnRecorder::begin(&mut s, AgentKind::ClaudeCode, None, None);
-        let img = || vec![Part::Image { mime: Some("image/png".into()), source: larrier_core::lsf::MediaSource::Base64 { data: "iVBORw0KGgo=".into() } }];
+        let img = || vec![Part::Image { mime: Some("image/png".into()), source: lary_core::lsf::MediaSource::Base64 { data: "iVBORw0KGgo=".into() } }];
         rec.apply(&mut s, &AgentEvent::ToolStart { tool: ToolCall::new("shot", "mcp__browser__screenshot", serde_json::json!({})) });
         rec.apply(&mut s, &AgentEvent::ToolStart { tool: ToolCall::new("task1", "Agent", serde_json::json!({"description": "Check UI"})) });
         rec.apply(&mut s, &sub("task1", AgentEvent::ToolStart { tool: ToolCall::new("inner", "mcp__browser__screenshot", serde_json::json!({})) }));

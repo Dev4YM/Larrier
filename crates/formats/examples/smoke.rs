@@ -1,34 +1,34 @@
 //! Read-only smoke test over this machine's real agent sessions.
 //! Imports everything into a throwaway store and prints counts and timing
-//! (no message contents). `cargo run -p larrier-formats --example smoke`
+//! (no message contents). `cargo run -p lary-formats --example smoke`
 
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use larrier_core::Store;
+use lary_core::Store;
 
 fn main() {
     let t0 = Instant::now();
-    let agents = larrier_formats::importable_agents();
+    let agents = lary_formats::importable_agents();
     let mut total = 0;
     for a in &agents {
         let t = Instant::now();
-        let list = larrier_formats::discover(a);
+        let list = lary_formats::discover(a);
         total += list.len();
         if !list.is_empty() {
             println!("discover {:<12} {:>5} sessions  {:>6} ms", a.id(), list.len(), t.elapsed().as_millis());
         }
     }
-    let droid = larrier_formats::discover(&larrier_core::AgentKind::Droid);
+    let droid = lary_formats::discover(&lary_core::AgentKind::Droid);
     println!("discover {:<12} {:>5} sessions", "droid", droid.len());
     println!("discovered {total} in {} ms", t0.elapsed().as_millis());
 
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
     let mut all = agents.clone();
-    all.push(larrier_core::AgentKind::Droid);
+    all.push(lary_core::AgentKind::Droid);
     let t = Instant::now();
-    let r = larrier_formats::sync(&store, &all);
+    let r = lary_formats::sync(&store, &all);
     println!("sync #1: imported {} updated {} skipped {} errors {} in {} ms", r.imported, r.updated, r.skipped, r.errors.len(), t.elapsed().as_millis());
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
     for e in &r.errors {
@@ -55,7 +55,7 @@ fn main() {
     let bytes: u64 = std::fs::read_dir(store.sessions_dir()).unwrap().flatten().map(|e| e.metadata().map(|m| m.len()).unwrap_or(0)).sum();
     println!("store size {:.1} MB", bytes as f64 / 1e6);
     let t = Instant::now();
-    let r2 = larrier_formats::sync(&store, &all);
+    let r2 = lary_formats::sync(&store, &all);
     println!("sync #2: imported {} updated {} skipped {} errors {} in {} ms", r2.imported, r2.updated, r2.skipped, r2.errors.len(), t.elapsed().as_millis());
     println!("total {} ms", t0.elapsed().as_millis());
 }

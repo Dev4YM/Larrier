@@ -15,7 +15,7 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use larrier_core::{AgentKind, Store};
+use lary_core::{AgentKind, Store};
 use notify::{RecursiveMode, Watcher};
 
 use crate::{claude, codex, cursor, discover, droid, gemini, hermes, opencode, pi, NativeSessionInfo, SyncReport};
@@ -156,7 +156,7 @@ struct InfoCache {
 }
 
 /// Re-import the sessions behind these changed files. `skip(session_id)`
-/// leaves a Larrier session alone (e.g. while Larrier itself runs it).
+/// leaves a Lary session alone (e.g. while Lary itself runs it).
 pub fn sync_paths(store: &Store, agents: &[AgentKind], paths: &[PathBuf], skip: &dyn Fn(&str) -> bool) -> SyncReport {
     sync_paths_in(store, &watch_specs(agents), paths, skip)
 }
@@ -294,7 +294,7 @@ pub fn spawn(
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop2 = stop.clone();
-    std::thread::Builder::new().name("larrier-live-sync".into()).spawn(move || {
+    std::thread::Builder::new().name("lary-live-sync".into()).spawn(move || {
         let mut files = Debouncer::new(FILE_QUIET, FILE_MAX_WAIT);
         let mut dbs = Debouncer::new(DB_QUIET, DB_MAX_WAIT);
         // Big files: when each was last imported, and the ones waiting for
@@ -396,7 +396,7 @@ mod tests {
         // Not after a whole line (the file was rewritten).
         assert!(!claude::grew_by_bookkeeping_only(&f, at - 3));
     }
-    use larrier_core::{Message, Session};
+    use lary_core::{Message, Session};
 
     fn claude_spec(root: &Path) -> WatchSpec {
         WatchSpec::tree(AgentKind::ClaudeCode, root.to_path_buf(), true)
@@ -482,14 +482,14 @@ mod tests {
         let r = sync_paths_in(&store, &specs, std::slice::from_ref(&file), &never);
         assert!(r.changed.is_empty());
 
-        // The agent keeps writing: the same Larrier session is updated in place.
+        // The agent keeps writing: the same Lary session is updated in place.
         std::thread::sleep(Duration::from_millis(20));
         write_claude_session(&proj, "11111111-2222-3333-4444-555555555555", &["first", "second"]);
         let r = sync_paths_in(&store, &specs, std::slice::from_ref(&file), &never);
         assert_eq!((r.imported, r.updated, r.changed.clone()), (0, 1, vec![id.clone()]));
         assert_eq!(store.load(&id).unwrap().messages.len(), 4);
 
-        // While Larrier itself runs the session it is left alone.
+        // While Lary itself runs the session it is left alone.
         std::thread::sleep(Duration::from_millis(20));
         write_claude_session(&proj, "11111111-2222-3333-4444-555555555555", &["first", "second", "third"]);
         let busy = |sid: &str| sid == id;
@@ -504,7 +504,7 @@ mod tests {
         let r = sync_paths_in(&store, &specs, &[agent_file], &never);
         assert_eq!(r.changed, vec![id.clone()]);
 
-        // Deleted in Larrier: never comes back, even when the file changes.
+        // Deleted in Lary: never comes back, even when the file changes.
         store.delete(&id).unwrap();
         std::thread::sleep(Duration::from_millis(20));
         write_claude_session(&proj, "11111111-2222-3333-4444-555555555555", &["first", "second", "third", "fourth"]);

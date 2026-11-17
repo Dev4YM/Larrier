@@ -1,4 +1,4 @@
-//! Larrier's version: the release number (Semantic Versioning, from the
+//! Lary's version: the release number (Semantic Versioning, from the
 //! workspace's Cargo.toml), the commit it was built from and that commit's
 //! date (baked in by build.rs), and every release's notes (CHANGELOG.md,
 //! built in so they read offline).
@@ -6,8 +6,8 @@
 use std::cmp::Ordering;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const COMMIT: &str = env!("LARRIER_COMMIT");
-pub const COMMIT_DATE: &str = env!("LARRIER_COMMIT_DATE");
+pub const COMMIT: &str = env!("LARY_COMMIT");
+pub const COMMIT_DATE: &str = env!("LARY_COMMIT_DATE");
 const CHANGELOG: &str = include_str!("../../CHANGELOG.md");
 
 /// "0.2.0 (a4a9ebc12, 2026-10-30)".

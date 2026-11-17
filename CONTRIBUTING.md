@@ -1,4 +1,4 @@
-# Contributing to Larrier
+# Contributing to Lary
 
 Thanks for helping. This guide covers setting up, the conventions the code
 follows, and how changes get in.
@@ -6,7 +6,7 @@ follows, and how changes get in.
 ## Before you start
 
 - **Bugs:** open an issue with what you did, what you expected, what
-  happened, your Larrier version (Settings → About, or `--version`) and the
+  happened, your Lary version (Settings → About, or `--version`) and the
   agent and its version.
 - **Features:** open an issue first for anything bigger than a small fix,
   so we can agree on the behavior before you build it.
@@ -15,8 +15,8 @@ follows, and how changes get in.
 ## Setting up
 
 ```bash
-git clone https://github.com/Dev4YM/Larrier
-cd Larrier
+git clone https://github.com/Dev4YM/Lary
+cd Lary
 ```
 
 | | Windows | macOS / Linux |
@@ -65,7 +65,7 @@ without an account. See [docs/building.md](docs/building.md).
 
 - Everything animates unless **Reduce Motion** is on; nothing jumps or
   reflows when state changes.
-- Larrier draws its own tooltips, menus and context menus; don't use the
+- Lary draws its own tooltips, menus and context menus; don't use the
   system's.
 - When an agent can't do something, say so in the UI rather than failing
   silently.
@@ -86,7 +86,7 @@ alone.
 
 Types: `feat`, `fix`, `perf`, `style`, `refactor`, `docs`, `test`,
 `build`, `ci`, `chore`. `feat`, `fix`, `perf` and `style` subjects become
-the release notes, so write them for the people using Larrier.
+the release notes, so write them for the people using Lary.
 
 Scopes name the area: `chat`, `composer`, `transcript`, `sidebar`,
 `settings`, `agents`, `claude`, `codex`, `cursor`, `formats`, `sync`,

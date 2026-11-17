@@ -104,7 +104,7 @@ CUSTOM = {
     "powershell": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#012456"/><path d="m6.5 8 4.5 4-4.5 4M12.5 16.5h5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     "terminal": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#2b2b2b"/><path d="m6.5 8 4.5 4-4.5 4M12.5 16.5h5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     "slack": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="8.2" y="2" width="3.6" height="11" rx="1.8" fill="#36C5F0"/><rect x="2" y="12.2" width="11" height="3.6" rx="1.8" fill="#E01E5A"/><rect x="12.2" y="11" width="3.6" height="11" rx="1.8" fill="#ECB22E"/><rect x="11" y="8.2" width="11" height="3.6" rx="1.8" fill="#2EB67D"/></svg>',
-    "larrier": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#26251E"/><path d="M8.5 5.5v12h8" fill="none" stroke="#F7F7F4" stroke-width="3" stroke-linecap="square"/></svg>',
+    "lary": '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="22" height="22" rx="6" fill="#26251E"/><path d="M8.5 5.5v12h8" fill="none" stroke="#F7F7F4" stroke-width="3" stroke-linecap="square"/></svg>',
 }
 
 

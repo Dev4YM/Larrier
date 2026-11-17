@@ -1,4 +1,4 @@
-//! The Larrier mark: an "L" whose stem is a dry brush stroke and whose
+//! The Lary mark: an "L" whose stem is a dry brush stroke and whose
 //! foot is a crisp slab, split by a 45° cut at the corner. It comes in two tiles: ink (dark theme, app icon) and paper
 //! (light theme).
 //!
@@ -7,9 +7,9 @@
 //! files ship with the app.
 
 /// The mark on an ink tile (64 × 64 view box).
-pub const MARK_SVG: &str = include_str!("../assets/brand/larrier-mark.svg");
+pub const MARK_SVG: &str = include_str!("../assets/brand/lary-mark.svg");
 /// The mark on a paper tile, for the light theme.
-pub const MARK_LIGHT_SVG: &str = include_str!("../assets/brand/larrier-mark-light.svg");
+pub const MARK_LIGHT_SVG: &str = include_str!("../assets/brand/lary-mark-light.svg");
 
 include!("mark_raster.rs");
 

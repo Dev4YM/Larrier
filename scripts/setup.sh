@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check that this Mac or Linux machine has what developing Larrier needs,
+# Check that this Mac or Linux machine has what developing Lary needs,
 # and say how to get what's missing. Changes nothing.
 #
 #   ./scripts/setup.sh

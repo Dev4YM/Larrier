@@ -1,4 +1,4 @@
-/* Larrier — the desktop app's styles.
+/* Lary — the desktop app's styles.
    Theme tokens first (light, dark), then the window, part by part. */
 
 .app[data-theme="light"] {
@@ -507,7 +507,7 @@ svg { flex-shrink: 0; display: block; }
 .browser-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 24px; text-align: center; color: var(--fg-3); }
 .browser-empty .t { color: var(--fg-2); font-weight: 500; }
 .browser-empty .d { max-width: 300px; font-size: var(--ui-sm); line-height: 18px; }
-/* A page that couldn't load: Larrier's own message where the page goes. */
+/* A page that couldn't load: Lary's own message where the page goes. */
 .browser-error { position: absolute; inset: 0; height: auto; background: var(--pane); gap: 8px; }
 .browser-error .t { font-size: var(--ui-lg); color: var(--fg); }
 .browser-error .d { max-width: 360px; font-size: var(--ui-sm); line-height: 19px; color: var(--fg-2); }
@@ -570,7 +570,7 @@ svg { flex-shrink: 0; display: block; }
 .set-row .lbl .t { font-size: var(--ui-sm); font-weight: 500; }
 .set-row .lbl .d { font-size: var(--ui-xs); color: var(--fg-2); margin-top: var(--sp-1); line-height: 16px; }
 .set-row.top { align-items: flex-start; }
-/* Larrier's fields and switches; the code editor's own parts that share
+/* Lary's fields and switches; the code editor's own parts that share
    these class names (its find box, its toggles) keep their look. */
 .input:not(.monaco-editor *) { height: var(--h-ctl); border-radius: var(--r-md); border: 1px solid var(--border); background: var(--input); padding: 0 var(--sp-4); font-size: var(--ui-sm); outline: none; min-width: 0; user-select: text; }
 .input:not(.monaco-editor *):focus { border-color: var(--border-2); }
@@ -1652,7 +1652,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 /* Behind Settings the sidebar stays as it was, out of sight. */
 .sidebar.parked { position: absolute; left: 0; top: 0; bottom: 0; visibility: hidden; pointer-events: none; transition: none; }
 
-/* Larrier's own tooltips (the title of whatever is hovered): a small label
+/* Lary's own tooltips (the title of whatever is hovered): a small label
    on the theme's raised surface, not an inverted bubble. It fades in once;
    chained from a neighbour it is just there. Hiding is instant. */
 .l-tip { position: fixed; left: 0; top: 0; z-index: 3000; max-width: 280px; padding: 3px 7px 4px; border-radius: var(--r-sm);

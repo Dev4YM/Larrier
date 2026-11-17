@@ -1,6 +1,6 @@
 # Changelog
 
-Every Larrier release and what changed in it. Versions follow
+Every Lary release and what changed in it. Versions follow
 [Semantic Versioning](https://semver.org): the major number for breaking
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
@@ -47,8 +47,8 @@ suffix such as `-beta.2`.
 ### Fixed
 
 - A placeholder that doesn't fit gets the two-line box
-- The taskbar keeps Larrier's icon while it's busy
-- Very large chats from other apps no longer keep Larrier busy
+- The taskbar keeps Lary's icon while it's busy
+- Very large chats from other apps no longer keep Lary busy
 - A menu in a row no longer clicks the row
 - Typing, the right-click menu and Find work in the file editor
 - A preview tab's italic title is no longer cut off
@@ -95,7 +95,7 @@ suffix such as `-beta.2`.
 - Take a message in when Claude asks with it; no time limit
 - Send straight in while only background work runs
 - Keep the caret where you type, typing fast anywhere
-- Keep an agent's last words when Larrier closes
+- Keep an agent's last words when Lary closes
 ## 0.1.42 — 2026-11-04
 
 ### New
@@ -111,7 +111,7 @@ suffix such as `-beta.2`.
 
 ### New
 
-- Run pages on Chromium's engine inside Larrier
+- Run pages on Chromium's engine inside Lary
 - Keep a prompt's edit with its chat, focused, closed when untouched
 - Typing with nothing focused goes to the message box
 - Show a chat running in another app as running, disabled
@@ -132,7 +132,7 @@ suffix such as `-beta.2`.
 ### Fixed
 
 - Show the toolbar's tips above the page
-- Keep typing in a page when Larrier comes back to the front
+- Keep typing in a page when Lary comes back to the front
 - Go back to one line after sending
 - Keep a turn as it is when it ends, errors where they came
 - Shorter pinned prompts, a themed Quote button, text cursor on text
@@ -146,7 +146,7 @@ suffix such as `-beta.2`.
 
 ### New
 
-- One text size for all of Larrier's text
+- One text size for all of Lary's text
 
 ### Fixed
 
@@ -162,7 +162,7 @@ suffix such as `-beta.2`.
 
 ### Fixed
 
-- Show Larrier's icon in Linux notifications
+- Show Lary's icon in Linux notifications
 ## 0.1.35 — 2026-11-01
 
 ### New
@@ -177,7 +177,7 @@ suffix such as `-beta.2`.
 
 ### Fixed
 
-- Give narration back to chats Larrier ran before 0.1.33
+- Give narration back to chats Lary ran before 0.1.33
 ## 0.1.33 — 2026-11-01
 
 ### Fixed
@@ -337,7 +337,7 @@ suffix such as `-beta.2`.
 
 ### Fixed
 
-- Use only Larrier's own loaders and drop the dots loader
+- Use only Lary's own loaders and drop the dots loader
 
 ## 0.1.14 — 2026-10-31
 
@@ -492,7 +492,7 @@ The first release.
 
 ### New
 
-- Initial Larrier workspace
+- Initial Lary workspace
 - Track subagents and background tasks end to end
 - Add appearance, behavior and sidebar options
 - Add tabs, split view, drag and drop and usage settings

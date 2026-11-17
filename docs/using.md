@@ -1,13 +1,13 @@
-# Using Larrier
+# Using Lary
 
-![Larrier with a chat running and its changes in the side panel](assets/agent.png)
+![Lary with a chat running and its changes in the side panel](assets/agent.png)
 
 ## The window
 
-**Menu bar.** File / Edit / View / Help. On Windows Larrier draws it with
+**Menu bar.** File / Edit / View / Help. On Windows Lary draws it with
 the window's buttons (the window has no system frame); on Linux it sits
 under your desktop's title bar; on macOS the menus are in the system menu
-bar and the traffic lights sit over Larrier's top bar.
+bar and the traffic lights sit over Lary's top bar.
 
 **Sidebar.**
 
@@ -60,7 +60,7 @@ onto the chat area:
   it and send it again as a
   fork: the cursor is in it, after its text. Esc or clicking elsewhere
   closes the editor; with unsaved changes it asks whether to keep editing.
-  An edit stays with its chat when you switch chats, close Larrier or
+  An edit stays with its chat when you switch chats, close Lary or
   update it. Sending a new message closes an edit you didn't change; one
   you changed stays open.
 - Reading, searching and thinking steps fold into "Explored …"; commands,
@@ -80,7 +80,7 @@ onto the chat area:
   Background Tasks shows each subagent's model, tools and context. Each
   running subagent and background command has its own stop button (Claude
   Code); Stop All stops the agent and everything it runs. Background work
-  runs as long as it takes: Larrier sets no limit of its own. Once the
+  runs as long as it takes: Lary sets no limit of its own. Once the
   agent's reply is done and only its background work runs, the agent is
   free: the box sends (not stops), and a message goes straight in and
   shows in the chat at once, whatever Settings say for a busy agent.
@@ -115,7 +115,7 @@ onto the chat area:
   top (← or Backspace with nothing typed); → opens the highlighted one.
 - `/` lists what you can do: the modes, **Model** and **Reasoning** (each a
   page of the menu), a new chat, fork, the agent's own **Commands**,
-  **Skills** and MCP prompts, and Larrier's commands with their `/name` at
+  **Skills** and MCP prompts, and Lary's commands with their `/name` at
   the right. Typing searches them, models included.
 - `@` and `/` work wherever the cursor is, on any line of the message.
 - Paste or drop images and files. Ctrl+Shift+V pastes long text as text.
@@ -149,12 +149,12 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   switched show within two seconds, with nothing to refresh. A worktree's
   branch can be merged back from here.
 - **Browser:** a real browser in the panel. On Windows its pages run on
-  Chromium, the open-source engine Chrome is built on, which Larrier runs
-  itself (as Electron apps do): Larrier is the browser, not a Chrome
+  Chromium, the open-source engine Chrome is built on, which Lary runs
+  itself (as Electron apps do): Lary is the browser, not a Chrome
   window. Its first use downloads the engine once (about 186 MB, see
   [install.md](install.md#the-browser-engine)). It has its own profile,
   so sign in to sites there separately from your Chrome. On macOS and
-  Linux it uses the system's web view. Agents drive it through Larrier's
+  Linux it uses the system's web view. Agents drive it through Lary's
   browser tools in tabs of their own, so the two of you never fight over a
   page: a tab the agent opens is its own (marked with its icon), and it
   opens behind the page you're on. While the agent works, its tabs are
@@ -165,7 +165,7 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   the agent can read; to act in one it reserves it first, and a tab's
   menu can Give to Agent or Take Back from Agent. Annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
-  A page that can't be reached gets Larrier's own message with Try again,
+  A page that can't be reached gets Lary's own message with Try again,
   pop-ups and new windows open as tabs. Developer tools (F12 or
   Ctrl+Shift+I in the page, or Inspect in its right-click menu) opens
   Chromium's DevTools docked on the page's right, below it, or in a window
@@ -179,7 +179,7 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   on macOS and Linux), plus read-only views of
   the agent's own background commands.
 - **Files:** tabs, quick open, a file tree and a code editor: Monaco (VS
-  Code's editor) in Larrier's colors, with the code theme you picked in
+  Code's editor) in Lary's colors, with the code theme you picked in
   Appearance and the Text Size. It edits any text file; Ctrl+S saves, a
   dot marks a tab with unsaved changes, and a change made on disk (an
   agent's edit) comes in when you haven't changed the file yourself. JSON,
@@ -226,7 +226,7 @@ each agent's own configuration and tagged with the agents that use it.
   works), the browser for agents, continuing interrupted agents, folding a
   finished turn's steps and showing reasoning.
 - **Appearance:** themes, accent and per-token colors for light and dark,
-  fonts (the interface is set in Inter, built into Larrier), **Text Size** (Small to Larger: every kind of text and its spacing
+  fonts (the interface is set in Inter, built into Lary), **Text Size** (Small to Larger: every kind of text and its spacing
   move together), zoom, density, **Button Corners** (Balanced is a
   moderate scale; Solid squares it off, Rounded brings back pills and
   circles), sidebar side and **Reduce Motion** (motion is already short;
@@ -239,25 +239,25 @@ each agent's own configuration and tagged with the agents that use it.
 - **Plan & Usage:** plan limits with reset times; tokens, cost, sessions
   and cache hits against the previous period; breakdowns by agent, model
   and project; an activity heatmap.
-- **Harnesses:** Larrier Chat and every agent found on this computer
+- **Harnesses:** Lary Chat and every agent found on this computer
   (the rest wait under Not installed). Each has a page in tabs: its
   **Accounts** (sign-ins, API keys and endpoints, checked when you ask),
-  **Models** and defaults, **How it runs** (the ways Larrier can run it,
+  **Models** and defaults, **How it runs** (the ways Lary can run it,
   with the command each uses) and **Version**, with updates and turning it
   on or off at the top.
 - **Source Control**, **Sessions** (import and live sync), **Workspaces**,
   **Shortcuts** and **About** (version, update channel, release notes).
 
-## Larrier reopens as you left it
+## Lary reopens as you left it
 
-Whether Larrier was closed, updated or stopped, it comes back on the same
+Whether Lary was closed, updated or stopped, it comes back on the same
 chat or page, with each chat's tabs, side panel (browser pages, terminals
 with their recent output, open files, the commit message being typed),
 scroll position, queued and half-typed messages, the sidebar's state, the
 cards and groups left open or folded, and the searches and filters of
 every page. A chat is written to disk as soon as its agent rests, and
-every running chat once more as Larrier closes, so an agent's last words
-are there when it reopens (with "Interrupted when Larrier closed" after
+every running chat once more as Lary closes, so an agent's last words
+are there when it reopens (with "Interrupted when Lary closed" after
 them if it was still running).
 
 ## Keyboard
@@ -276,6 +276,6 @@ them if it was still running).
 | Settings | Ctrl , | ⌘, |
 | Import sessions | Ctrl Shift I | ⌘⇧I |
 
-Larrier shows each shortcut the way your system writes it. In the
+Lary shows each shortcut the way your system writes it. In the
 terminal, copy and paste are Ctrl+Shift+C / Ctrl+Shift+V on Windows and
 Linux (Ctrl+C / Ctrl+V with a selection) and ⌘C / ⌘V on macOS.

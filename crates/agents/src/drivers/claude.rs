@@ -5,9 +5,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use larrier_core::{lsf::{is_narration_block, is_narration_signature, MediaSource}, AgentKind, FileDiff, Part, ToolCall, ToolKind, ToolStatus, Usage};
-use larrier_formats::claude::{fix_tool_kind, loaded_tools, server_tool_result};
-use larrier_formats::util::image_parts;
+use lary_core::{lsf::{is_narration_block, is_narration_signature, MediaSource}, AgentKind, FileDiff, Part, ToolCall, ToolKind, ToolStatus, Usage};
+use lary_formats::claude::{fix_tool_kind, loaded_tools, server_tool_result};
+use lary_formats::util::image_parts;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -84,7 +84,7 @@ async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedRece
     if !matches!(req.agent, AgentKind::Custom(_)) {
         cmd.arg("--include-partial-messages");
         // Resuming from the file path is the most robust form (works for
-        // sessions Larrier wrote and avoids cross-project id clashes).
+        // sessions Lary wrote and avoids cross-project id clashes).
         if let Some(target) = req.resume_path.as_ref().or(req.resume_id.as_ref()) {
             cmd.args(["--resume", target]);
             // An earlier prompt was edited: continue from just before it, in
@@ -149,7 +149,7 @@ pub async fn run_qwen(req: TurnRequest, sink: EventSink, mut control: UnboundedR
     run_stream("Qwen Code", cmd, None, &sink, &mut control, &mut parser).await;
 }
 
-/// Larrier's browser as an MCP server for this run, its tools allowed.
+/// Lary's browser as an MCP server for this run, its tools allowed.
 /// Claude Code's own breakdown of a chat's context window (what its
 /// `/context` shows: system prompt, tools, MCP tools, memory files, skills,
 /// messages, free space…), from a short-lived Claude on the chat's session
@@ -183,8 +183,8 @@ pub async fn context_usage(req: TurnRequest) -> Result<Value, String> {
     };
     let ask = |id: &str, request: Value| format!("{}\n", json!({"type": "control_request", "request_id": id, "request": request}));
     let asked = async {
-        stdin.write_all(ask("larrier_init", json!({"subtype": "initialize"})).as_bytes()).await?;
-        stdin.write_all(ask("larrier_context", json!({"subtype": "get_context_usage"})).as_bytes()).await?;
+        stdin.write_all(ask("lary_init", json!({"subtype": "initialize"})).as_bytes()).await?;
+        stdin.write_all(ask("lary_context", json!({"subtype": "get_context_usage"})).as_bytes()).await?;
         stdin.flush().await
     };
     if asked.await.is_err() {
@@ -196,7 +196,7 @@ pub async fn context_usage(req: TurnRequest) -> Result<Value, String> {
         while let Ok(Some(line)) = lines.next_line().await {
             let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
             let r = &v["response"];
-            if v["type"] == "control_response" && r["request_id"] == "larrier_context" {
+            if v["type"] == "control_response" && r["request_id"] == "lary_context" {
                 return match s(r, "subtype") {
                     Some("success") => Ok(r["response"].clone()),
                     _ => Err(s(r, "error").unwrap_or("Claude Code couldn't say.").to_string()),
@@ -341,9 +341,9 @@ impl ClaudeLive {
         let r = &v["request"];
         match s(r, "subtype").unwrap_or("") {
             "can_use_tool" => self.can_use_tool(rid, r, sink),
-            // Only sent for hooks a host registers; Larrier registers none.
+            // Only sent for hooks a host registers; Lary registers none.
             "hook_callback" => self.reply(&rid, json!({"continue": true})),
-            other => self.out.push(json!({"type": "control_response", "response": {"subtype": "error", "request_id": rid, "error": format!("Larrier doesn't handle {other}")}}).to_string()),
+            other => self.out.push(json!({"type": "control_response", "response": {"subtype": "error", "request_id": rid, "error": format!("Lary doesn't handle {other}")}}).to_string()),
         }
     }
 
@@ -557,7 +557,7 @@ impl super::process::Interactive for ClaudeLive {
                     .map(|a| a.iter().filter_map(|t| Some((s(t, "task_id")?.to_string(), s(t, "description").map(String::from)))).collect())
                     .unwrap_or_default();
                 // Claude reports back on finished work in a turn of its own,
-                // however long that takes: no limit of Larrier's.
+                // however long that takes: no limit of Lary's.
                 self.inner.handle(line, sink);
             }
             // The mode Claude runs in; it changes when a plan is approved.
@@ -596,7 +596,7 @@ impl super::process::Interactive for ClaudeLive {
                 }
                 if self.stop_at.is_none() && !self.finished {
                     self.host_requests += 1;
-                    self.out.push(json!({"type": "control_request", "request_id": format!("larrier_{}", self.host_requests), "request": {"subtype": "interrupt"}}).to_string());
+                    self.out.push(json!({"type": "control_request", "request_id": format!("lary_{}", self.host_requests), "request": {"subtype": "interrupt"}}).to_string());
                     self.stop_at = Some(std::time::Instant::now() + std::time::Duration::from_secs(8));
                 }
             }
@@ -604,7 +604,7 @@ impl super::process::Interactive for ClaudeLive {
             TurnCommand::StopTask { tool_id, description } => match self.task_of(&tool_id, description.as_deref()) {
                 Some(task) => {
                     self.host_requests += 1;
-                    let rid = format!("larrier_{}", self.host_requests);
+                    let rid = format!("lary_{}", self.host_requests);
                     self.stopping.insert(rid.clone());
                     self.out.push(json!({"type": "control_request", "request_id": rid, "request": {"subtype": "stop_task", "task_id": task}}).to_string());
                 }
@@ -625,7 +625,7 @@ impl super::process::Interactive for ClaudeLive {
                     // Claude holds it until its next step: ask for it back.
                     Some(uuid) if !self.finished => {
                         self.host_requests += 1;
-                        let rid = format!("larrier_{}", self.host_requests);
+                        let rid = format!("lary_{}", self.host_requests);
                         self.unsteers.insert(rid.clone(), key);
                         self.out.push(json!({"type": "control_request", "request_id": rid, "request": {"subtype": "cancel_async_message", "message_uuid": uuid}}).to_string());
                     }
@@ -1544,7 +1544,7 @@ fn diffs_from_result(meta: &Value) -> Vec<FileDiff> {
 }
 
 /// Back-compat helper used by older callers.
-pub fn todo_entries(input: &Value) -> Option<Vec<larrier_core::PlanEntry>> {
+pub fn todo_entries(input: &Value) -> Option<Vec<lary_core::PlanEntry>> {
     input.get("todos").and_then(plan_entries)
 }
 
@@ -1716,7 +1716,7 @@ mod tests {
     }
 
     /// Real run (Claude Code 2.1.310): `echo hi > a.txt` in Manual mode,
-    /// approved once in Larrier.
+    /// approved once in Lary.
     #[test]
     fn live_approval() {
         let (ev, written) = live(include_str!("../../tests/fixtures/claude_live_approval.jsonl"), |r| reply(&r.id, "allow_once"));
@@ -1783,7 +1783,7 @@ mod tests {
         p.command(TurnCommand::Unsteer { key: 8 }, &sink);
         let ask: Value = serde_json::from_str(&p.take_output()[0]).unwrap();
         p.handle(&json!({"type": "control_response", "response": {"subtype": "success", "request_id": ask["request_id"], "response": {"cancelled": false}}}).to_string(), &sink);
-        // One Larrier never sent: nothing to ask.
+        // One Lary never sent: nothing to ask.
         p.command(TurnCommand::Unsteer { key: 9 }, &sink);
         assert!(p.take_output().is_empty());
         let ev: Vec<AgentEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
@@ -1879,7 +1879,7 @@ mod tests {
         assert_eq!(starts[2].diffs.first().map(|d| d.added), Some(3));
     }
     use crate::drivers::testutil::collect;
-    use larrier_core::ToolKind;
+    use lary_core::ToolKind;
 
     /// A thinking block's signature naming its kind, as the API writes it.
     fn signature(kind: &str) -> String {
@@ -1937,8 +1937,8 @@ mod tests {
         let events = collect(&mut p, &lines);
         assert!(events.iter().any(|e| matches!(e, AgentEvent::Subagent { inner, .. } if matches!(&**inner, AgentEvent::Text { text } if text == "Looking for writers."))));
 
-        let mut s = larrier_core::Session::new(AgentKind::ClaudeCode, None);
-        s.push(larrier_core::Message::user_text("make webhooks idempotent"));
+        let mut s = lary_core::Session::new(AgentKind::ClaudeCode, None);
+        s.push(lary_core::Message::user_text("make webhooks idempotent"));
         let mut rec = crate::engine::TurnRecorder::begin(&mut s, AgentKind::ClaudeCode, None, None);
         for e in events.iter().filter(|e| !matches!(e, AgentEvent::Subagent { .. })) {
             rec.apply(&mut s, e);

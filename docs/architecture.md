@@ -1,22 +1,22 @@
 # Architecture
 
-Larrier is a Cargo workspace: three library crates, a command line and the
+Lary is a Cargo workspace: three library crates, a command line and the
 desktop app.
 
 ```
 crates/
-  core/      larrier-core     LSF types, agent catalog, config, accounts, keychain secrets, the store
-  formats/   larrier-formats  native session discovery and importers, native exporters, sync, live watching
-  agents/    larrier-agents   agent drivers, the turn engine, detection, models, versions, git, the browser tools
-  cli/       larrier          the command line
-app/         larrier-app      the desktop app (Dioxus 0.7: WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux)
+  core/      lary-core     LSF types, agent catalog, config, accounts, keychain secrets, the store
+  formats/   lary-formats  native session discovery and importers, native exporters, sync, live watching
+  agents/    lary-agents   agent drivers, the turn engine, detection, models, versions, git, the browser tools
+  cli/       lary          the command line
+app/         lary-app      the desktop app (Dioxus 0.7: WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux)
 docs/                         documentation; LSF.md is the session format spec
 scripts/                      development, release and demo tooling
 ```
 
-## larrier-core
+## lary-core
 
-- `lsf.rs`: the [Larrier Session Format](LSF.md): sessions, messages,
+- `lsf.rs`: the [Lary Session Format](LSF.md): sessions, messages,
   parts, tool calls and diffs, JSON Lines and document forms.
 - `agent.rs`: the agent catalog: names, programs, install commands, the
   protocol each speaks, its ACP command, modes and environment variables.
@@ -25,7 +25,7 @@ scripts/                      development, release and demo tooling
 - `secrets.rs`: API keys in the OS credential store.
 - `models.rs`: the model registry (names, context windows, prices).
 
-## larrier-formats
+## lary-formats
 
 One module per agent (`claude.rs`, `codex.rs`, `cursor.rs`, `opencode.rs`,
 `gemini.rs`, `pi.rs`, `hermes.rs`, `droid.rs`) that discovers its native
@@ -34,7 +34,7 @@ claude.ai exports. Agents that can resume external sessions (Claude Code,
 Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
 `live.rs` watches the folders.
 
-## larrier-agents
+## lary-agents
 
 - `drivers/`: one driver per protocol. Each spawns the agent (or calls the
   API), feeds it the prompt and translates its stream into `AgentEvent`s:
@@ -57,7 +57,7 @@ Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
   other configuration, for Customize and the `/` and `@` menus.
 - `git.rs`: changes, commits, pushes, worktrees and pull requests.
 - `browser/`: the browser views agents can drive, served to them as an MCP
-  server (`Larrier mcp-browser`). An agent acts in tabs reserved for it
+  server (`Lary mcp-browser`). An agent acts in tabs reserved for it
   (`tabs_create`, `tabs_reserve`) and reads any; what the user does with
   its tabs (unlock, lock again, take back, close) comes back as notes in
   its next tool result.
@@ -79,16 +79,16 @@ Codex, Gemini CLI, Pi) also have exporters. `sync.rs` imports what changed;
 - `browser_host.rs`, `browser_control.rs`: the Browser tab's tabs and
   the agents' control of them (which tabs are an agent's, the notes for
   it); `browser_cef.rs`: on Windows, the pages themselves, run on Chromium
-  (CEF) inside Larrier's window, with the engine's runtime fetched on
+  (CEF) inside Lary's window, with the engine's runtime fetched on
   first use. While a chat's agent runs, its tabs' page windows are
   disabled, so the user's input doesn't reach them (the agent's goes in
   through DevTools).
 - `ui/editor.rs`: the Files panel's code editor, Monaco, embedded in the
   program (`assets/monaco`, listed by `build.rs`) and served over the
-  `larrier://` protocol.
+  `lary://` protocol.
 - `update.rs`, `install.rs`, `version.rs`: self-install (Windows) and
   updates from GitHub releases on every system (the `.exe`, the whole
-  Larrier.app, or the Linux program, swapped on restart).
+  Lary.app, or the Linux program, swapped on restart).
 - `platform.rs`: what differs by system in the window and in how shortcuts
   read: Windows draws its own frame and buttons, macOS keeps the traffic
   lights and a system menu bar (`ui::menubar::system_menu`), Linux uses

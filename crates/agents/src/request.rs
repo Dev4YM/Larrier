@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
-use larrier_core::{
+use lary_core::{
     config::CustomAgent, secrets, Account, AccountAuth, AgentKind, ApiKind, Config, Message, Part, Protocol, ModeSelection,
     RunMode, Session,
 };
@@ -45,12 +45,12 @@ pub struct TurnRequest {
     pub launch: Launch,
     pub chat: Option<ChatTarget>,
     /// Something the user should know about this turn, shown before the
-    /// reply (a limitation of the agent Larrier had to work around).
+    /// reply (a limitation of the agent Lary had to work around).
     pub notice: Option<String>,
     /// One of the agent's own named agents to run as (Claude Code's
     /// `--agent`).
     pub run_as: Option<String>,
-    /// Larrier's browser, for agents that take MCP servers per run.
+    /// Lary's browser, for agents that take MCP servers per run.
     pub browser: Option<crate::browser::Server>,
     /// The project's other folders, which the agent may work in too.
     pub extra_dirs: Vec<String>,
@@ -93,7 +93,7 @@ impl TurnRequest {
 
     /// Write `text` to a per-turn temporary prompt file.
     pub fn write_prompt_file(&self, text: &str) -> Option<PathBuf> {
-        let dir = std::env::temp_dir().join("larrier").join("prompts");
+        let dir = std::env::temp_dir().join("lary").join("prompts");
         std::fs::create_dir_all(&dir).ok()?;
         let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S%3f");
         let short: String = self.session_id.chars().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect();
@@ -107,7 +107,7 @@ impl TurnRequest {
         self.attachments
             .iter()
             .filter_map(|a| match a {
-                Part::Image { source: larrier_core::lsf::MediaSource::Path { path }, .. } => Some(path.clone()),
+                Part::Image { source: lary_core::lsf::MediaSource::Path { path }, .. } => Some(path.clone()),
                 _ => None,
             })
             .collect()
@@ -184,7 +184,7 @@ pub fn account_env(agent: &AgentKind, account: &Account) -> Vec<(String, String)
             Some(var) => vec![(var.to_string(), path.clone())],
             None => Vec::new(),
         },
-        // A key the harness reads from a variable. An API Larrier points the
+        // A key the harness reads from a variable. An API Lary points the
         // harness at itself goes through `model_launch`.
         AccountAuth::Api(api) => match (&api.env_var, api.secret_ref.as_deref().and_then(secrets::get)) {
             (Some(var), Some(key)) => vec![(var.clone(), key)],
@@ -620,7 +620,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
 fn project_dirs(cfg: &Config, session: &Session, cwd: &Path) -> Vec<String> {
     let Some(main) = session.workspace.as_ref().map(|w| w.path.clone()) else { return Vec::new() };
     let Some(project) = cfg.project_for(&main) else { return Vec::new() };
-    let same = |a: &str, b: &str| larrier_core::config::normalize_path(a) == larrier_core::config::normalize_path(b);
+    let same = |a: &str, b: &str| lary_core::config::normalize_path(a) == lary_core::config::normalize_path(b);
     project
         .all_folders()
         .filter(|f| !same(f, &main) && !same(f, &cwd.to_string_lossy()) && Path::new(f.as_str()).is_dir())
@@ -633,13 +633,13 @@ fn project_dirs(cfg: &Config, session: &Session, cwd: &Path) -> Vec<String> {
 /// otherwise it would quietly start an empty chat with the same id, so the
 /// reason is returned and the conversation is handed over instead.
 fn cursor_resume(id: &str, known: Option<&str>, cwd: Option<&str>) -> std::result::Result<PathBuf, String> {
-    match larrier_formats::cursor::cli_chat(id, known.map(Path::new), cwd) {
+    match lary_formats::cursor::cli_chat(id, known.map(Path::new), cwd) {
         Some(chat) if Path::new(&chat.workspace).is_dir() => Ok(PathBuf::from(chat.workspace)),
         Some(chat) => Err(format!(
-            "This Cursor chat was started in {}, which no longer exists, and Cursor can only resume a chat from the folder it started in. Larrier passed the conversation so far to a new Cursor chat.",
+            "This Cursor chat was started in {}, which no longer exists, and Cursor can only resume a chat from the folder it started in. Lary passed the conversation so far to a new Cursor chat.",
             chat.workspace
         )),
-        None => Err("Cursor's CLI can only continue chats it ran itself, and this one was made in the Cursor app. Larrier passed the conversation so far to a new Cursor chat.".to_string()),
+        None => Err("Cursor's CLI can only continue chats it ran itself, and this one was made in the Cursor app. Lary passed the conversation so far to a new Cursor chat.".to_string()),
     }
 }
 
@@ -672,7 +672,7 @@ pub fn takes_fast(agent: &AgentKind) -> bool {
     matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex)
 }
 
-/// The APIs a harness can be pointed at when it starts (Larrier Chat
+/// The APIs a harness can be pointed at when it starts (Lary Chat
 /// speaks them itself). Other harnesses take an API key only through the
 /// variables they read (`AgentSpec::key_env`).
 pub fn api_kinds(agent: &AgentKind) -> &'static [ApiKind] {
@@ -716,7 +716,7 @@ pub fn model_launch(cfg: &Config, agent: &AgentKind, account: Option<&str>, mode
             _ => {}
         }
     }
-    // An API account Larrier points the agent at (one whose key the agent
+    // An API account Lary points the agent at (one whose key the agent
     // reads from a variable is in its environment already).
     let Some((acc, api)) = cfg.api_for(agent, account, model).filter(|(_, a)| a.env_var.is_none()) else { return Ok(ml) };
     let name = acc.label.as_str();
@@ -728,8 +728,8 @@ pub fn model_launch(cfg: &Config, agent: &AgentKind, account: Option<&str>, mode
     if url.is_empty() {
         return Err(anyhow!("{name} has no address. Add it in Settings → Harnesses → {}.", agent.display_name()));
     }
-    let pid = format!("larrier-{}", slug(&acc.id));
-    let key_var = format!("LARRIER_KEY_{}", slug(&acc.id).replace('-', "_").to_ascii_uppercase());
+    let pid = format!("lary-{}", slug(&acc.id));
+    let key_var = format!("LARY_KEY_{}", slug(&acc.id).replace('-', "_").to_ascii_uppercase());
     let wire_npm = match api.api {
         ApiKind::Anthropic => ("anthropic", "@ai-sdk/anthropic"),
         ApiKind::OpenAi => ("openai", "@ai-sdk/openai"),
@@ -777,7 +777,7 @@ pub fn model_launch(cfg: &Config, agent: &AgentKind, account: Option<&str>, mode
             let settings = serde_json::json!({ "customModels": [{
                 "model": id, "id": custom_id, "displayName": name, "baseUrl": url, "apiKey": key, "provider": wire_npm.0,
             }] });
-            let dir = std::env::temp_dir().join("larrier").join("droid");
+            let dir = std::env::temp_dir().join("lary").join("droid");
             std::fs::create_dir_all(&dir)?;
             let path = dir.join(format!("{pid}.json"));
             std::fs::write(&path, serde_json::to_vec_pretty(&settings)?)?;
@@ -803,7 +803,7 @@ fn toml_str(v: &str) -> String {
     serde_json::to_string(v).unwrap_or_else(|_| format!("\"{v}\""))
 }
 
-/// For Larrier Chat, `session.model` is `account_id/model`; a model
+/// For Lary Chat, `session.model` is `account_id/model`; a model
 /// without an account runs on the chat's account.
 pub fn resolve_chat(cfg: &Config, session: &Session) -> Result<ChatTarget> {
     let raw = session.model.clone().unwrap_or_default();
@@ -814,20 +814,20 @@ pub fn resolve_chat(cfg: &Config, session: &Session) -> Result<ChatTarget> {
         None => {
             let acc = cfg
                 .account_for(&chat, session.account_id.as_deref())
-                .ok_or_else(|| anyhow!("Larrier Chat has no API account yet. Add one in Settings → Harnesses → Larrier Chat."))?;
+                .ok_or_else(|| anyhow!("Lary Chat has no API account yet. Add one in Settings → Harnesses → Lary Chat."))?;
             (acc, raw.clone())
         }
     };
     let AccountAuth::Api(api) = &acc.auth else {
-        return Err(anyhow!("{} isn't an API account. Pick another in Settings → Harnesses → Larrier Chat.", acc.label));
+        return Err(anyhow!("{} isn't an API account. Pick another in Settings → Harnesses → Lary Chat.", acc.label));
     };
     let model = if model.trim().is_empty() { api.models.first().cloned().unwrap_or_default() } else { model };
     let api_key = api.secret_ref.as_deref().and_then(secrets::get).filter(|k| !k.trim().is_empty());
     if api.api.needs_key() && api_key.is_none() {
-        return Err(anyhow!("{} has no API key saved. Add it in Settings → Harnesses → Larrier Chat.", acc.label));
+        return Err(anyhow!("{} has no API key saved. Add it in Settings → Harnesses → Lary Chat.", acc.label));
     }
     if model.trim().is_empty() {
-        return Err(anyhow!("{} has no models yet. Add one in Settings → Harnesses → Larrier Chat.", acc.label));
+        return Err(anyhow!("{} has no models yet. Add one in Settings → Harnesses → Lary Chat.", acc.label));
     }
     Ok(ChatTarget { kind: api.api, base_url: api.url(), api_key, model, provider_name: acc.label.clone() })
 }
@@ -837,7 +837,7 @@ mod tests {
     use super::*;
 
     fn tmpdir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("larrier-shim-{name}-{}", larrier_core::lsf::new_id()));
+        let d = std::env::temp_dir().join(format!("lary-shim-{name}-{}", lary_core::lsf::new_id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }
@@ -901,7 +901,7 @@ mod tests {
     /// `all`, else serving only the models added with it.
     fn with_api(agent: AgentKind, api: ApiKind, url: &str, all: bool) -> Config {
         let mut cfg = Config::default();
-        let auth = AccountAuth::Api(larrier_core::ApiAccount { api, base_url: Some(url.into()), secret_ref: None, env_var: None, models: Vec::new() });
+        let auth = AccountAuth::Api(lary_core::ApiAccount { api, base_url: Some(url.into()), secret_ref: None, env_var: None, models: Vec::new() });
         let mut acc = Account::new(agent.clone(), "My gateway", auth);
         acc.id = "ep1".into();
         if !all {
@@ -937,23 +937,23 @@ mod tests {
 
         // Codex: a provider of its own through config overrides.
         let mut cfg = with_api(AgentKind::Codex, ApiKind::OpenAiCompatible, "https://openrouter.ai/api/v1", false);
-        cfg.agent_mut(&AgentKind::Codex).custom_models.push(larrier_core::CustomModel { id: "z-ai/glm-5.2".into(), name: None, account: Some("ep1".into()) });
+        cfg.agent_mut(&AgentKind::Codex).custom_models.push(lary_core::CustomModel { id: "z-ai/glm-5.2".into(), name: None, account: Some("ep1".into()) });
         assert_eq!(model_launch(&cfg, &AgentKind::Codex, None, Some("gpt-6.1-sol"), None).unwrap(), ModelLaunch::default());
         let ml = model_launch(&cfg, &AgentKind::Codex, None, Some("z-ai/glm-5.2"), None).unwrap();
-        assert!(ml.args.contains(&"model_providers.larrier-ep1.base_url=\"https://openrouter.ai/api/v1\"".to_string()));
-        assert!(ml.args.contains(&"model_providers.larrier-ep1.wire_api=\"chat\"".to_string()));
-        assert_eq!(ml.args.last().unwrap(), "model_provider=\"larrier-ep1\"");
-        assert_eq!(ml.env[0].0, "LARRIER_KEY_EP1");
+        assert!(ml.args.contains(&"model_providers.lary-ep1.base_url=\"https://openrouter.ai/api/v1\"".to_string()));
+        assert!(ml.args.contains(&"model_providers.lary-ep1.wire_api=\"chat\"".to_string()));
+        assert_eq!(ml.args.last().unwrap(), "model_provider=\"lary-ep1\"");
+        assert_eq!(ml.env[0].0, "LARY_KEY_EP1");
 
         // OpenCode: an inline provider, and the model under it.
         let mut cfg = with_api(AgentKind::OpenCode, ApiKind::Anthropic, "https://api.anthropic.com", false);
-        cfg.agent_mut(&AgentKind::OpenCode).custom_models.push(larrier_core::CustomModel { id: "claude-opus-5-5".into(), name: Some("Opus".into()), account: Some("ep1".into()) });
+        cfg.agent_mut(&AgentKind::OpenCode).custom_models.push(lary_core::CustomModel { id: "claude-opus-5-5".into(), name: Some("Opus".into()), account: Some("ep1".into()) });
         let ml = model_launch(&cfg, &AgentKind::OpenCode, None, Some("claude-opus-5-5"), None).unwrap();
-        assert_eq!(ml.model.as_deref(), Some("larrier-ep1/claude-opus-5-5"));
+        assert_eq!(ml.model.as_deref(), Some("lary-ep1/claude-opus-5-5"));
         let cfg: serde_json::Value = serde_json::from_str(&ml.env[0].1).unwrap();
-        assert_eq!(cfg["provider"]["larrier-ep1"]["npm"], "@ai-sdk/anthropic");
-        assert_eq!(cfg["provider"]["larrier-ep1"]["options"]["apiKey"], "{env:LARRIER_KEY_EP1}");
-        assert_eq!(cfg["provider"]["larrier-ep1"]["models"]["claude-opus-5-5"]["name"], "Opus");
+        assert_eq!(cfg["provider"]["lary-ep1"]["npm"], "@ai-sdk/anthropic");
+        assert_eq!(cfg["provider"]["lary-ep1"]["options"]["apiKey"], "{env:LARY_KEY_EP1}");
+        assert_eq!(cfg["provider"]["lary-ep1"]["models"]["claude-opus-5-5"]["name"], "Opus");
 
         // Cursor can't take one.
         let cfg = with_api(AgentKind::Cursor, ApiKind::OpenAi, "https://api.openai.com/v1", true);
@@ -971,7 +971,7 @@ mod tests {
     fn chat_runs_on_its_account() {
         let mut cfg = Config::default();
         assert!(resolve_chat(&cfg, &Session::new(AgentKind::Chat, None)).unwrap_err().to_string().contains("no API account"));
-        let auth = AccountAuth::Api(larrier_core::ApiAccount { api: ApiKind::Ollama, base_url: None, secret_ref: None, env_var: None, models: vec!["llama3.1".into()] });
+        let auth = AccountAuth::Api(lary_core::ApiAccount { api: ApiKind::Ollama, base_url: None, secret_ref: None, env_var: None, models: vec!["llama3.1".into()] });
         let mut acc = Account::new(AgentKind::Chat, "Local", auth);
         acc.id = "local".into();
         cfg.accounts.push(acc);

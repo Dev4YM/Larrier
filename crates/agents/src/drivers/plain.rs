@@ -1,7 +1,7 @@
 //! Plain-text agents: stdout is the answer. Used for Aider
 //! (`aider --message … --yes-always --no-stream`) and custom commands.
 
-use larrier_core::AgentKind;
+use lary_core::AgentKind;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::process::strip_ansi;

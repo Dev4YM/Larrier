@@ -1,14 +1,14 @@
 //! What differs between Windows, macOS and Linux in how the window looks
 //! and how shortcuts read.
 //!
-//! - Windows: no system frame; Larrier draws its menu bar and the window's
+//! - Windows: no system frame; Lary draws its menu bar and the window's
 //!   buttons.
-//! - macOS: the system's traffic lights over Larrier's own top bar, and the
+//! - macOS: the system's traffic lights over Lary's own top bar, and the
 //!   app's commands in the system menu bar.
 //! - Linux: the system's frame (works with every window manager), with
-//!   Larrier's menu bar under it.
+//!   Lary's menu bar under it.
 
-/// Larrier draws the window's caption buttons itself (no system frame).
+/// Lary draws the window's caption buttons itself (no system frame).
 pub const DRAWS_CAPTION: bool = cfg!(windows);
 
 /// The app's menus are in the system menu bar, not the window.
@@ -42,7 +42,7 @@ pub fn key(k: &str) -> &str {
 
 /// macOS and Linux: an app opened from the Dock, Finder or a desktop menu
 /// gets a bare PATH, without Homebrew, npm's or `~/.local/bin`, where the
-/// agents and the tools they run (node, git, gh) live. Larrier takes the
+/// agents and the tools they run (node, git, gh) live. Lary takes the
 /// PATH the user's login shell sets up, as a terminal has it, ahead of its
 /// own. Called once at startup, before any thread starts.
 pub fn adopt_login_path() {
@@ -50,7 +50,7 @@ pub fn adopt_login_path() {
     {
         use std::process::{Command, Stdio};
         use std::time::{Duration, Instant};
-        const MARK: &str = "__LARRIER_PATH__";
+        const MARK: &str = "__LARY_PATH__";
         let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
         let Ok(mut child) = Command::new(&shell)
             .args(["-l", "-i", "-c", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])

@@ -1,9 +1,9 @@
-//! Settings → Plan & Usage, under the usage: the model registry — every model Larrier knows with
+//! Settings → Plan & Usage, under the usage: the model registry — every model Lary knows with
 //! its vendor, context window, output cap and prices, searchable and
 //! filterable.
 
 use dioxus::prelude::*;
-use larrier_core::models::{self, money, tokens_short, ModelInfo, ModelStatus, Source, Vendor};
+use lary_core::models::{self, money, tokens_short, ModelInfo, ModelStatus, Source, Vendor};
 
 use crate::icons::{Icon, I};
 use crate::logos::{model_logo, Logo};

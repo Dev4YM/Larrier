@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use larrier_core::lsf::is_narration_block;
-use larrier_core::{AgentKind, NativeLink, Part, Role, Session, ToolCall, Usage};
+use lary_core::lsf::is_narration_block;
+use lary_core::{AgentKind, NativeLink, Part, Role, Session, ToolCall, Usage};
 use serde_json::{json, Value};
 
 use crate::util::{self, content_text, env_dir, finish, head_lines, image_parts, json_lines, parse_ts, s, string, ts_value, Conv, Meta};
@@ -109,7 +109,7 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
             "custom_message" if e["display"].as_bool().unwrap_or(false) => {
                 let t = content_text(&e["content"]);
                 if !t.trim().is_empty() {
-                    conv.notice(larrier_core::lsf::first_line(&t), ts);
+                    conv.notice(lary_core::lsf::first_line(&t), ts);
                 }
             }
             "model_change" => {
@@ -187,11 +187,11 @@ pub fn parse(text: &str, path: Option<&Path>) -> Result<Session> {
                     // A command the user ran with `!` (or `!!`, kept out of
                     // the model's context).
                     "bashExecution" => {
-                        let mut t = ToolCall::new(larrier_core::lsf::new_id(), "bash", json!({"command": m["command"]}));
+                        let mut t = ToolCall::new(lary_core::lsf::new_id(), "bash", json!({"command": m["command"]}));
                         let code = m["exitCode"].as_i64();
                         t.output = Some(util::trim_output(&string(m, "output").unwrap_or_default()));
                         t.is_error = m["cancelled"].as_bool().unwrap_or(false) || code.is_some_and(|c| c != 0);
-                        t.status = larrier_core::ToolStatus::Completed;
+                        t.status = lary_core::ToolStatus::Completed;
                         conv.tool(t, mts, None);
                     }
                     _ => {}
@@ -312,10 +312,10 @@ mod tests {
 
     #[test]
     fn export_roundtrip() {
-        let mut s = Session::new(AGENT, Some(larrier_core::WorkspaceRef::from_path("/tmp/x")));
+        let mut s = Session::new(AGENT, Some(lary_core::WorkspaceRef::from_path("/tmp/x")));
         s.title = "T".into();
-        s.push(larrier_core::Message::user_text("hello"));
-        let mut a = larrier_core::Message::assistant(AGENT, None);
+        s.push(lary_core::Message::user_text("hello"));
+        let mut a = lary_core::Message::assistant(AGENT, None);
         a.push_text("world");
         s.push(a);
         let back = parse(&export_lines(&s, "ID", "/tmp/x"), None).unwrap();

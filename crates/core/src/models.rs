@@ -1,4 +1,4 @@
-//! Model registry: every model Larrier knows, with a proper display name,
+//! Model registry: every model Lary knows, with a proper display name,
 //! vendor, context window, output cap and per-million-token prices.
 //!
 //! Two layers:
@@ -223,7 +223,7 @@ impl ModelStatus {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
-    /// The vendor's own published catalog (curated in Larrier).
+    /// The vendor's own published catalog (curated in Lary).
     Official,
     /// The live LiteLLM registry.
     #[default]
@@ -291,7 +291,7 @@ struct Curated {
     context: u64,
     max_output: u64,
     /// (input, output, cache read, cache write) per MTok; None = not
-    /// published in the catalog Larrier ships (the live registry fills it).
+    /// published in the catalog Lary ships (the live registry fills it).
     price: Option<(f64, f64, f64, f64)>,
     status: ModelStatus,
     tag: Option<&'static str>,

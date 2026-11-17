@@ -1,4 +1,4 @@
-//! Windows: give the .exe the Larrier icon and its version details (shown
+//! Windows: give the .exe the Lary icon and its version details (shown
 //! by Explorer, the Start menu and Settings → Apps). The icon is drawn from
 //! the same geometry as the window icon (`src/mark_raster.rs`).
 
@@ -11,8 +11,8 @@ fn main() {
     println!("cargo:rerun-if-changed=src/mark_raster.rs");
     println!("cargo:rerun-if-changed=src/mark_geometry.rs");
     let (commit, date) = build_info();
-    println!("cargo:rustc-env=LARRIER_COMMIT={commit}");
-    println!("cargo:rustc-env=LARRIER_COMMIT_DATE={date}");
+    println!("cargo:rustc-env=LARY_COMMIT={commit}");
+    println!("cargo:rustc-env=LARY_COMMIT_DATE={date}");
     monaco_files();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
@@ -22,15 +22,15 @@ fn main() {
     println!("cargo:rustc-link-arg=/DELAYLOAD:libcef.dll");
     println!("cargo:rustc-link-lib=delayimp");
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    let ico = out.join("larrier.ico");
+    let ico = out.join("lary.ico");
     std::fs::write(&ico, icon(&[16, 20, 24, 32, 40, 48, 64, 128, 256])).expect("write icon");
     let mut res = winresource::WindowsResource::new();
     res.set_icon(ico.to_str().expect("utf-8 path"));
-    res.set("ProductName", "Larrier");
-    res.set("FileDescription", "Larrier");
+    res.set("ProductName", "Lary");
+    res.set("FileDescription", "Lary");
     res.set("CompanyName", "Dev4YM");
     res.set("LegalCopyright", "© Dev4YM");
-    res.set("OriginalFilename", "Larrier.exe");
+    res.set("OriginalFilename", "Lary.exe");
     res.set("ProductVersion", &format!("{} ({commit})", env!("CARGO_PKG_VERSION")));
     // Windows 10/11 as what the program is made for: without it Windows
     // reports an older version, and the browser engine's GPU process fails.
@@ -87,26 +87,26 @@ fn monaco_files() {
     std::fs::write(out, src).expect("write the editor's file table");
 }
 
-/// The commit being built and its date (`LARRIER_COMMIT` /
-/// `LARRIER_COMMIT_DATE` override them, e.g. for builds outside a checkout).
+/// The commit being built and its date (`LARY_COMMIT` /
+/// `LARY_COMMIT_DATE` override them, e.g. for builds outside a checkout).
 /// A checkout with uncommitted changes marks the commit `+dirty`.
 fn build_info() -> (String, String) {
     for p in ["../.git/HEAD", "../.git/index", "../.git/refs/heads", "../.git/packed-refs"] {
         println!("cargo:rerun-if-changed={p}");
     }
-    println!("cargo:rerun-if-env-changed=LARRIER_COMMIT");
-    println!("cargo:rerun-if-env-changed=LARRIER_COMMIT_DATE");
+    println!("cargo:rerun-if-env-changed=LARY_COMMIT");
+    println!("cargo:rerun-if-env-changed=LARY_COMMIT_DATE");
     let git = |args: &[&str]| -> Option<String> {
         let out = std::process::Command::new("git").args(args).output().ok()?;
         let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
         (out.status.success() && !s.is_empty()).then_some(s)
     };
-    let commit = std::env::var("LARRIER_COMMIT").ok().filter(|c| !c.is_empty()).unwrap_or_else(|| {
+    let commit = std::env::var("LARY_COMMIT").ok().filter(|c| !c.is_empty()).unwrap_or_else(|| {
         let hash = git(&["rev-parse", "--short=9", "HEAD"]).unwrap_or_else(|| "unknown".into());
         let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some();
         if dirty { format!("{hash}+dirty") } else { hash }
     });
-    let date = std::env::var("LARRIER_COMMIT_DATE").ok().filter(|c| !c.is_empty()).or_else(|| git(&["log", "-1", "--format=%cs"])).unwrap_or_default();
+    let date = std::env::var("LARY_COMMIT_DATE").ok().filter(|c| !c.is_empty()).or_else(|| git(&["log", "-1", "--format=%cs"])).unwrap_or_default();
     (commit, date)
 }
 

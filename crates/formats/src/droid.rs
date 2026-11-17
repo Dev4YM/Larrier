@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use larrier_core::lsf::is_narration_block;
-use larrier_core::{AgentKind, Part, Session, ToolCall, Usage};
+use lary_core::lsf::is_narration_block;
+use lary_core::{AgentKind, Part, Session, ToolCall, Usage};
 use serde_json::Value;
 
 use crate::util::{self, content_text, finish, head_lines, json_lines, json_or_string, parse_ts, s, string, Conv, Meta};
@@ -176,7 +176,7 @@ fn usage(u: &Value) -> Option<Usage> {
 
 #[cfg(test)]
 mod tests {
-    use larrier_core::{Part, PlanStatus, ToolKind};
+    use lary_core::{Part, PlanStatus, ToolKind};
 
     #[test]
     fn parses_session() {

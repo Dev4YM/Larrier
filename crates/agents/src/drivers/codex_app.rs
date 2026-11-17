@@ -6,9 +6,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use larrier_core::lsf::{MediaSource, Part};
-use larrier_core::{ToolStatus, Usage};
-use larrier_formats::codex::{error_message, unwrap_shell};
+use lary_core::lsf::{MediaSource, Part};
+use lary_core::{ToolStatus, Usage};
+use lary_formats::codex::{error_message, unwrap_shell};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -199,7 +199,7 @@ impl CodexLive {
         };
         live.first = input(&prompt, &req.attachments);
         let version = env!("CARGO_PKG_VERSION");
-        live.send("initialize", json!({"clientInfo": {"name": "larrier", "title": "Larrier", "version": version}, "capabilities": {"experimentalApi": true}}), Pending::Init);
+        live.send("initialize", json!({"clientInfo": {"name": "lary", "title": "Lary", "version": version}, "capabilities": {"experimentalApi": true}}), Pending::Init);
         live
     }
 
@@ -348,7 +348,7 @@ impl CodexLive {
                 let rule = p["proposedExecpolicyAmendment"].clone();
                 if let Some(prefix) = rule.as_array().filter(|a| !a.is_empty()) {
                     // The rule's command as the model wrote it, not its shell.
-                    let words = larrier_formats::codex::unwrap_argv(prefix);
+                    let words = lary_formats::codex::unwrap_argv(prefix);
                     let short: String = words.chars().take(48).collect();
                     let more = if short.len() < words.len() { "…" } else { "" };
                     req.options.push(opt("rule", &format!("Always allow `{short}{more}`"), "allow_always"));
@@ -451,8 +451,8 @@ impl CodexLive {
                 }
             }
             other => {
-                // Nothing Larrier can answer: say so rather than leave Codex waiting.
-                self.out.push(json!({"id": rpc, "error": {"code": -32601, "message": format!("Larrier doesn't handle {other}")}}).to_string());
+                // Nothing Lary can answer: say so rather than leave Codex waiting.
+                self.out.push(json!({"id": rpc, "error": {"code": -32601, "message": format!("Lary doesn't handle {other}")}}).to_string());
                 return;
             }
         };
@@ -557,7 +557,7 @@ impl CodexLive {
                 // is held back; finished ones are dropped.
                 let cut = acc.rfind('\n').map(|i| i + 1).unwrap_or(0);
                 let shown = if acc[cut..].trim_start().starts_with("::") { &acc[..cut] } else { &acc[..] };
-                let (text, _) = larrier_formats::codex::app_directives(shown);
+                let (text, _) = lary_formats::codex::app_directives(shown);
                 self.inner.stream_text(id, &text, false, sink);
             }
             "item/reasoning/summaryTextDelta" => {
@@ -664,7 +664,7 @@ impl CodexLive {
             "imageView" => {
                 if !completed {
                     let path = s(item, "path").unwrap_or("").to_string();
-                    let mut t = tool_of_kind(id.clone(), "view_image", larrier_core::ToolKind::Read, json!({"file_path": path}));
+                    let mut t = tool_of_kind(id.clone(), "view_image", lary_core::ToolKind::Read, json!({"file_path": path}));
                     t.status = ToolStatus::Completed;
                     sink.send(AgentEvent::ToolStart { tool: t });
                 }
@@ -984,10 +984,10 @@ fn field_value(prop: &Value, answer: &[String]) -> Option<Value> {
 mod tests {
     use super::*;
     use crate::request::Launch;
-    use larrier_core::{AgentKind, Protocol, RunMode};
+    use lary_core::{AgentKind, Protocol, RunMode};
 
     fn req(plan: bool) -> TurnRequest {
-        let mut modes = larrier_core::ModeSelection::default();
+        let mut modes = lary_core::ModeSelection::default();
         if plan {
             modes.ids = vec!["plan".into()];
         }
@@ -1016,7 +1016,7 @@ mod tests {
         }
     }
 
-    /// Replays a recorded app-server session: each event Larrier shows, and
+    /// Replays a recorded app-server session: each event Lary shows, and
     /// everything it wrote back (requests and replies).
     fn live(fixture: &str, plan: bool, mut answer: impl FnMut(&PermissionRequest) -> Option<TurnCommand>) -> (Vec<AgentEvent>, Vec<Value>) {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1156,7 +1156,7 @@ mod tests {
         }
         assert_eq!(steered, ["also this", "late"]);
         assert!(!p.finished());
-        // A message Larrier still holds (no turn yet) can be taken back; one
+        // A message Lary still holds (no turn yet) can be taken back; one
         // Codex has can't.
         p.take_output();
         let n = p.waiting.len();

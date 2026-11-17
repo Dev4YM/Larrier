@@ -1,4 +1,4 @@
-//! Inter, built into Larrier, so the interface reads the same on every
+//! Inter, built into Lary, so the interface reads the same on every
 //! system and stays crisp at small sizes. It works offline. It's the variable
 //! font (weight and optical size) for Latin, Latin Extended, Cyrillic and
 //! Greek; other scripts (Arabic…) use the system's fonts.

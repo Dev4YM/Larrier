@@ -1,4 +1,4 @@
-//! Larrier core: the unified session format (LSF), the agent catalog,
+//! Lary core: the unified session format (LSF), the agent catalog,
 //! configuration (harness accounts, workspaces) and the on-disk store.
 
 pub mod agent;
@@ -18,5 +18,5 @@ pub use lsf::{
 };
 pub use store::Store;
 
-pub const APP_NAME: &str = "Larrier";
+pub const APP_NAME: &str = "Lary";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

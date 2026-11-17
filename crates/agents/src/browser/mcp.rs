@@ -1,5 +1,5 @@
-//! `Larrier mcp-browser`: an MCP server on stdio that gives an agent
-//! Larrier's browser: the real browser views in Larrier's Browser tab, so
+//! `Lary mcp-browser`: an MCP server on stdio that gives an agent
+//! Lary's browser: the real browser views in Lary's Browser tab, so
 //! the user watches (and can use) the very pages the agent works in. The
 //! tools: tabs, navigate, computer (mouse, keys, screenshots), read_page and
 //! find (refs), form_input, page text, JavaScript, console and network logs,
@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use super::{address, control, view_running, view_target, Cdp};
 
-const INSTRUCTIONS: &str = "Larrier's browser: real browser tabs the user sees live in Larrier's Browser tab (logins and cookies persist). \
+const INSTRUCTIONS: &str = "Lary's browser: real browser tabs the user sees live in Lary's Browser tab (logins and cookies persist). \
 Start with tabs_context to get the tab ids. You work in tabs of your own (tabs_create opens one; tools without a tabId use yours, opening one if needed): the user watches them while you work and may unlock one to use it, which you're told about. The user's own tabs you can read; to act in one, tabs_reserve it first. \
 Read a page with read_page or find (they give elements refs like ref_12), get_page_text for articles, and computer to click, type, press keys, scroll and take screenshots. \
 Coordinates are the page's CSS pixels, the frame every screenshot reports. Prefer refs over coordinates when you have them.";
@@ -22,7 +22,7 @@ Coordinates are the page's CSS pixels, the frame every screenshot reports. Prefe
 /// What the tool server keeps between calls.
 struct Browser {
     cdp: Cdp,
-    /// Larrier tab → DevTools session.
+    /// Lary tab → DevTools session.
     sessions: HashMap<u64, String>,
     /// Console messages and network requests seen per tab.
     console: HashMap<u64, Vec<Value>>,
@@ -39,16 +39,16 @@ struct Browser {
     known: std::collections::HashSet<u64>,
     /// The agent's own tab it last worked in: where tools without a tabId act.
     current: Option<u64>,
-    /// The last of Larrier's notes about the agent's tabs already passed on.
+    /// The last of Lary's notes about the agent's tabs already passed on.
     seen: u64,
 }
 
-/// A tab as Larrier lists it.
+/// A tab as Lary lists it.
 struct TabInfo {
     id: u64,
     url: String,
     title: String,
-    /// Shown in Larrier.
+    /// Shown in Lary.
     shown: bool,
     /// Reserved for this agent.
     mine: bool,
@@ -77,7 +77,7 @@ pub fn serve() -> i32 {
             "initialize" => json!({"result": {
                 "protocolVersion": params["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "larrier-browser", "title": "Larrier browser", "version": env!("CARGO_PKG_VERSION")},
+                "serverInfo": {"name": "lary-browser", "title": "Lary browser", "version": env!("CARGO_PKG_VERSION")},
                 "instructions": INSTRUCTIONS,
             }}),
             "tools/list" => json!({"result": {"tools": tools()}}),
@@ -107,7 +107,7 @@ fn failed(t: impl Into<String>) -> Value {
     json!({"content": [{"type": "text", "text": t.into()}], "isError": true})
 }
 
-/// Larrier's browser, opened by Larrier if it isn't yet.
+/// Lary's browser, opened by Lary if it isn't yet.
 fn connect() -> Result<Cdp, String> {
     if view_running().is_none() {
         control::request(json!({"cmd": "ensure"}))?;
@@ -116,7 +116,7 @@ fn connect() -> Result<Cdp, String> {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
-    Cdp::connect(&view_running().ok_or("Larrier's browser didn't start.")?)
+    Cdp::connect(&view_running().ok_or("Lary's browser didn't start.")?)
 }
 
 /// Run a tool, reconnecting once if the browser went away.
@@ -167,7 +167,7 @@ fn call(browser: &mut Option<Browser>, name: &str, args: &Value) -> Value {
             }
         }
     }
-    failed("Larrier's browser isn't reachable.")
+    failed("Lary's browser isn't reachable.")
 }
 
 /// A tab's page, attached.
@@ -297,7 +297,7 @@ impl Browser {
         }
     }
 
-    /// The tabs as Larrier has them.
+    /// The tabs as Lary has them.
     fn tabs(&mut self) -> Result<Vec<TabInfo>, String> {
         let v = control::request(json!({"cmd": "tabs"}))?;
         let tabs: Vec<TabInfo> = v["tabs"]
@@ -360,11 +360,11 @@ impl Browser {
             .or_else(|| list.iter().find(|t| t.mine && t.shown).or_else(|| list.iter().find(|t| t.mine)).map(|t| t.id))
     }
 
-    /// Why tab `id` isn't there, if Larrier knows.
+    /// Why tab `id` isn't there, if Lary knows.
     fn why_gone(id: u64, listing: &Value) -> String {
         match listing["closed"].as_array().into_iter().flatten().rev().find(|c| c["id"].as_u64() == Some(id)) {
             Some(c) => format!("Tab {id} is gone: {} ({} ago).", c["why"].as_str().unwrap_or("it was closed"), ago(c["ago"].as_u64().unwrap_or(0))),
-            None => format!("Tab {id} isn't open (Larrier may have restarted; its tabs come back with the same ids when its chat's browser is shown)."),
+            None => format!("Tab {id} isn't open (Lary may have restarted; its tabs come back with the same ids when its chat's browser is shown)."),
         }
     }
 
@@ -396,7 +396,7 @@ impl Browser {
         self.notes.push(if list.is_empty() { "No tabs are open now.".into() } else { format!("Open tabs now: {}.", list.join(", ")) });
     }
 
-    /// The page target showing tab `id`: as Larrier knows it, or found by
+    /// The page target showing tab `id`: as Lary knows it, or found by
     /// asking the pages which tab they're in.
     fn target(&self, id: u64) -> Option<String> {
         let known = control::request(json!({"cmd": "tabs"})).ok().and_then(|v| {
@@ -406,10 +406,10 @@ impl Browser {
         known.or_else(|| view_target(&self.cdp, id))
     }
 
-    /// Open a tab in Larrier and wait until its page can be driven.
+    /// Open a tab in Lary and wait until its page can be driven.
     fn new_tab(&mut self, url: &str) -> Result<u64, String> {
         let v = control::request(json!({"cmd": "new_tab", "url": url}))?;
-        let id = v["id"].as_u64().ok_or("Larrier couldn't open a tab")?;
+        let id = v["id"].as_u64().ok_or("Lary couldn't open a tab")?;
         self.known.insert(id);
         let until = Instant::now() + Duration::from_secs(20);
         while Instant::now() < until {
@@ -848,7 +848,7 @@ fn run(b: &mut Browser, name: &str, a: &Value) -> Result<Value, String> {
             let data = b.shots.iter().find(|(i, _)| i == image).map(|(_, d)| d.clone()).ok_or(format!("No screenshot {image} (they expire after 20 more)."))?;
             let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
             let name = s("filename").unwrap_or("image.jpg").to_string();
-            let path = std::env::temp_dir().join(format!("larrier-upload-{}-{name}", std::process::id()));
+            let path = std::env::temp_dir().join(format!("lary-upload-{}-{name}", std::process::id()));
             std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
             let file = path.to_string_lossy().to_string();
             let t = b.tab(tab_id)?;
@@ -1032,7 +1032,7 @@ fn pick_options(t: &Tab, r: &str, value: &Value, v: &Value) -> Result<Value, Str
     let desc = v["desc"].as_str().unwrap_or(r).to_string();
     let mut picked = Vec::new();
     for w in &want {
-        let open = t.eval(&format!("(() => {{ const el = document.querySelector('[data-larrier-ref=\"' + {} + '\"]'); return !!el && el.getAttribute('aria-expanded') === 'true'; }})()", json!(r))).ok().and_then(|o| o.as_bool()).unwrap_or(false);
+        let open = t.eval(&format!("(() => {{ const el = document.querySelector('[data-lary-ref=\"' + {} + '\"]'); return !!el && el.getAttribute('aria-expanded') === 'true'; }})()", json!(r))).ok().and_then(|o| o.as_bool()).unwrap_or(false);
         if !open || typed {
             t.mouse("mouseMoved", x, y, "none", 0, 0)?;
             t.mouse("mousePressed", x, y, "left", 1, 0)?;
@@ -1078,7 +1078,7 @@ fn pick_options(t: &Tab, r: &str, value: &Value, v: &Value) -> Result<Value, Str
 fn set_files(t: &Tab, r: &str, files: &[String]) -> Result<(), String> {
     // The input may have been drawn again since its ref was given.
     t.eval(&format!("(() => {{ {} return !!byRef({}); }})()", A11Y_JS, json!(r)))?;
-    let obj = t.call("Runtime.evaluate", json!({"expression": format!("document.querySelector('[data-larrier-ref={}]')", json!(r))}))?;
+    let obj = t.call("Runtime.evaluate", json!({"expression": format!("document.querySelector('[data-lary-ref={}]')", json!(r))}))?;
     let oid = obj["result"]["objectId"].as_str().ok_or(format!("No element has {r}."))?;
     t.call("DOM.setFileInputFiles", json!({"files": files, "objectId": oid}))?;
     Ok(())
@@ -1199,9 +1199,9 @@ const A11Y_JS: &str = r#"
   // A ref for an element, with what it was (its role and name), so the
   // same element drawn again later (a re-render) is found again.
   const R = (el, r, n) => {
-    let ref = el.getAttribute('data-larrier-ref');
-    if (!ref) { window.__larrierRefN = (window.__larrierRefN || 0) + 1; ref = 'ref_' + window.__larrierRefN; el.setAttribute('data-larrier-ref', ref); }
-    (window.__larrierRefInfo = window.__larrierRefInfo || {})[ref] = { role: r || '', name: n || '', tag: el.tagName.toLowerCase() };
+    let ref = el.getAttribute('data-lary-ref');
+    if (!ref) { window.__laryRefN = (window.__laryRefN || 0) + 1; ref = 'ref_' + window.__laryRefN; el.setAttribute('data-lary-ref', ref); }
+    (window.__laryRefInfo = window.__laryRefInfo || {})[ref] = { role: r || '', name: n || '', tag: el.tagName.toLowerCase() };
     return ref;
   };
   const clean = (t, n) => (t || '').replace(/\s+/g, ' ').trim().slice(0, n || 100);
@@ -1244,7 +1244,7 @@ const A11Y_JS: &str = r#"
     const a = el.getAttribute('aria-label'); if (a) return clean(a);
     // A label wrapping its control holds the control's own text too (a
     // select's options): only the label's words.
-    if (el.labels && el.labels.length) { el.setAttribute('data-larrier-self', ''); const c = el.labels[0].cloneNode(true); el.removeAttribute('data-larrier-self'); c.querySelectorAll('[data-larrier-self], select, textarea').forEach(n => n.remove()); const lt = clean(c.textContent); if (lt) return lt; }
+    if (el.labels && el.labels.length) { el.setAttribute('data-lary-self', ''); const c = el.labels[0].cloneNode(true); el.removeAttribute('data-lary-self'); c.querySelectorAll('[data-lary-self], select, textarea').forEach(n => n.remove()); const lt = clean(c.textContent); if (lt) return lt; }
     const alt = el.getAttribute('alt') || el.getAttribute('title') || el.getAttribute('placeholder'); if (alt) return clean(alt);
     if (r === 'textbox' || r === 'searchbox' || r === 'combobox' || r === 'listbox' || r === 'spinbutton' || r === 'slider') return '';
     if (['link', 'button', 'heading', 'tab', 'menuitem', 'option', 'label', 'cell', 'columnheader', 'listitem', 'generic-clickable', 'checkbox', 'radio'].includes(r)) return clean(el.innerText || el.value);
@@ -1267,14 +1267,14 @@ const A11Y_JS: &str = r#"
   // The element a ref names: the one marked with it, else (the page drew it
   // again) the one element with the same tag, role and name, marked anew.
   const byRef = (ref) => {
-    const el = document.querySelector('[data-larrier-ref="' + ref + '"]');
+    const el = document.querySelector('[data-lary-ref="' + ref + '"]');
     if (el) return el;
-    const info = (window.__larrierRefInfo || {})[ref];
+    const info = (window.__laryRefInfo || {})[ref];
     if (!info || (!info.name && !info.role)) return null;
-    const same = [...document.body.querySelectorAll(info.tag || '*')].filter(e => !e.hasAttribute('data-larrier-ref') && role(e) === info.role && name(e, info.role) === info.name);
+    const same = [...document.body.querySelectorAll(info.tag || '*')].filter(e => !e.hasAttribute('data-lary-ref') && role(e) === info.role && name(e, info.role) === info.name);
     const seen = same.filter(shown);
     const pick = seen.length === 1 ? seen[0] : (same.length === 1 ? same[0] : null);
-    if (pick) pick.setAttribute('data-larrier-ref', ref);
+    if (pick) pick.setAttribute('data-lary-ref', ref);
     return pick;
   };
 "#;
@@ -1425,7 +1425,7 @@ fn tools() -> Value {
     let ro = json!({"readOnlyHint": true, "openWorldHint": true});
     let act = json!({"readOnlyHint": false, "destructiveHint": false, "openWorldHint": true});
     json!([
-        {"name": "tabs_context", "description": "List the tabs in this chat's browser in Larrier: yours (reserved for you) and the user's. Call it first to get tab ids.", "inputSchema": {"type": "object", "properties": {"createIfEmpty": {"type": "boolean"}}}, "annotations": ro},
+        {"name": "tabs_context", "description": "List the tabs in this chat's browser in Lary: yours (reserved for you) and the user's. Call it first to get tab ids.", "inputSchema": {"type": "object", "properties": {"createIfEmpty": {"type": "boolean"}}}, "annotations": ro},
         {"name": "tabs_create", "description": "Open a new tab of your own (optionally at a URL) and return its id. The user watches your tabs while you work and can unlock one to use it; you're told when they do.", "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}}, "annotations": act},
         {"name": "tabs_reserve", "description": "Make one of the user's tabs yours, to act in it (navigate, click, type). Reading a tab needs no reservation.", "inputSchema": obj(json!({}), &["tabId"]), "annotations": act},
         {"name": "tabs_release", "description": "Give a tab of yours back to the user.", "inputSchema": obj(json!({}), &["tabId"]), "annotations": act},

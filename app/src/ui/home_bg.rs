@@ -4,7 +4,7 @@
 //! to switch between.
 
 use dioxus::prelude::*;
-use larrier_core::config::{BgEffect, HomeBackground, Wallpaper};
+use lary_core::config::{BgEffect, HomeBackground, Wallpaper};
 
 use super::Select;
 use crate::icons::{Icon, I};
@@ -116,7 +116,7 @@ pub fn input_style(bg: &HomeBackground) -> String {
     format!("--hb-blur: {blur}px; --hb-solid: {}%;", if blur == 0 { 100 } else { 60 })
 }
 
-/// Copy a picked picture into Larrier's folder; returns its path.
+/// Copy a picked picture into Lary's folder; returns its path.
 async fn pick_picture() -> Option<String> {
     let f = rfd::AsyncFileDialog::new().add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif"]).pick_file().await?;
     let ext = f.path().extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| "png".into());
@@ -127,8 +127,8 @@ async fn pick_picture() -> Option<String> {
     Some(dest.to_string_lossy().to_string())
 }
 
-/// Delete a picture Larrier copied once nothing uses it any more.
-fn forget_picture(path: &str, s: &larrier_core::Settings) {
+/// Delete a picture Lary copied once nothing uses it any more.
+fn forget_picture(path: &str, s: &lary_core::Settings) {
     let used = s.home_bg.image == path || s.wallpapers.iter().any(|w| w.look.image == path);
     let ours = std::path::Path::new(path).starts_with(store().root().join("wallpapers"));
     if !used && ours {

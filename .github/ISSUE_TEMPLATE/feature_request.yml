@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest something Larrier should do.
+description: Suggest something Lary should do.
 labels: [enhancement]
 body:
   - type: textarea

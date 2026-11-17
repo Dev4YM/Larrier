@@ -1,4 +1,4 @@
-//! Spelling: the red underlines in Larrier's text boxes and the
+//! Spelling: the red underlines in Lary's text boxes and the
 //! corrections in their right-click menu. Latin-script words are checked
 //! with Hunspell, the engine Chrome's spelling is built on, and the English
 //! dictionary from SCOWL (app/dict/en, the word list Chrome's English
@@ -38,7 +38,7 @@ fn latin(word: &str) -> bool {
 
 /// Words the user added ("Add to Dictionary"), one per line.
 fn user_file() -> std::path::PathBuf {
-    larrier_core::store::data_root().join("dictionary.txt")
+    lary_core::store::data_root().join("dictionary.txt")
 }
 
 fn user_words() -> Vec<String> {
@@ -126,7 +126,7 @@ pub fn suggest(word: &str) -> Option<Vec<String>> {
     imp::suggest(word)
 }
 
-/// Teach the checkers a word (Larrier's own word list, and Windows' for the
+/// Teach the checkers a word (Lary's own word list, and Windows' for the
 /// scripts it checks), so it stops being underlined.
 pub fn add(word: &str) -> bool {
     let w = plain(word);

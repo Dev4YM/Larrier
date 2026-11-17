@@ -1,19 +1,19 @@
 [package]
-name = "larrier-app"
-description = "Larrier: one desktop app for every coding agent and AI chat"
+name = "lary-app"
+description = "Lary: one desktop app for every coding agent and AI chat"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "larrier-desktop"
+name = "lary-desktop"
 path = "src/main.rs"
 
 [dependencies]
-larrier-core.workspace = true
-larrier-formats.workspace = true
-larrier-agents.workspace = true
+lary-core.workspace = true
+lary-formats.workspace = true
+lary-agents.workspace = true
 dioxus.workspace = true
 anyhow.workspace = true
 serde.workspace = true

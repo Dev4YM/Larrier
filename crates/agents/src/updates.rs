@@ -7,7 +7,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context};
-use larrier_core::AgentKind;
+use lary_core::AgentKind;
 
 /// Where an agent's releases are published.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,7 +42,7 @@ pub struct Versions {
     pub update: Option<Update>,
 }
 
-/// What Larrier knows of an agent's versions (`None`: it can't tell).
+/// What Lary knows of an agent's versions (`None`: it can't tell).
 pub fn of(kind: &AgentKind) -> Option<Versions> {
     use AgentKind as A;
     let (source, update) = match kind {
@@ -97,7 +97,7 @@ pub fn source_label(s: &Source) -> String {
 pub async fn latest(kind: &AgentKind) -> anyhow::Result<String> {
     let v = of(kind).ok_or_else(|| anyhow!("no known source"))?;
     let client = reqwest::Client::builder()
-        .user_agent(concat!("Larrier/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Lary/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(20))
         .build()?;
     let json = |url: String| {
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn npm_installs_are_known_by_their_package() {
-        let dir = std::env::temp_dir().join(format!("larrier-npm-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lary-npm-{}", std::process::id()));
         let pkg = dir.join("node_modules").join("@openai").join("codex");
         std::fs::create_dir_all(&pkg).unwrap();
         assert!(from_npm(&dir.join("codex.ps1"), "@openai/codex"));

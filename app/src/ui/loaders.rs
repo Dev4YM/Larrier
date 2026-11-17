@@ -1,4 +1,4 @@
-//! Larrier's loaders, one set for the whole app:
+//! Lary's loaders, one set for the whole app:
 //!
 //! - [`Orbit`]: a tool at work (a command running, a file being written),
 //!   a chat at work (sidebar, tabs), and anything loading.

@@ -1,9 +1,9 @@
 //! The window's menu bar: app mark, File / Edit / View / Help, drag area and
-//! caption buttons, drawn by Larrier itself (the window has no system frame).
+//! caption buttons, drawn by Lary itself (the window has no system frame).
 
 use dioxus::prelude::*;
-use larrier_core::Theme;
-use larrier_formats::ExportFormat;
+use lary_core::Theme;
+use lary_formats::ExportFormat;
 
 use super::{open_tool, zoom, DragRegion, WindowControls};
 use crate::state::{use_app, App, RightTab, SettingsTab, View};
@@ -12,8 +12,8 @@ use crate::state::{use_app, App, RightTab, SettingsTab, View};
 pub fn edit_command(cmd: &str) {
     let js = match cmd {
         "paste" => return paste_into_focused(),
-        "selectAll" => "const el = window.__larrierCtx || document.activeElement; if (el && el.select) { el.focus(); el.select(); } else { document.execCommand('selectAll'); }".to_string(),
-        other => format!("(window.__larrierCtx || document.activeElement)?.focus?.(); document.execCommand('{other}');"),
+        "selectAll" => "const el = window.__laryCtx || document.activeElement; if (el && el.select) { el.focus(); el.select(); } else { document.execCommand('selectAll'); }".to_string(),
+        other => format!("(window.__laryCtx || document.activeElement)?.focus?.(); document.execCommand('{other}');"),
     };
     document::eval(&js);
 }
@@ -23,7 +23,7 @@ pub fn edit_command(cmd: &str) {
 pub fn paste_into_focused() {
     let text = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
     let js = format!(
-        "const el = window.__larrierCtx || document.activeElement; if (el) {{ el.focus(); document.execCommand('insertText', false, {}); }}",
+        "const el = window.__laryCtx || document.activeElement; if (el) {{ el.focus(); document.execCommand('insertText', false, {}); }}",
         serde_json::to_string(&text).unwrap_or_default()
     );
     document::eval(&js);
@@ -39,9 +39,9 @@ pub fn system_menu() -> dioxus::desktop::muda::Menu {
     let sep = P::separator;
     let menu = |title: &str, items: &[&dyn dioxus::desktop::muda::IsMenuItem]| Submenu::with_items(title, true, items).expect("menu");
     let app = menu(
-        "Larrier",
+        "Lary",
         &[
-            &item("about", "About Larrier", None),
+            &item("about", "About Lary", None),
             &sep(),
             &item("settings", "Settings…", Some((cmd, Code::Comma))),
             &sep(),
@@ -51,7 +51,7 @@ pub fn system_menu() -> dioxus::desktop::muda::Menu {
             &P::hide_others(None),
             &P::show_all(None),
             &sep(),
-            &item("quit", "Quit Larrier", Some((cmd, Code::KeyQ))),
+            &item("quit", "Quit Lary", Some((cmd, Code::KeyQ))),
         ],
     );
     let file = menu(
@@ -86,7 +86,7 @@ pub fn system_menu() -> dioxus::desktop::muda::Menu {
     let window = menu("Window", &[&P::minimize(None), &P::maximize(None), &sep(), &P::bring_all_to_front(None)]);
     let help = menu(
         "Help",
-        &[&item("docs", "Documentation", None), &item("spec", "Larrier Session Format", None), &item("shortcuts", "Keyboard Shortcuts", None), &sep(), &item("issue", "Report an Issue", None)],
+        &[&item("docs", "Documentation", None), &item("spec", "Lary Session Format", None), &item("shortcuts", "Keyboard Shortcuts", None), &sep(), &item("issue", "Report an Issue", None)],
     );
     #[cfg(target_os = "macos")]
     {
@@ -194,14 +194,14 @@ fn run(mut app: App, c: Cmd) {
         Cmd::Automations => app.navigate(View::Automations),
         Cmd::Customize => app.navigate(View::Customize),
         Cmd::Docs => {
-            let _ = open::that("https://github.com/Dev4YM/Larrier#readme");
+            let _ = open::that("https://github.com/Dev4YM/Lary#readme");
         }
         Cmd::Spec => {
-            let _ = open::that("https://github.com/Dev4YM/Larrier/blob/main/docs/LSF.md");
+            let _ = open::that("https://github.com/Dev4YM/Lary/blob/main/docs/LSF.md");
         }
         Cmd::Shortcuts => app.open_settings(SettingsTab::Shortcuts),
         Cmd::Issue => {
-            let _ = open::that("https://github.com/Dev4YM/Larrier/issues/new");
+            let _ = open::that("https://github.com/Dev4YM/Lary/issues/new");
         }
         Cmd::About => app.open_settings(SettingsTab::About),
     }
@@ -261,11 +261,11 @@ fn entries(menu: &str) -> Vec<Entry> {
         ],
         _ => vec![
             Some(("Documentation", "", Cmd::Docs)),
-            Some(("Larrier Session Format", "", Cmd::Spec)),
+            Some(("Lary Session Format", "", Cmd::Spec)),
             Some(("Keyboard Shortcuts", "", Cmd::Shortcuts)),
             None,
             Some(("Report an Issue", "", Cmd::Issue)),
-            Some(("About Larrier", "", Cmd::About)),
+            Some(("About Lary", "", Cmd::About)),
         ],
     }
 }
@@ -286,7 +286,7 @@ pub fn MenuBar() -> Element {
     rsx! {
         div { class: if crate::platform::SYSTEM_MENU_BAR { "menubar system" } else { "menubar" },
             if !crate::platform::SYSTEM_MENU_BAR {
-                div { class: "app-mark", title: "Larrier",
+                div { class: "app-mark", title: "Lary",
                     span { class: "mark ink", dangerous_inner_html: crate::logo::MARK_SVG }
                     span { class: "mark paper", dangerous_inner_html: crate::logo::MARK_LIGHT_SVG }
                 }

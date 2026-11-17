@@ -2,7 +2,7 @@
 //! models), source control, sessions/import, workspaces, shortcuts, about.
 
 use dioxus::prelude::*;
-use larrier_core::{
+use lary_core::{
     agent::catalog, config::CustomAgent, secrets, Account, AccountAuth, AgentKind, Protocol, RunMode,
 };
 
@@ -69,7 +69,7 @@ pub fn SettingsNav() -> Element {
                             }
                         }
                     }
-                    button { class: "nav-row", onclick: move |_| { let _ = open::that("https://github.com/Dev4YM/Larrier#readme"); },
+                    button { class: "nav-row", onclick: move |_| { let _ = open::that("https://github.com/Dev4YM/Lary#readme"); },
                         span { class: "ic", Icon { i: I::File, size: 16, stroke: 1.5 } }
                         "Docs"
                         span { class: "faint", Icon { i: I::ArrowUpRight, size: 11 } }
@@ -140,10 +140,10 @@ fn General() -> Element {
             Row { title: "Tips".to_string(), desc: Some("Show rotating tips on the new agent screen.".to_string()),
                 Toggle { on: s.show_tips, onchange: move |v| app.update_config(|c| c.settings.show_tips = v) }
             }
-            Row { title: "Window Restoration".to_string(), desc: Some("Reopen Larrier with the same size and position.".to_string()),
+            Row { title: "Window Restoration".to_string(), desc: Some("Reopen Lary with the same size and position.".to_string()),
                 Toggle { on: s.restore_window, onchange: move |v| app.update_config(|c| c.settings.restore_window = v) }
             }
-            Row { title: "Import Sessions on Startup".to_string(), desc: Some("Pull new conversations from every installed agent when Larrier opens.".to_string()),
+            Row { title: "Import Sessions on Startup".to_string(), desc: Some("Pull new conversations from every installed agent when Lary opens.".to_string()),
                 Toggle { on: s.auto_import, onchange: move |v| app.update_config(|c| c.settings.auto_import = v) }
             }
         }
@@ -152,7 +152,7 @@ fn General() -> Element {
             Row { title: "System Notifications".to_string(), desc: Some("Show a system notification when an agent finishes or needs attention.".to_string()),
                 Toggle { on: s.notify_on_finish, onchange: move |v| app.update_config(|c| c.settings.notify_on_finish = v) }
             }
-            Row { title: "System Tray Icon".to_string(), desc: Some("Show Larrier in the system tray.".to_string()),
+            Row { title: "System Tray Icon".to_string(), desc: Some("Show Lary in the system tray.".to_string()),
                 Toggle { on: s.tray_icon, onchange: move |v| app.update_config(|c| c.settings.tray_icon = v) }
             }
             Row { title: "Completion Sound".to_string(), desc: Some("Play a sound when agents finish or need attention.".to_string()),
@@ -175,7 +175,7 @@ fn AgentSettings() -> Element {
     let mut app = use_app();
     let s = app.config.read().settings.clone();
     let seg = |on: bool| if on { "on" } else { "" };
-    let agent_opts: Vec<(String, String)> = larrier_core::agent::runnable().map(|sp| (sp.kind.id(), sp.name.to_string())).collect();
+    let agent_opts: Vec<(String, String)> = lary_core::agent::runnable().map(|sp| (sp.kind.id(), sp.name.to_string())).collect();
     let send_keys = crate::platform::keys("Ctrl+Enter");
     rsx! {
         h1 { "Agents" }
@@ -212,9 +212,9 @@ fn AgentSettings() -> Element {
                 desc: Some(format!("{}. {send_keys} does the other of steer and queue (it never stops the agent). Agents that can't read messages mid-turn get them queued.", s.busy_send.description())),
                 super::Select {
                     value: format!("{:?}", s.busy_send),
-                    options: larrier_core::BusySend::ALL.iter().map(|b| (format!("{b:?}"), b.label().to_string())).collect(),
+                    options: lary_core::BusySend::ALL.iter().map(|b| (format!("{b:?}"), b.label().to_string())).collect(),
                     onchange: move |v: String| {
-                        if let Some(b) = larrier_core::BusySend::ALL.into_iter().find(|b| format!("{b:?}") == v) {
+                        if let Some(b) = lary_core::BusySend::ALL.into_iter().find(|b| format!("{b:?}") == v) {
                             app.update_config(move |c| c.settings.busy_send = b);
                         }
                     },
@@ -223,16 +223,16 @@ fn AgentSettings() -> Element {
         }
         div { class: "set-group-title", "Running" }
         div { class: "set-card",
-            if larrier_agents::browser::SUPPORTED {
-                Row { title: "Browser for Agents".to_string(), desc: Some("Claude Code, Codex and agents connected over ACP can open pages, click, type and take screenshots in Larrier's browser, which you watch in the Browser tab.".to_string()),
+            if lary_agents::browser::SUPPORTED {
+                Row { title: "Browser for Agents".to_string(), desc: Some("Claude Code, Codex and agents connected over ACP can open pages, click, type and take screenshots in Lary's browser, which you watch in the Browser tab.".to_string()),
                     Toggle { on: s.browser_tools, onchange: move |v| app.update_config(|c| c.settings.browser_tools = v) }
                 }
             } else {
-                Row { title: "Browser for Agents".to_string(), desc: Some("Windows only for now: agents drive Larrier's browser through its DevTools port, which this system's web engine doesn't have. The Browser tab is yours to browse in.".to_string()),
+                Row { title: "Browser for Agents".to_string(), desc: Some("Windows only for now: agents drive Lary's browser through its DevTools port, which this system's web engine doesn't have. The Browser tab is yours to browse in.".to_string()),
                     span { class: "faint", "Not available" }
                 }
             }
-            Row { title: "Continue Interrupted Agents".to_string(), desc: Some("Offer to resume agents that were running when Larrier closed.".to_string()),
+            Row { title: "Continue Interrupted Agents".to_string(), desc: Some("Offer to resume agents that were running when Lary closed.".to_string()),
                 Toggle { on: s.continue_interrupted, onchange: move |v| app.update_config(|c| c.settings.continue_interrupted = v) }
             }
         }
@@ -268,10 +268,10 @@ fn SourceControl() -> Element {
     let app = use_app();
     let s = app.config.read().settings.clone();
     let gh = use_resource(|| async {
-        tokio::task::spawn_blocking(|| larrier_agents::detect::which_program("gh").is_some()).await.unwrap_or(false)
+        tokio::task::spawn_blocking(|| lary_agents::detect::which_program("gh").is_some()).await.unwrap_or(false)
     });
     let git = use_resource(|| async {
-        tokio::task::spawn_blocking(|| larrier_agents::detect::which_program("git").is_some()).await.unwrap_or(false)
+        tokio::task::spawn_blocking(|| lary_agents::detect::which_program("git").is_some()).await.unwrap_or(false)
     });
     let dir = s.worktrees_dir.clone().unwrap_or_else(|| store().worktrees_dir().to_string_lossy().to_string());
     rsx! {
@@ -379,7 +379,7 @@ fn Harnesses() -> Element {
 }
 
 /// What a harness runs as, in a few words.
-fn runs_as(cfg: &larrier_core::Config, kind: &AgentKind) -> String {
+fn runs_as(cfg: &lary_core::Config, kind: &AgentKind) -> String {
     let list = cfg.accounts_for(kind);
     match (list.len(), cfg.default_account(kind)) {
         (0, _) if *kind == AgentKind::Chat => "No API account yet".into(),
@@ -401,7 +401,7 @@ fn HarnessList() -> Element {
     let mut show_more = crate::keep::use_kept(crate::keep::WINDOW, "harnesses.more", || false);
     rsx! {
         h1 { "Harnesses" }
-        div { class: "sub", "What runs your chats: Larrier Chat and the coding agents on this computer, each with the accounts it runs as." }
+        div { class: "sub", "What runs your chats: Lary Chat and the coding agents on this computer, each with the accounts it runs as." }
         div { class: "set-card hn-list",
             HarnessRow { kind: AgentKind::Chat }
             for k in have {
@@ -514,7 +514,7 @@ fn HarnessPage(kind: AgentKind) -> Element {
         _ => spec.name.to_string(),
     };
     let line = if chat {
-        "Larrier's own chat: talks to model APIs itself, on your API accounts.".to_string()
+        "Lary's own chat: talks to model APIs itself, on your API accounts.".to_string()
     } else if custom {
         "A custom agent: a command of your own.".to_string()
     } else {
@@ -598,9 +598,9 @@ fn VersionPanel(kind: AgentKind) -> Element {
     let newer = crate::agent_versions::update_to(&app, &kind);
     let latest = crate::agent_versions::LATEST.read().get(&id).cloned();
     let checking = crate::agent_versions::CHECKING();
-    let versions = larrier_agents::updates::of(&kind);
+    let versions = lary_agents::updates::of(&kind);
     let update_cmd = if installed { crate::agent_versions::step(&app, &kind, false) } else { None };
-    let install_cmd = if installed { None } else { larrier_agents::updates::install_step(&kind) };
+    let install_cmd = if installed { None } else { lary_agents::updates::install_step(&kind) };
     let (k1, k2) = (kind.clone(), kind.clone());
     rsx! {
         div { class: "set-card ad-card",
@@ -636,7 +636,7 @@ fn VersionPanel(kind: AgentKind) -> Element {
                             div { class: "grow" }
                             button { class: "ghost-btn sm", disabled: checking, onclick: move |_| crate::agent_versions::check_now(), "Check now" }
                         }
-                        div { class: "h", "From {larrier_agents::updates::source_label(&vs.source)}" }
+                        div { class: "h", "From {lary_agents::updates::source_label(&vs.source)}" }
                     }
                 }
             }
@@ -651,7 +651,7 @@ fn VersionPanel(kind: AgentKind) -> Element {
                                 if let Some(v) = &newer { "Update to v{v}" } else { "Update" }
                             }
                         }
-                        div { class: "h", "As {spec.vendor} says to update it; Larrier runs it and shows what it prints." }
+                        div { class: "h", "As {spec.vendor} says to update it; Lary runs it and shows what it prints." }
                     }
                 }
             }
@@ -663,7 +663,7 @@ fn VersionPanel(kind: AgentKind) -> Element {
                             span { class: "cmd mono", title: "{c.shown}", "{c.shown}" }
                             button { class: "primary-btn", disabled: running, onclick: move |_| crate::agent_versions::run(app, k2.clone(), true), "Install" }
                         }
-                        div { class: "h", "Its official installer; Larrier runs it and shows what it prints." }
+                        div { class: "h", "Its official installer; Lary runs it and shows what it prints." }
                     }
                 }
             }
@@ -812,7 +812,7 @@ fn AccountRow(a: Account, only: bool) -> Element {
             _ => (String::new(), true),
         }
     };
-    let can_check = api.as_ref().is_some_and(|x| x.api != larrier_core::ApiKind::Service && !x.url().is_empty());
+    let can_check = api.as_ref().is_some_and(|x| x.api != lary_core::ApiKind::Service && !x.url().is_empty());
     let is_default = only || a.is_default;
     let icon = match a.auth {
         AccountAuth::Api(_) | AccountAuth::ApiKey { .. } => I::Key,
@@ -863,7 +863,7 @@ fn AccountRow(a: Account, only: bool) -> Element {
                                 checking.set(true);
                                 checked.set(None);
                                 spawn(async move {
-                                    let r = larrier_agents::drivers::chat::check_api(x.api, &x.url(), k.as_deref()).await;
+                                    let r = lary_agents::drivers::chat::check_api(x.api, &x.url(), k.as_deref()).await;
                                     checking.set(false);
                                     checked.set(Some(r.map(|list| match list.len() {
                                         0 => "Works".to_string(),
@@ -903,14 +903,14 @@ fn AccountRow(a: Account, only: bool) -> Element {
 }
 
 /// Everything an API account holds (in its Edit dialog): its name, which API,
-/// its address, its key and (for Larrier Chat) the models it offers.
+/// its address, its key and (for Lary Chat) the models it offers.
 #[component]
-pub fn ApiEditor(a: Account, api: larrier_core::ApiAccount) -> Element {
+pub fn ApiEditor(a: Account, api: lary_core::ApiAccount) -> Element {
     let app = use_app();
     let spec = a.agent.spec();
     let chat = a.agent == AgentKind::Chat;
     let mut key = use_signal(String::new);
-    let kinds = larrier_agents::request::api_kinds(&a.agent);
+    let kinds = lary_agents::request::api_kinds(&a.agent);
     let saved = api.secret_ref.as_deref().and_then(secrets::get).filter(|k| !k.trim().is_empty()).map(|k| secrets::mask(&k));
     let [i1, i2, i3, i4, i5] = [a.id.clone(), a.id.clone(), a.id.clone(), a.id.clone(), a.id.clone()];
     let r_default = api.secret_ref.clone().unwrap_or_else(|| format!("account:{}", a.id));
@@ -924,7 +924,7 @@ pub fn ApiEditor(a: Account, api: larrier_core::ApiAccount) -> Element {
                 super::Select {
                     value: var,
                     options: spec.key_env.iter().map(|v| (v.to_string(), v.to_string())).collect::<Vec<_>>(),
-                    onchange: move |v: String| edit_account(app, i2.clone(), move |x| if let AccountAuth::Api(p) = &mut x.auth { p.api = larrier_core::ApiKind::for_variable(&v); p.env_var = Some(v); }),
+                    onchange: move |v: String| edit_account(app, i2.clone(), move |x| if let AccountAuth::Api(p) = &mut x.auth { p.api = lary_core::ApiKind::for_variable(&v); p.env_var = Some(v); }),
                 }
             } else {
                 if kinds.len() > 1 {
@@ -933,7 +933,7 @@ pub fn ApiEditor(a: Account, api: larrier_core::ApiAccount) -> Element {
                         value: api.api.id().to_string(),
                         options: kinds.iter().map(|k| (k.id().to_string(), k.label().to_string())).collect::<Vec<_>>(),
                         onchange: move |v: String| {
-                            if let Some(k) = larrier_core::ApiKind::from_id(&v) {
+                            if let Some(k) = lary_core::ApiKind::from_id(&v) {
                                 edit_account(app, i2.clone(), move |x| if let AccountAuth::Api(p) = &mut x.auth { p.api = k; });
                             }
                         },
@@ -1002,7 +1002,7 @@ fn Sessions() -> Element {
     };
     rsx! {
         h1 { "Sessions & Import" }
-        div { class: "sub", "Every conversation is stored in the Larrier Session Format (LSF) — one portable file per session that any agent can continue." }
+        div { class: "sub", "Every conversation is stored in the Lary Session Format (LSF) — one portable file per session that any agent can continue." }
         div { class: "set-card",
             Row { title: "Live sync".to_string(), desc: Some(format!("Sessions you run in a terminal, an IDE or another app update here as they change. {live_status}")),
                 Toggle { on: live_on, onchange: move |v: bool| {
@@ -1039,13 +1039,13 @@ fn Sessions() -> Element {
                 }
             }
         }
-        div { class: "set-group-title", "Larrier Session Format" }
+        div { class: "set-group-title", "Lary Session Format" }
         div { class: "set-card",
             div { class: "set-row top",
                 div { class: "lbl",
                     div { class: "d", style: "line-height: 1.6",
                         "A session is a JSON Lines file: a header line (id, title, agent, model, workspace, environment, native ids per agent) followed by one line per message. Messages carry typed parts — text, reasoning, tool calls with inputs, outputs and file diffs, plans, images, files and notices — plus usage and cost. "
-                        "When you continue a session with a different agent, Larrier writes a native resumable session for agents that support it (Claude Code, Codex, Gemini CLI, Pi) and hands the transcript over as context for the rest."
+                        "When you continue a session with a different agent, Lary writes a native resumable session for agents that support it (Claude Code, Codex, Gemini CLI, Pi) and hands the transcript over as context for the rest."
                     }
                 }
             }
@@ -1071,7 +1071,7 @@ fn Workspaces() -> Element {
                     div { class: "lbl",
                         div { class: "t", "{w.name}" }
                         div { class: "d",
-                            "{larrier_core::lsf::short_path(&w.path)}"
+                            "{lary_core::lsf::short_path(&w.path)}"
                             if !w.folders.is_empty() { " · {w.folders.len() + 1} folders" }
                         }
                     }
@@ -1136,7 +1136,7 @@ fn Shortcuts() -> Element {
 fn About() -> Element {
     let mut app = use_app();
     let kind = crate::install::current();
-    let mode = if app.config.read().settings.auto_update { app.config.read().settings.updates } else { larrier_core::UpdateMode::Off };
+    let mode = if app.config.read().settings.auto_update { app.config.read().settings.updates } else { lary_core::UpdateMode::Off };
     let channel = app.config.read().settings.update_channel;
     let built = match (crate::version::COMMIT, crate::version::COMMIT_DATE) {
         ("" | "unknown", _) => None,
@@ -1157,19 +1157,19 @@ fn About() -> Element {
     let installed = matches!(kind, crate::install::Kind::Installed(_));
     let can_update = !matches!(kind, crate::install::Kind::Dev);
     let status = match &upd {
-        crate::state::UpdateState::Idle => "Updates come from Larrier's releases on GitHub.".to_string(),
+        crate::state::UpdateState::Idle => "Updates come from Lary's releases on GitHub.".to_string(),
         crate::state::UpdateState::Checking => "Checking…".to_string(),
-        crate::state::UpdateState::UpToDate => format!("Larrier {} is the newest {}.", crate::version::VERSION, if channel == larrier_core::UpdateChannel::Preview { "release or preview" } else { "release" }),
-        crate::state::UpdateState::Available(r) => format!("Larrier {} is available.", r.version),
+        crate::state::UpdateState::UpToDate => format!("Lary {} is the newest {}.", crate::version::VERSION, if channel == lary_core::UpdateChannel::Preview { "release or preview" } else { "release" }),
+        crate::state::UpdateState::Available(r) => format!("Lary {} is available.", r.version),
         crate::state::UpdateState::Downloading { version, got, total } => {
             let pct = if *total > 0 { got * 100 / total } else { 0 };
-            format!("Downloading Larrier {version}… {pct}%")
+            format!("Downloading Lary {version}… {pct}%")
         }
-        crate::state::UpdateState::Ready { version, .. } => format!("Larrier {version} is ready: restart to finish."),
+        crate::state::UpdateState::Ready { version, .. } => format!("Lary {version} is ready: restart to finish."),
         crate::state::UpdateState::Failed(e) => e.clone(),
     };
     rsx! {
-        h1 { "Larrier" }
+        h1 { "Lary" }
         div { class: "sub", "One window for every coding agent and AI chat." }
         div { class: "set-card",
             Row { title: "Version".to_string(), desc: built,
@@ -1205,29 +1205,29 @@ fn About() -> Element {
             }
             if can_update {
                 Row { title: "Update channel".to_string(), desc: Some("Stable gets releases. Preview also gets previews of the next release as soon as they're out.".to_string()),
-                    super::Select { value: if channel == larrier_core::UpdateChannel::Preview { "preview".to_string() } else { "stable".to_string() },
+                    super::Select { value: if channel == lary_core::UpdateChannel::Preview { "preview".to_string() } else { "stable".to_string() },
                         options: vec![("stable".to_string(), "Stable".to_string()), ("preview".to_string(), "Preview".to_string())],
                         onchange: move |v: String| {
-                            let c = if v == "preview" { larrier_core::UpdateChannel::Preview } else { larrier_core::UpdateChannel::Stable };
+                            let c = if v == "preview" { lary_core::UpdateChannel::Preview } else { lary_core::UpdateChannel::Stable };
                             app.update_config(|cfg| cfg.settings.update_channel = c);
                             app.check_updates(false);
                         },
                     }
                 }
-                Row { title: "Updates".to_string(), desc: Some(format!("{} Larrier looks when it starts, then every 10 minutes.", mode.description())),
+                Row { title: "Updates".to_string(), desc: Some(format!("{} Lary looks when it starts, then every 10 minutes.", mode.description())),
                     super::Select {
                         value: format!("{mode:?}"),
-                        options: larrier_core::UpdateMode::ALL.iter().map(|m| (format!("{m:?}"), m.label().to_string())).collect(),
+                        options: lary_core::UpdateMode::ALL.iter().map(|m| (format!("{m:?}"), m.label().to_string())).collect(),
                         wide: true,
                         onchange: move |v: String| {
-                            if let Some(m) = larrier_core::UpdateMode::ALL.into_iter().find(|m| format!("{m:?}") == v) {
+                            if let Some(m) = lary_core::UpdateMode::ALL.into_iter().find(|m| format!("{m:?}") == v) {
                                 app.update_config(move |c| {
                                     c.settings.updates = m;
-                                    c.settings.auto_update = m != larrier_core::UpdateMode::Off;
+                                    c.settings.auto_update = m != lary_core::UpdateMode::Off;
                                 });
                                 // Picked a mode that looks: look now (and
                                 // download, if it says to).
-                                if m != larrier_core::UpdateMode::Off {
+                                if m != lary_core::UpdateMode::Off {
                                     app.check_updates(true);
                                 }
                             }
@@ -1235,10 +1235,10 @@ fn About() -> Element {
                     }
                 }
             }
-            Row { title: "Session format".to_string(), span { class: "code-inline", "LSF {larrier_core::lsf::LSF_VERSION}" } }
-            Row { title: "Source".to_string(), a { href: "https://github.com/Dev4YM/Larrier", "github.com/Dev4YM/Larrier" } }
+            Row { title: "Session format".to_string(), span { class: "code-inline", "LSF {lary_core::lsf::LSF_VERSION}" } }
+            Row { title: "Source".to_string(), a { href: "https://github.com/Dev4YM/Lary", "github.com/Dev4YM/Lary" } }
             if installed {
-                Row { title: "Uninstall".to_string(), desc: Some("Remove Larrier from this computer. You choose whether your sessions go too.".to_string()),
+                Row { title: "Uninstall".to_string(), desc: Some("Remove Lary from this computer. You choose whether your sessions go too.".to_string()),
                     button { class: "ghost-btn",
                         onclick: move |_| {
                             if let Ok(me) = std::env::current_exe() {

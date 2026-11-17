@@ -2,7 +2,7 @@
 
 ## Our pledge
 
-We want Larrier to be a welcoming project for everyone, whatever their
+We want Lary to be a welcoming project for everyone, whatever their
 experience, background or identity. Everyone who takes part (in issues, pull
 requests, discussions or anywhere else the project is represented) agrees to
 make that true.

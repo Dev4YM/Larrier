@@ -1,8 +1,8 @@
 //! Markdown transcripts: Aider's `.aider.chat.history.md` and generic
-//! "## User / ## Assistant" exports (including Larrier's own).
+//! "## User / ## Assistant" exports (including Lary's own).
 
 use anyhow::Result;
-use larrier_core::{AgentKind, Session};
+use lary_core::{AgentKind, Session};
 
 use crate::util::{finish, finish_as, parse_ts, Conv, Meta};
 

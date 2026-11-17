@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use larrier_core::ToolStatus;
+use lary_core::ToolStatus;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -81,7 +81,7 @@ impl LineParser for HermesStream {
                 // Tools answer with JSON ({"output": …, "exit_code": …}); show
                 // the readable part, as imported sessions do.
                 let raw = content_text(&v["output"]);
-                let (output, failed) = larrier_formats::hermes::tool_output(&raw);
+                let (output, failed) = lary_formats::hermes::tool_output(&raw);
                 if raw.contains("\"status\": \"blocked\"") || raw.contains("\"status\":\"blocked\"") {
                     sink.notice("Hermes blocked a command it flags as dangerous: in one-shot mode it can't ask for approval. Pick YOLO under Permissions, or turn on Use ACP for Hermes in Settings → Agents to approve such commands here.");
                 }
@@ -141,7 +141,7 @@ impl LineParser for HermesStream {
 mod tests {
     use super::*;
     use crate::drivers::testutil::collect;
-    use larrier_core::ToolKind;
+    use lary_core::ToolKind;
 
     #[test]
     fn maps_stream_json() {

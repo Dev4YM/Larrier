@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """A stand-in for Claude Code that plays a scripted turn over Claude Code's
-stream-json control protocol, so Larrier can be shown and worked on with
+stream-json control protocol, so Lary can be shown and worked on with
 live agents and no API account.
 
-`make_demo.py` sets it as Claude Code's program in a sample Larrier home.
+`make_demo.py` sets it as Claude Code's program in a sample Lary home.
 The turn it plays depends on the prompt (see TURNS); it ends with work
-still running and holds the turn open until Larrier stops it or closes
+still running and holds the turn open until Lary stops it or closes
 its input.
 """
 

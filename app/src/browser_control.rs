@@ -1,6 +1,6 @@
-//! The door the agents' browser tools knock on (`larrier_agents::browser::
+//! The door the agents' browser tools knock on (`lary_agents::browser::
 //! control`): a local port, named with a token in a file only this user can
-//! read, answering for Larrier's browser tabs.
+//! read, answering for Lary's browser tabs.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -28,7 +28,7 @@ pub fn start() {
             let Ok(listener) = TcpListener::bind("127.0.0.1:0") else { return };
             let Ok(addr) = listener.local_addr() else { return };
             let token = uuid::Uuid::new_v4().simple().to_string();
-            let file = larrier_agents::browser::control::file();
+            let file = lary_agents::browser::control::file();
             if let Some(dir) = file.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
@@ -50,7 +50,7 @@ pub fn start() {
                     } else {
                         let (rtx, rrx) = std::sync::mpsc::channel();
                         let _ = tx.send((req, rtx));
-                        rrx.recv_timeout(Duration::from_secs(30)).unwrap_or_else(|_| json!({"error": "Larrier didn't answer"}))
+                        rrx.recv_timeout(Duration::from_secs(30)).unwrap_or_else(|_| json!({"error": "Lary didn't answer"}))
                     };
                     let mut s = stream;
                     let _ = s.write_all(format!("{out}\n").as_bytes());
@@ -60,7 +60,7 @@ pub fn start() {
         .ok();
 }
 
-/// The DevTools target showing tab `id`, when Larrier's engine shows it.
+/// The DevTools target showing tab `id`, when Lary's engine shows it.
 fn target_of(id: u64) -> Option<String> {
     #[cfg(windows)]
     return crate::browser_cef::target_of(id);
@@ -93,7 +93,7 @@ fn answer(req: &Value) -> Value {
         // The agent's tabs are reserved for it.
         "new_tab" => match host::new_agent_tab(&owner, req["url"].as_str().unwrap_or("about:blank")) {
             Some(id) => json!({"id": id}),
-            None => json!({"error": st.error.unwrap_or_else(|| "Larrier couldn't open a tab".into())}),
+            None => json!({"error": st.error.unwrap_or_else(|| "Lary couldn't open a tab".into())}),
         },
         "reserve" => match host::reserve(req["id"].as_u64().unwrap_or(0), &owner) {
             Ok(()) => json!({"ok": true}),

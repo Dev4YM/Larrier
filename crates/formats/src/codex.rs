@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use larrier_core::lsf::{close_active_tools, find_tool_path, slim_transcript, tool_at_path_mut, MediaSource};
-use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
+use lary_core::lsf::{close_active_tools, find_tool_path, slim_transcript, tool_at_path_mut, MediaSource};
+use lary_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
 use serde_json::{json, Value};
 
 use crate::util::{self, content_text, env_dir, finish, head_lines, json_lines, json_or_string, parse_ts, s, string, trim_output, Conv, Meta};
@@ -1823,9 +1823,9 @@ mod tests {
 
     #[test]
     fn export_roundtrip() {
-        let mut s = Session::new(AGENT, Some(larrier_core::WorkspaceRef::from_path("/tmp/x")));
-        s.push(larrier_core::Message::user_text("hello"));
-        let mut a = larrier_core::Message::assistant(AGENT, None);
+        let mut s = Session::new(AGENT, Some(lary_core::WorkspaceRef::from_path("/tmp/x")));
+        s.push(lary_core::Message::user_text("hello"));
+        let mut a = lary_core::Message::assistant(AGENT, None);
         a.push_text("world");
         s.push(a);
         let back = parse(&export_lines(&s, "ID", Utc::now()), None).unwrap();

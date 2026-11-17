@@ -1,4 +1,4 @@
-//! Live sessions: Larrier watches every agent's session folders and
+//! Live sessions: Lary watches every agent's session folders and
 //! re-imports what changes, so a session running in a terminal, an IDE or
 //! another app updates here while it runs.
 //!
@@ -12,24 +12,24 @@ use std::time::{Duration, Instant};
 
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
-use larrier_core::Session;
-use larrier_formats::live::LiveWatcher;
+use lary_core::Session;
+use lary_formats::live::LiveWatcher;
 
 use crate::state::{store, App};
 
 /// A session counts as live while its agent wrote to it this recently.
 pub const LIVE_FOR: Duration = Duration::from_secs(25);
-/// After Larrier's own turn ends, its agent may still flush the native file.
+/// After Lary's own turn ends, its agent may still flush the native file.
 const GRACE: Duration = Duration::from_secs(20);
 
-/// Sessions Larrier itself is driving: `None` while running, else when the
+/// Sessions Lary itself is driving: `None` while running, else when the
 /// turn ended.
 fn busy() -> &'static Mutex<HashMap<String, Option<Instant>>> {
     static BUSY: OnceLock<Mutex<HashMap<String, Option<Instant>>>> = OnceLock::new();
     BUSY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Last external write per Larrier session id.
+/// Last external write per Lary session id.
 fn last_write() -> &'static Mutex<HashMap<String, Instant>> {
     static LAST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
     LAST.get_or_init(|| Mutex::new(HashMap::new()))
@@ -45,12 +45,12 @@ type Fresh = (Vec<Session>, Vec<String>);
 
 static TX: OnceLock<tokio::sync::mpsc::UnboundedSender<Fresh>> = OnceLock::new();
 
-/// Larrier started a turn on this session: live sync leaves it alone.
+/// Lary started a turn on this session: live sync leaves it alone.
 pub fn mark_busy(id: &str) {
     busy().lock().unwrap().insert(id.to_string(), None);
 }
 
-/// Larrier's turn ended; live sync resumes after a short grace period.
+/// Lary's turn ended; live sync resumes after a short grace period.
 pub fn mark_idle(id: &str) {
     busy().lock().unwrap().insert(id.to_string(), Some(Instant::now()));
 }
@@ -93,7 +93,7 @@ pub fn start(app: App) {
 pub fn restart(app: App) {
     let (on, agents) = {
         let cfg = app.config.read();
-        let agents: Vec<_> = larrier_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect();
+        let agents: Vec<_> = lary_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect();
         (cfg.settings.live_sync, agents)
     };
     // Dropping the old watcher stops it.
@@ -105,7 +105,7 @@ pub fn restart(app: App) {
     // Registering watches on big folders can take a moment: not on the UI thread.
     std::thread::spawn(move || {
         let st = store().clone();
-        let on_report = move |r: larrier_formats::SyncReport| {
+        let on_report = move |r: lary_formats::SyncReport| {
             for e in r.errors.iter().take(3) {
                 tracing::warn!("live sync: {e}");
             }
@@ -115,7 +115,7 @@ pub fn restart(app: App) {
                 let _ = tx.send((sessions, r.grew));
             }
         };
-        match larrier_formats::live::spawn(st, agents, Arc::new(is_busy), Box::new(on_report)) {
+        match lary_formats::live::spawn(st, agents, Arc::new(is_busy), Box::new(on_report)) {
             Ok(w) => *watcher().lock().unwrap() = Some(w),
             Err(e) => tracing::warn!("live sync could not start: {e}"),
         }

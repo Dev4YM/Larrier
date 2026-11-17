@@ -1,4 +1,4 @@
-//! Larrier — one window for every coding agent and AI chat.
+//! Lary — one window for every coding agent and AI chat.
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
 mod agent_models;
@@ -31,7 +31,7 @@ use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
 
 const CSS: &str = include_str!("styles.css");
 
-/// When Larrier is started from inside another agent's session (e.g. a
+/// When Lary is started from inside another agent's session (e.g. a
 /// terminal in Claude Code or Claude Desktop), that host's session markers
 /// leak into our environment and make child agents believe they are nested
 /// sessions that receive credentials from a host — they then report "not
@@ -58,7 +58,7 @@ fn scrub_host_session_env() {
 /// Where installing, updating and uninstalling note what went wrong (an
 /// elevated helper can only hand back an exit code).
 pub fn setup_log() -> std::path::PathBuf {
-    std::env::temp_dir().join("larrier-setup.log")
+    std::env::temp_dir().join("lary-setup.log")
 }
 
 /// Steps that run without a window (installing, updating, uninstalling,
@@ -67,7 +67,7 @@ fn headless(args: &[String]) -> Option<i32> {
     let has = |f: &str| args.iter().any(|a| a == f);
     let val = |f: &str| args.iter().position(|a| a == f).and_then(|i| args.get(i + 1)).cloned();
     if has("--version") || has("-V") {
-        println!("Larrier {}", version::long());
+        println!("Lary {}", version::long());
         return Some(0);
     }
     let result: anyhow::Result<()> = if let Some(scope) = val("--install") {
@@ -77,6 +77,9 @@ fn headless(args: &[String]) -> Option<i32> {
         update::apply(std::path::Path::new(&target), val("--pid").and_then(|p| p.parse().ok()), !has("--no-launch"))
     } else if let Some(target) = val("--replace") {
         update::replace(std::path::Path::new(&target))
+    } else if let Some(scope) = val("--replace-larrier") {
+        let scope = if scope == "machine" { install::Scope::Machine } else { install::Scope::User };
+        install::replace_larrier(scope).map(|_| ())
     } else if has("--uninstall") && (has("--quiet") || has("--confirmed")) {
         match install::current() {
             install::Kind::Installed(scope) if scope == install::Scope::User || install::can_install(scope) => install::uninstall(scope, has("--remove-data")),
@@ -85,7 +88,7 @@ fn headless(args: &[String]) -> Option<i32> {
                 anyhow::ensure!(code == 0, "uninstall failed (code {code})");
                 Ok(())
             }),
-            _ => Err(anyhow::anyhow!("this copy of Larrier isn't installed")),
+            _ => Err(anyhow::anyhow!("this copy of Lary isn't installed")),
         }
     } else {
         return None;
@@ -111,7 +114,7 @@ enum Start {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // One of the browser engine's helper processes (renderer, GPU, …): this
-    // program again, started by the engine. Nothing else of Larrier's runs.
+    // program again, started by the engine. Nothing else of Lary's runs.
     #[cfg(windows)]
     if browser_cef::is_subprocess(&args) {
         std::process::exit(browser_cef::subprocess());
@@ -120,10 +123,18 @@ fn main() {
     // An agent's browser tools: an MCP server on stdio (before any logging,
     // which would write into its replies).
     if args.first().map(String::as_str) == Some("mcp-browser") {
-        std::process::exit(larrier_agents::browser::mcp::serve());
+        std::process::exit(lary_agents::browser::mcp::serve());
     }
-    let filter = std::env::var("LARRIER_LOG").unwrap_or_else(|_| "info,larrier=debug".into());
+    let filter = std::env::var("LARY_LOG").unwrap_or_else(|_| "info,lary=debug".into());
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+    // Larrier is Lary now: its data folder moves over once, and an
+    // installed program updated in Larrier's place installs itself as Lary.
+    if let Some(what) = lary_core::store::migrate_from_larrier() {
+        tracing::info!("data from Larrier: {what}");
+    }
+    if let Some(code) = install::migrate_from_larrier(&args) {
+        std::process::exit(code);
+    }
 
     if let Some(code) = headless(&args) {
         std::process::exit(code);
@@ -144,20 +155,20 @@ fn main() {
     let root = state::store().root().to_path_buf();
     // Agents start this program for their browser tools.
     if let Ok(exe) = std::env::current_exe() {
-        larrier_agents::browser::register(&exe);
+        lary_agents::browser::register(&exe);
     }
-    let dark = state::store().load_config().settings.theme == larrier_core::Theme::Dark;
+    let dark = state::store().load_config().settings.theme == lary_core::Theme::Dark;
     let bg = if dark { (26, 26, 24, 255) } else { (247, 247, 244, 255) };
 
     #[allow(unused_mut)]
     let mut window = crate::notify::apply_to_builder(
         WindowBuilder::new()
-            .with_title("Larrier")
+            .with_title("Lary")
             .with_inner_size(LogicalSize::new(1440.0, 900.0))
             .with_min_inner_size(LogicalSize::new(560.0, 420.0)),
     );
-    // Windows: no system frame (Larrier draws the bar and its buttons).
-    // macOS: the traffic lights over Larrier's own top bar. Linux: the
+    // Windows: no system frame (Lary draws the bar and its buttons).
+    // macOS: the traffic lights over Lary's own top bar. Linux: the
     // system's frame, which every window manager can move and resize.
     #[cfg(windows)]
     {
@@ -172,7 +183,7 @@ fn main() {
     if start != Start::App {
         // The installer and uninstaller: a small window with the system's frame.
         window = WindowBuilder::new()
-            .with_title(if start == Start::Setup { "Install Larrier" } else { "Uninstall Larrier" })
+            .with_title(if start == Start::Setup { "Install Lary" } else { "Uninstall Lary" })
             .with_inner_size(LogicalSize::new(640.0, if start == Start::Setup { 560.0 } else { 360.0 }))
             .with_resizable(false);
     }
@@ -181,22 +192,22 @@ fn main() {
         .with_window(window.with_window_icon(Some(app_icon())))
         .with_icon(app_icon())
         // macOS keeps the app's commands (and Edit's, which copy and paste
-        // need there) in the system menu bar; elsewhere Larrier draws its own.
+        // need there) in the system menu bar; elsewhere Lary draws its own.
         .with_menu(if platform::SYSTEM_MENU_BAR && start == Start::App { Some(ui::menubar::system_menu()) } else { None })
         .with_disable_context_menu(true)
         .with_background_color(bg)
         .with_data_directory(root.join("webview"))
         .with_custom_head(format!(
-            "<meta name=\"color-scheme\" content=\"light dark\"><link rel=\"icon\" href=\"data:,\"><title>Larrier</title><style>{}</style><style>{CSS}</style>",
+            "<meta name=\"color-scheme\" content=\"light dark\"><link rel=\"icon\" href=\"data:,\"><title>Lary</title><style>{}</style><style>{CSS}</style>",
             fonts::faces_css()
         ))
-        .with_windows_browser_args(match std::env::var("LARRIER_DEVTOOLS_PORT") {
+        .with_windows_browser_args(match std::env::var("LARY_DEVTOOLS_PORT") {
             // Lets automated UI tests drive the webview over the DevTools protocol.
             Ok(port) if !port.is_empty() => format!("--remote-debugging-port={port}"),
             _ => String::new(),
         })
         // The code editor's files (Monaco), served from the program.
-        .with_custom_protocol("larrier", |_, req| ui::editor::serve(req))
+        .with_custom_protocol("lary", |_, req| ui::editor::serve(req))
         .with_navigation_handler(|url: &str| {
             let internal = url.contains("dioxus.") || url.starts_with("about:") || url.starts_with("data:");
             if !internal && (url.starts_with("http://") || url.starts_with("https://")) {
@@ -213,7 +224,7 @@ fn main() {
     }
 }
 
-/// The Larrier mark as the window icon, drawn at runtime (no image files).
+/// The Lary mark as the window icon, drawn at runtime (no image files).
 fn app_icon() -> dioxus::desktop::tao::window::Icon {
     const N: u32 = 64;
     dioxus::desktop::tao::window::Icon::from_rgba(logo::mark_rgba(N), N, N).expect("valid icon")

@@ -6,7 +6,7 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use larrier_core::{AgentKind, SessionStatus, SessionSummary, SidebarGroup, SidebarSort};
+use lary_core::{AgentKind, SessionStatus, SessionSummary, SidebarGroup, SidebarSort};
 
 use dioxus::html::input_data::MouseButton;
 
@@ -27,7 +27,7 @@ struct Repo {
     latest: chrono::DateTime<chrono::Utc>,
     agent: Option<AgentKind>,
     home: bool,
-    /// A project's look and place (see `larrier_core::Workspace`).
+    /// A project's look and place (see `lary_core::Workspace`).
     icon: Option<String>,
     color: Option<String>,
     pinned: bool,
@@ -48,8 +48,8 @@ fn sort_items(items: &mut [SessionSummary], sort: SidebarSort) {
 
 /// The new agent draft as a sidebar row: in the project it would start in.
 fn draft_row(row: &crate::keep::HomeRow, d: &crate::state::Draft) -> SessionSummary {
-    let ws = d.workspace.clone().map(larrier_core::WorkspaceRef::from_path);
-    let mut s = larrier_core::Session::new(d.agent.clone(), ws).summary();
+    let ws = d.workspace.clone().map(lary_core::WorkspaceRef::from_path);
+    let mut s = lary_core::Session::new(d.agent.clone(), ws).summary();
     s.id = DRAFT_ID.to_string();
     s.title = row.title.clone();
     s.created_at = row.at;
@@ -90,7 +90,7 @@ fn repo_key(s: &SessionSummary) -> String {
 }
 
 /// Projects with their chats (Home among them), in the user's order.
-fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace], home_project: &larrier_core::Workspace, sort: SidebarSort, order: &[String]) -> (Vec<SessionSummary>, Vec<Repo>) {
+fn build_projects(list: &[SessionSummary], workspaces: &[lary_core::Workspace], home_project: &lary_core::Workspace, sort: SidebarSort, order: &[String]) -> (Vec<SessionSummary>, Vec<Repo>) {
     let mut pinned = Vec::new();
     let mut map: BTreeMap<String, Repo> = BTreeMap::new();
     let mut home = Repo {
@@ -117,7 +117,7 @@ fn build_projects(list: &[SessionSummary], workspaces: &[larrier_core::Workspace
         }
         let w = s.workspace.as_ref().unwrap();
         // A chat started in one of a project's folders is that project's.
-        let project = larrier_core::config::project_in(workspaces, &w.path);
+        let project = lary_core::config::project_in(workspaces, &w.path);
         let key = project.map(|p| project_key(Some(&p.path))).unwrap_or(key);
         let e = map.entry(key.clone()).or_insert_with(|| match project {
             Some(p) => Repo { key: key.clone(), name: p.name.clone(), path: Some(p.path.clone()), items: Vec::new(), latest: s.activity(), agent: None, home: false, icon: p.icon.clone(), color: p.color.clone(), pinned: p.pinned },
@@ -215,7 +215,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
     let mut scrolled = use_signal(|| false);
     let mut me_menu = use_signal(|| false);
     // A harness turned off in Settings takes its chats out of the list too.
-    let off: Vec<larrier_core::AgentKind> = app.config.read().agents.iter().filter(|a| !a.enabled).map(|a| a.kind.clone()).collect();
+    let off: Vec<lary_core::AgentKind> = app.config.read().agents.iter().filter(|a| !a.enabled).map(|a| a.kind.clone()).collect();
     let all: Vec<SessionSummary> = all.into_iter().filter(|s| (show_archived || !s.archived) && !off.contains(&s.agent)).collect();
     let filtered: Vec<SessionSummary> = if query.is_empty() {
         all
@@ -433,7 +433,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                                 div { class: "menu-sep" }
                                 MenuItem { label: "What's new".to_string(), icon: Some(I::Sparkle),
                                     onclick: move |_| { me_menu.set(false); app.ui.write().modal = Some(crate::state::Modal::WhatsNew(crate::version::VERSION.to_string(), false)); } }
-                                MenuItem { label: "About Larrier".to_string(), icon: Some(I::Info), onclick: move |_| go(SettingsTab::About) }
+                                MenuItem { label: "About Lary".to_string(), icon: Some(I::Info), onclick: move |_| go(SettingsTab::About) }
                             }
                         }
                     }
@@ -444,19 +444,19 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                     let upd = app.update.read().clone();
                     match upd {
                         crate::state::UpdateState::Available(r) => rsx! {
-                            button { class: "update-btn", title: "Download update · Larrier {r.version}", onclick: move |_| app.download_update(),
+                            button { class: "update-btn", title: "Download update · Lary {r.version}", onclick: move |_| app.download_update(),
                                 Icon { i: I::Download, size: 15, stroke: 1.6 }
                                 span { class: "lbl", "Download" }
                             }
                         },
                         crate::state::UpdateState::Downloading { version, got, total } => rsx! {
-                            button { class: "update-btn busy", title: "Downloading Larrier {version}…", disabled: true,
+                            button { class: "update-btn busy", title: "Downloading Lary {version}…", disabled: true,
                                 super::loaders::Orbit { size: 13 }
                                 span { class: "lbl", {if total > 0 { format!("{}%", got * 100 / total) } else { "Downloading".to_string() }} }
                             }
                         },
                         crate::state::UpdateState::Ready { version, .. } => rsx! {
-                            button { class: "update-btn ready", title: "Restart to update to Larrier {version}", onclick: move |_| app.restart_to_update(),
+                            button { class: "update-btn ready", title: "Restart to update to Lary {version}", onclick: move |_| app.restart_to_update(),
                                 Icon { i: I::Refresh, size: 14, stroke: 1.8 }
                                 span { class: "lbl", "Restart" }
                             }
@@ -634,8 +634,8 @@ fn ProjectActions(path: Option<String>, pinned: bool, onclose: EventHandler<()>)
                         onclose.call(());
                         let p = p6.clone();
                         app.update_config(move |c| {
-                            let n = larrier_core::config::normalize_path(&p);
-                            c.workspaces.retain(|w| larrier_core::config::normalize_path(&w.path) != n);
+                            let n = lary_core::config::normalize_path(&p);
+                            c.workspaces.retain(|w| lary_core::config::normalize_path(&w.path) != n);
                         });
                         app.toast("Project removed; its chats stay");
                     } }

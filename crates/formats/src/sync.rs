@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use anyhow::Result;
-use larrier_core::{
+use lary_core::{
     store::{import_key, ImportRecord},
     AgentKind, Session, Store,
 };
@@ -67,18 +67,18 @@ pub fn drop_copies(store: &Store) -> usize {
 }
 
 /// Import new and changed sessions among `infos`. `skip(session_id)` leaves
-/// an existing Larrier session alone (for example while Larrier itself is
+/// an existing Lary session alone (for example while Lary itself is
 /// running it, since its agent writes the same native file).
 /// Bump when an importer changes what it produces: sessions imported by an
 /// older version are imported again on the next sync, keeping what the user
-/// changed in Larrier.
+/// changed in Lary.
 pub const IMPORTER_VERSION: u32 = 10;
 
-/// Sessions Larrier ran itself recorded Claude's narration as thinking
+/// Sessions Lary ran itself recorded Claude's narration as thinking
 /// before this version; linked records older than it are repaired once.
 const NARRATION_TOLD: u32 = 10;
 
-/// A chat Larrier ran itself, which is never re-imported: repaired once
+/// A chat Lary ran itself, which is never re-imported: repaired once
 /// from its native transcript (narration it recorded as thinking, before
 /// `NARRATION_TOLD`). Returns the importer version its record carries now.
 fn repair_linked(store: &Store, r: &ImportRecord, info: &NativeSessionInfo, report: &mut SyncReport) -> u32 {
@@ -109,7 +109,7 @@ pub(crate) fn apply(store: &Store, infos: Vec<NativeSessionInfo>, skip: &dyn Fn(
         }
         match store.import_record(&key) {
             // A session imported from this native session and continued in
-            // Larrier was once marked as Larrier's own, which stopped its
+            // Lary was once marked as Lary's own, which stopped its
             // syncing for good: it syncs again (and the mark is undone).
             Some(r) if r.linked && !r.deleted && !skip(&r.session_id) && (r.source_mtime != info.mtime_ms || r.source_len != info.size) => {
                 if continues(store, &r.session_id, &info) {
@@ -252,16 +252,16 @@ fn grew(new: &Session, old: &Session) -> bool {
     new.messages.len() > old.messages.len() || (new.messages.len() == old.messages.len() && size(new) > size(old))
 }
 
-/// Keep what the user changed in Larrier when a native session is re-imported.
+/// Keep what the user changed in Lary when a native session is re-imported.
 fn merge_user_state(new: &mut Session, old: &Session) {
     new.pinned = old.pinned;
     new.unread = old.unread;
-    // Thumbs up / down and other Larrier-only notes.
+    // Thumbs up / down and other Lary-only notes.
     for (k, v) in old.extra.iter().filter(|(k, _)| k.starts_with("feedback:")) {
         new.extra.insert(k.clone(), v.clone());
     }
     // Archived in the agent follows the agent, unless the user (un)archived
-    // it in Larrier.
+    // it in Lary.
     let old_import_archived = old.extra.get("import_archived").and_then(|a| a.as_bool()).unwrap_or(false);
     if old.archived != old_import_archived {
         new.archived = old.archived;
@@ -287,7 +287,7 @@ fn merge_user_state(new: &mut Session, old: &Session) {
         }
     }
     if old.agent != new.origin.agent {
-        // The user continued this session with another agent in Larrier.
+        // The user continued this session with another agent in Lary.
         new.agent = old.agent.clone();
         new.model = old.model.clone();
     }
@@ -327,13 +327,13 @@ mod tests {
     }
 
     #[test]
-    fn reimport_keeps_a_mode_picked_in_larrier() {
-        // Unchanged in Larrier: the native mode wins.
+    fn reimport_keeps_a_mode_picked_in_lary() {
+        // Unchanged in Lary: the native mode wins.
         let mut new = imported("plan");
         merge_user_state(&mut new, &imported("auto"));
         assert_eq!(new.mode.as_deref(), Some("plan"));
 
-        // Picked in Larrier: kept.
+        // Picked in Lary: kept.
         let mut old = imported("auto");
         old.mode = Some("acceptEdits".into());
         let mut new = imported("plan");
@@ -341,10 +341,10 @@ mod tests {
         assert_eq!(new.mode.as_deref(), Some("acceptEdits"));
     }
 
-    /// A chat Larrier ran itself is never re-imported, but narration it
+    /// A chat Lary ran itself is never re-imported, but narration it
     /// recorded as thinking is repaired from its transcript, once.
     #[test]
-    fn larriers_own_chats_get_narration_back_once() {
+    fn larys_own_chats_get_narration_back_once() {
         use base64::Engine;
         let native = tempfile::tempdir().unwrap();
         let data = tempfile::tempdir().unwrap();
@@ -364,9 +364,9 @@ mod tests {
         let info = crate::claude::file_info(&f).unwrap();
 
         let mut s = Session::new(AgentKind::ClaudeCode, None);
-        s.push(larrier_core::Message::user_text("go"));
-        let mut a = larrier_core::Message::assistant(AgentKind::ClaudeCode, None);
-        a.parts.push(larrier_core::Part::Reasoning { text: "I'll start with the handler.".into(), duration_ms: None });
+        s.push(lary_core::Message::user_text("go"));
+        let mut a = lary_core::Message::assistant(AgentKind::ClaudeCode, None);
+        a.parts.push(lary_core::Part::Reasoning { text: "I'll start with the handler.".into(), duration_ms: None });
         s.push(a);
         store.save(&s).unwrap();
         let key = import_key(&AgentKind::ClaudeCode, &info.native_id);
@@ -377,15 +377,15 @@ mod tests {
         assert!(r.changed.is_empty());
         let r = apply(&store, vec![info.clone()], &|_| false);
         assert_eq!(r.changed, vec![s.id.clone()]);
-        assert_eq!(store.load(&s.id).unwrap().messages[1].parts, vec![larrier_core::Part::Text { text: "I'll start with the handler.".into() }]);
+        assert_eq!(store.load(&s.id).unwrap().messages[1].parts, vec![lary_core::Part::Text { text: "I'll start with the handler.".into() }]);
         let rec = store.import_record(&key).unwrap();
         assert!(rec.linked && rec.importer >= NARRATION_TOLD);
         assert!(apply(&store, vec![info], &|_| false).changed.is_empty());
         assert_eq!(store.list().len(), 1, "never imported as a second session");
     }
 
-    /// An imported session once continued in Larrier (and so marked as
-    /// Larrier's own) syncs from its native session again.
+    /// An imported session once continued in Lary (and so marked as
+    /// Lary's own) syncs from its native session again.
     #[test]
     fn continued_imports_sync_again() {
         let native = tempfile::tempdir().unwrap();
@@ -395,8 +395,8 @@ mod tests {
         let write = |prompts: &[&str]| {
             let mut s = Session::new(AgentKind::ClaudeCode, None);
             for p in prompts {
-                s.push(larrier_core::Message::user_text(*p));
-                let mut a = larrier_core::Message::assistant(AgentKind::ClaudeCode, None);
+                s.push(lary_core::Message::user_text(*p));
+                let mut a = lary_core::Message::assistant(AgentKind::ClaudeCode, None);
                 a.push_text(&format!("Answer to {p}"));
                 s.push(a);
             }
@@ -406,7 +406,7 @@ mod tests {
         };
         let r = apply(&store, vec![write(&["first"])], &|_| false);
         let sid = r.changed[0].clone();
-        // What older versions did when Larrier ran a turn on it.
+        // What older versions did when Lary ran a turn on it.
         store.set_import_record(&import_key(&AgentKind::ClaudeCode, id), ImportRecord::linked(&sid));
         std::thread::sleep(std::time::Duration::from_millis(20));
         let r = apply(&store, vec![write(&["first", "second"])], &|_| false);
@@ -423,7 +423,7 @@ mod tests {
         let store = Store::open(data.path()).unwrap();
         let id = "31111111-2222-3333-4444-555555555555";
         let mut s = Session::new(AgentKind::ClaudeCode, None);
-        s.push(larrier_core::Message::user_text("hello"));
+        s.push(lary_core::Message::user_text("hello"));
         let mut infos = Vec::new();
         for dir in ["a", "b"] {
             let d = native.path().join(dir);
@@ -447,7 +447,7 @@ mod tests {
             s.title = title.into();
             s.extra.insert("import_title".into(), Value::String("Chat".into()));
             s.origin.native_id = Some("chat-1".into());
-            s.push(larrier_core::Message::user_text("hi"));
+            s.push(lary_core::Message::user_text("hi"));
             s
         };
         let held = imported("Chat");
@@ -456,7 +456,7 @@ mod tests {
         let copy = imported("Chat");
         let renamed = imported("My chat");
         let mut fork = imported("Chat");
-        fork.parent = Some(larrier_core::lsf::ForkRef { session_id: held.id.clone(), message_id: None });
+        fork.parent = Some(lary_core::lsf::ForkRef { session_id: held.id.clone(), message_id: None });
         for s in [&copy, &renamed, &fork] {
             store.save(s).unwrap();
         }
@@ -466,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn archived_follows_the_agent_unless_changed_in_larrier() {
+    fn archived_follows_the_agent_unless_changed_in_lary() {
         let archived_in_agent = |on: bool| {
             let mut s = imported("auto");
             s.archived = on;
@@ -483,13 +483,13 @@ mod tests {
         let mut new = archived_in_agent(false);
         merge_user_state(&mut new, &archived_in_agent(true));
         assert!(!new.archived);
-        // Archived in Larrier: stays archived.
+        // Archived in Lary: stays archived.
         let mut old = archived_in_agent(false);
         old.archived = true;
         let mut new = archived_in_agent(false);
         merge_user_state(&mut new, &old);
         assert!(new.archived);
-        // Brought back in Larrier: stays in the list.
+        // Brought back in Lary: stays in the list.
         let mut old = archived_in_agent(true);
         old.archived = false;
         let mut new = archived_in_agent(true);

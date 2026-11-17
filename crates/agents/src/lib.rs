@@ -1,4 +1,4 @@
-//! Larrier agent runtime: launches agents (CLI stream protocols, ACP, HTTP
+//! Lary agent runtime: launches agents (CLI stream protocols, ACP, HTTP
 //! chat), normalizes their output into [`AgentEvent`]s and records them into
 //! LSF sessions.
 

@@ -6,7 +6,7 @@
 //! injected text is folded back into objects in place.
 
 use dioxus::prelude::*;
-use larrier_core::{AgentKind, SessionSummary};
+use lary_core::{AgentKind, SessionSummary};
 
 /// Marks around an object in a text box's text. Both are invisible and
 /// zero-width (Unicode default-ignorables), so the box lays its text out
@@ -32,7 +32,7 @@ pub enum MentionKind {
     Subagent,
     /// The agent of the user's own a new chat runs as (not sent as text).
     RunAs,
-    /// A page from Larrier's browser (its address, title and text, as it
+    /// A page from Lary's browser (its address, title and text, as it
     /// was when it was added), sent as a block.
     Page,
     /// Text quoted from an agent's reply, sent in place as a quote block.
@@ -55,7 +55,7 @@ pub struct MentionChip {
     /// Glyph for agent chips.
     pub agent: Option<AgentKind>,
     /// The context block as it was sent, sent again as is when it can't be
-    /// made afresh (a paste, a chat Larrier no longer has).
+    /// made afresh (a paste, a chat Lary no longer has).
     pub block: Option<String>,
 }
 
@@ -289,7 +289,7 @@ pub fn unique(chips: &[MentionChip], mut c: MentionChip) -> MentionChip {
     c
 }
 
-/// A sent prompt in pieces, its objects in place: context blocks Larrier
+/// A sent prompt in pieces, its objects in place: context blocks Lary
 /// appended (`<agent_context>`, `<git_diff>`, `<pasted_text>`,
 /// `<browser_page>`) fold into the object that asked for them; `@agent:`, `@git:diff`, `@agent-name` and
 /// `@path` tokens and a leading `/skill` become objects.
@@ -329,7 +329,7 @@ pub fn prompt_segs(text: &str, sessions: &[SessionSummary]) -> Vec<Seg> {
                 "<agent_context" => {
                     let title = attr("title").unwrap_or_else(|| "Agent chat".into());
                     let agent_name = attr("agent").unwrap_or_default();
-                    let agent = larrier_core::agent::catalog().iter().find(|s| s.name == agent_name).map(|s| s.kind.clone());
+                    let agent = lary_core::agent::catalog().iter().find(|s| s.name == agent_name).map(|s| s.kind.clone());
                     let tip = if agent_name.is_empty() { title.clone() } else { format!("{agent_name} · {title} — sent as context") };
                     agent_blocks.push(MentionChip { agent, block: Some(block), ..MentionChip::new(MentionKind::Agent, String::new(), title, tip) });
                 }

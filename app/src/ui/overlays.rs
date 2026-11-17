@@ -1,8 +1,8 @@
 //! Command palette, context menu, modals and toasts.
 
 use dioxus::prelude::*;
-use larrier_core::{lsf::new_id, Account, AccountAuth, AgentKind, ApiAccount, ApiKind};
-use larrier_formats::ExportFormat;
+use lary_core::{lsf::new_id, Account, AccountAuth, AgentKind, ApiAccount, ApiKind};
+use lary_formats::ExportFormat;
 
 use super::{AgentGlyph, Kbd};
 use crate::icons::{Icon, I};
@@ -59,7 +59,7 @@ fn run_action(mut app: App, a: &str) {
         "import-file" => app.import_files(),
         "theme" => {
             let dark = app.ui.read().dark;
-            app.update_config(|c| c.settings.theme = if dark { larrier_core::Theme::Light } else { larrier_core::Theme::Dark });
+            app.update_config(|c| c.settings.theme = if dark { lary_core::Theme::Light } else { lary_core::Theme::Dark });
             app.apply_theme();
         }
         "agents" | "accounts" | "models" | "harnesses" => app.open_models(None),
@@ -308,7 +308,7 @@ pub fn ContextMenu() -> Element {
             {item(if s.unread { "Mark as Read" } else { "Mark as Unread" }, I::Circle, { let u = !s.unread; Box::new(move || app.set_unread(&i4, u)) })}
             {item("Fork", I::Fork, Box::new(move || app.fork(&i5, None)))}
             super::SubMenu { label: "Continue with", icon: I::Swap,
-                for spec in larrier_core::agent::runnable() {
+                for spec in lary_core::agent::runnable() {
                     {
                         let k = spec.kind.clone();
                         let sid = id.clone();
@@ -430,7 +430,7 @@ fn DeleteModal(id: String) -> Element {
     rsx! {
         div { class: "modal-head", "Delete “{title}”?" }
         div { class: "modal-body",
-            "This removes the session from Larrier, and it won't be imported again. The agent's own session files are left untouched. Worktrees Larrier created for this agent are removed."
+            "This removes the session from Lary, and it won't be imported again. The agent's own session files are left untouched. Worktrees Lary created for this agent are removed."
         }
         div { class: "modal-foot",
             button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
@@ -451,7 +451,7 @@ fn WhatsNewModal(version: String, updated: bool) -> Element {
     let date = crate::version::released_on(&version).unwrap_or_default();
     rsx! {
         div { class: "modal-head",
-            if updated { "Larrier is now {version}" } else { "What's new in Larrier {version}" }
+            if updated { "Lary is now {version}" } else { "What's new in Lary {version}" }
             if !date.is_empty() { span { class: "faint", style: "font-weight: 400; margin-left: 8px; font-size: var(--ui-sm);", "{date}" } }
         }
         div { class: "modal-body whats-new md", dangerous_inner_html: "{html}" }
@@ -469,7 +469,7 @@ enum AuthKind {
     Existing,
     /// A key the agent reads from one of its variables.
     Key,
-    /// An API Larrier points the harness at (Larrier Chat speaks it itself).
+    /// An API Lary points the harness at (Lary Chat speaks it itself).
     Api,
 }
 
@@ -526,7 +526,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
     let spec = kind.spec();
     let mut label = use_signal(|| String::new());
     let chat = kind == AgentKind::Chat;
-    let kinds = larrier_agents::request::api_kinds(&kind);
+    let kinds = lary_agents::request::api_kinds(&kind);
     let can_api = !kinds.is_empty();
     let mut auth = use_signal(|| {
         if chat {
@@ -589,7 +589,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
             }
             AuthKind::Key => {
                 let r = format!("account:{id}");
-                if let Err(e) = larrier_core::secrets::set(&r, key().trim()) {
+                if let Err(e) = lary_core::secrets::set(&r, key().trim()) {
                     app.toast_err(format!("Could not store key: {e}"));
                     return;
                 }
@@ -601,7 +601,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                 let mut secret_ref = None;
                 if api.needs_key() {
                     let r = format!("account:{id}");
-                    if let Err(e) = larrier_core::secrets::set(&r, key().trim()) {
+                    if let Err(e) = lary_core::secrets::set(&r, key().trim()) {
                         app.toast_err(format!("Could not store key: {e}"));
                         return;
                     }
@@ -622,7 +622,7 @@ fn AddAccountModal(kind: AgentKind) -> Element {
         let first = app.config.read().accounts_for(&k2).is_empty();
         // An agent's first added account keeps it on what it ran with:
         // that stays, as an account of its own, the default; the new one
-        // can be made default. (Larrier Chat had nothing to run on.)
+        // can be made default. (Lary Chat had nothing to run on.)
         let keep_current = first && k2 != AgentKind::Chat && auth() != AuthKind::System;
         acc.is_default = first && !keep_current;
         app.update_config(|c| {
@@ -746,10 +746,10 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                 }
             }
             match auth() {
-                AuthKind::Dir => rsx! { div { "Larrier creates an isolated config folder for this account and opens {spec.name}'s login in a terminal. Each account keeps its own credentials and history." } },
+                AuthKind::Dir => rsx! { div { "Lary creates an isolated config folder for this account and opens {spec.name}'s login in a terminal. Each account keeps its own credentials and history." } },
                 AuthKind::Existing => rsx! {
                     div {
-                        "Uses a {spec.name} folder you already have, with its sign-in, settings and sessions. {spec.name} runs with it for this account, and its sessions show up in Larrier; Larrier itself changes nothing in it."
+                        "Uses a {spec.name} folder you already have, with its sign-in, settings and sessions. {spec.name} runs with it for this account, and its sessions show up in Lary; Lary itself changes nothing in it."
                         match signed_in(&kind, &folder()) {
                             Some(true) => rsx! { div { class: "folder-state ok", "Signed in · its sessions come in once it's added" } },
                             Some(false) => rsx! { div { class: "folder-state", "No sign-in in this folder yet: {spec.name}'s login opens in a terminal after adding" } },
@@ -759,8 +759,8 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                     }
                 },
                 AuthKind::Key => rsx! { div { "The key is stored in your OS keychain and passed to {spec.name} as an environment variable only when this account runs." } },
-                AuthKind::Api if chat => rsx! { div { "Larrier Chat sends your messages to this API with this key. The key stays in your OS keychain." } },
-                AuthKind::Api => rsx! { div { "When a chat runs on this account, Larrier points {spec.name} at this API for that run and hands it the key from your OS keychain. {spec.name}'s own settings aren't changed." } },
+                AuthKind::Api if chat => rsx! { div { "Lary Chat sends your messages to this API with this key. The key stays in your OS keychain." } },
+                AuthKind::Api => rsx! { div { "When a chat runs on this account, Lary points {spec.name} at this API for that run and hands it the key from your OS keychain. {spec.name}'s own settings aren't changed." } },
                 AuthKind::System => rsx! { div { "Uses whatever {spec.name} is currently signed into on this computer." } },
             }
         }
@@ -797,7 +797,7 @@ fn EditAccountModal(id: String) -> Element {
     }
 }
 
-/// Larrier's own right-click menu for everything that isn't a session row.
+/// Lary's own right-click menu for everything that isn't a session row.
 #[component]
 pub fn GlobalMenu() -> Element {
     let mut app = use_app();
@@ -890,7 +890,7 @@ pub fn GlobalMenu() -> Element {
                         onclick: move |_| {
                             app.ui.write().gctx = None;
                             document::eval(&format!(
-                                "const el = window.__larrierCtx; if (el) {{ el.focus(); el.setSelectionRange({}, {}); document.execCommand('insertText', false, {}); }}",
+                                "const el = window.__laryCtx; if (el) {{ el.focus(); el.setSelectionRange({}, {}); document.execCommand('insertText', false, {}); }}",
                                 sp.start, sp.end, serde_json::to_string(&w).unwrap_or_default()
                             ));
                         },
@@ -994,7 +994,7 @@ pub fn GlobalMenu() -> Element {
                     app.ui.write().sidebar_open = v;
                 }))}
                 {item(if dark { "Light Theme" } else { "Dark Theme" }, if dark { I::Sun } else { I::Moon }, "", true, Box::new(move || {
-                    app.update_config(|cfg| cfg.settings.theme = if dark { larrier_core::Theme::Light } else { larrier_core::Theme::Dark });
+                    app.update_config(|cfg| cfg.settings.theme = if dark { lary_core::Theme::Light } else { lary_core::Theme::Dark });
                     app.apply_theme();
                 }))}
                 div { class: "menu-sep" }

@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use larrier_core::models::{self, ModelInfo};
+use lary_core::models::{self, ModelInfo};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -68,7 +68,7 @@ pub fn refresh_blocking() -> anyhow::Result<usize> {
     let result = (|| -> anyhow::Result<usize> {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
         let text = rt.block_on(async {
-            let client = reqwest::Client::builder().timeout(Duration::from_secs(45)).user_agent("Larrier").build()?;
+            let client = reqwest::Client::builder().timeout(Duration::from_secs(45)).user_agent("Lary").build()?;
             let resp = client.get(models::LITELLM_URL).send().await?.error_for_status()?;
             anyhow::Ok(resp.text().await?)
         })?;

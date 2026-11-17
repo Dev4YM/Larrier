@@ -1,7 +1,7 @@
 //! OpenCode: `opencode run --format json --thinking --dir <cwd> [-s ses_…]
 //! [-m provider/model] [--agent build|plan] [--auto] <message>`.
 
-use larrier_core::{lsf::is_narration_block, FileDiff, ToolKind, ToolStatus};
+use lary_core::{lsf::is_narration_block, FileDiff, ToolKind, ToolStatus};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 

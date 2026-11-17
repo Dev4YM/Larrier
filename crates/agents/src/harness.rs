@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use larrier_core::AgentKind;
+use lary_core::AgentKind;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1044,7 +1044,7 @@ mod tests {
     use super::*;
 
     fn tmp() -> PathBuf {
-        let d = std::env::temp_dir().join(format!("larrier-harness-{}", uuid::Uuid::new_v4()));
+        let d = std::env::temp_dir().join(format!("lary-harness-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }
@@ -1200,7 +1200,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(d);
     }
 
-    /// Read-only scan of this machine: `cargo test -p larrier-agents harness_smoke -- --ignored --nocapture`.
+    /// Read-only scan of this machine: `cargo test -p lary-agents harness_smoke -- --ignored --nocapture`.
     #[test]
     #[ignore]
     fn harness_smoke() {

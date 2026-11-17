@@ -15,7 +15,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, TimeZone, Utc};
-use larrier_core::{AccountAuth, AgentKind, Config};
+use lary_core::{AccountAuth, AgentKind, Config};
 
 /// One rate-limit window ("5-hour", "Weekly").
 #[derive(Clone, Debug, PartialEq)]
@@ -31,7 +31,7 @@ pub struct Window {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Quota {
     pub agent: AgentKind,
-    /// Larrier account id (None = the CLI's default login).
+    /// Lary account id (None = the CLI's default login).
     pub account_id: Option<String>,
     pub label: String,
     pub email: Option<String>,
@@ -356,7 +356,7 @@ fn http_get_json(url: &str, token: &str, headers: &[(&str, &str)]) -> Result<ser
     }
     let mut child = cmd.spawn().map_err(|_| HttpError::Other("curl not found".into()))?;
     {
-        let mut cfg = format!("url = \"{url}\"\nheader = \"Authorization: Bearer {token}\"\nheader = \"Accept: application/json\"\nheader = \"User-Agent: larrier\"\nwrite-out = \"\\n%{{http_code}}\"\n");
+        let mut cfg = format!("url = \"{url}\"\nheader = \"Authorization: Bearer {token}\"\nheader = \"Accept: application/json\"\nheader = \"User-Agent: lary\"\nwrite-out = \"\\n%{{http_code}}\"\n");
         for (k, v) in headers {
             cfg.push_str(&format!("header = \"{k}: {v}\"\n"));
         }
@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn reads_codex_snapshot() {
-        let dir = std::env::temp_dir().join(format!("larrier-quota-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("lary-quota-test-{}", std::process::id()));
         let day = dir.join("sessions").join("2026").join("10").join("29");
         std::fs::create_dir_all(&day).unwrap();
         let future = Utc::now().timestamp() + 3600;

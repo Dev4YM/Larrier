@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
-use larrier_core::{AgentKind, Usage};
+use lary_core::{AgentKind, Usage};
 use serde_json::Value;
 
 use super::loaders::Orbit;
@@ -213,12 +213,12 @@ fn ask(app: App, id: String, key: usize) {
     if current.as_ref().is_some_and(|a| a.loading || (a.key == key && a.result.is_some())) {
         return;
     }
-    let req = app.peek_session(&id, |s| larrier_agents::build_request(&app.config.peek(), s, &s.agent.clone()));
+    let req = app.peek_session(&id, |s| lary_agents::build_request(&app.config.peek(), s, &s.agent.clone()));
     let before = current.and_then(|a| a.result);
     BREAKDOWNS.write().insert(id.clone(), Asked { key, loading: true, result: before.clone() });
     spawn_forever(async move {
         let result = match req {
-            Some(Ok(req)) => larrier_agents::drivers::claude::context_usage(req).await.map(|v| breakdown(&v)),
+            Some(Ok(req)) => lary_agents::drivers::claude::context_usage(req).await.map(|v| breakdown(&v)),
             Some(Err(e)) => Err(e.to_string()),
             None => Err("The chat isn't open.".into()),
         };

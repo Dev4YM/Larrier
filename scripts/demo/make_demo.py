@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Builds a sample Larrier home for screenshots, demos and UI work: four
+"""Builds a sample Lary home for screenshots, demos and UI work: four
 made-up projects (real git repositories, one with uncommitted changes), a
 dozen chats across agents and states, and `demo_agent.py` standing in for
 Claude Code so chats can run live without an account.
 
-Nothing here reads or touches your own Larrier data or agent folders. Run
-Larrier against the result with the environment this script prints:
+Nothing here reads or touches your own Lary data or agent folders. Run
+Lary against the result with the environment this script prints:
 
-    python scripts/demo/make_demo.py            # → %TEMP%/larrier-demo
+    python scripts/demo/make_demo.py            # → %TEMP%/lary-demo
     python scripts/demo/make_demo.py --out D:/demo --force
 
 Every name, address and number in it is invented.
@@ -471,7 +471,7 @@ def home(out, p, agent_cmd, demo_login, account):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "larrier-demo"))
+    ap.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "lary-demo"))
     ap.add_argument("--force", action="store_true", help="replace an existing demo folder")
     args = ap.parse_args()
     out = os.path.abspath(args.out)
@@ -496,9 +496,9 @@ def main():
     root = home(out, p, agent_cmd, demo_login, "acc-demo-claude")
 
     print(f"Demo home: {root}")
-    print("Run Larrier against it (PowerShell):")
-    print(f"  $env:LARRIER_HOME = '{root}'; $env:CLAUDE_CONFIG_DIR = '{demo_login}'")
-    print("  cargo run -p larrier-app")
+    print("Run Lary against it (PowerShell):")
+    print(f"  $env:LARY_HOME = '{root}'; $env:CLAUDE_CONFIG_DIR = '{demo_login}'")
+    print("  cargo run -p lary-app")
 
 
 if __name__ == "__main__":

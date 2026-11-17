@@ -4,9 +4,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use larrier_core::{FileDiff, ToolKind, ToolStatus, Usage};
-use larrier_formats::codex::{error_message, unwrap_shell};
-use larrier_formats::util::image_parts;
+use lary_core::{FileDiff, ToolKind, ToolStatus, Usage};
+use lary_formats::codex::{error_message, unwrap_shell};
+use lary_formats::util::image_parts;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -55,7 +55,7 @@ pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiv
     // from where the thread stood.
     if let Some(id) = req.resume_id.clone() {
         let home = req.launch.env.iter().find(|(k, _)| k == "CODEX_HOME").map(|(_, v)| PathBuf::from(v));
-        parser.baseline = tokio::task::spawn_blocking(move || larrier_formats::codex::thread_usage(home.as_deref(), &id)).await.ok().flatten();
+        parser.baseline = tokio::task::spawn_blocking(move || lary_formats::codex::thread_usage(home.as_deref(), &id)).await.ok().flatten();
     }
     run_stream("Codex", cmd, Some(prompt), &sink, &mut control, &mut parser).await;
 }
@@ -118,7 +118,7 @@ impl CodexStream {
             "agent_message" => {
                 if let Some(t) = s(item, "text") {
                     // Codex app directives (::git-commit{…}) are not text.
-                    let (text, actions) = larrier_formats::codex::app_directives(t);
+                    let (text, actions) = lary_formats::codex::app_directives(t);
                     self.stream_text(&id, &text, false, sink);
                     if !actions.is_empty() {
                         sink.notice(format!("Git: {}", actions.join(", ")));
@@ -363,7 +363,7 @@ impl CodexStream {
         sink.send(AgentEvent::ToolUpdate { id: id.to_string(), status: Some(status), output, diffs: Vec::new(), is_error: failed, title: None });
     }
 
-    fn start(&mut self, id: &str, make: impl FnOnce() -> larrier_core::ToolCall, sink: &EventSink) {
+    fn start(&mut self, id: &str, make: impl FnOnce() -> lary_core::ToolCall, sink: &EventSink) {
         if !self.started_tools.contains_key(id) {
             let t = make();
             self.started_tools.insert(id.to_string(), t.kind);
@@ -518,7 +518,7 @@ mod tests {
             r#"{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Scanning** the repo"}}"#,
             r#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}"#,
             r#"{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"Cargo.toml\nsrc\n","exit_code":0,"status":"completed"}}"#,
-            r#"{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"zz_new_file_larrier_test.txt","kind":"add"},{"path":"src/b.rs","kind":"update"}],"status":"completed"}}"#,
+            r#"{"type":"item.completed","item":{"id":"item_2","type":"file_change","changes":[{"path":"zz_new_file_lary_test.txt","kind":"add"},{"path":"src/b.rs","kind":"update"}],"status":"completed"}}"#,
             r#"{"type":"item.started","item":{"id":"item_3","type":"todo_list","items":[{"text":"a","completed":true},{"text":"b","completed":false}]}}"#,
             r#"{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"Done."}}"#,
             r#"{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":800,"output_tokens":50,"reasoning_output_tokens":20}}"#,
@@ -625,7 +625,7 @@ mod tests {
         ];
         let ev = collect(&mut CodexStream::new(std::env::temp_dir()), &lines);
         assert!(matches!(&ev[0], AgentEvent::ToolStart { tool } if tool.name == "mcp__cua_repl__js"));
-        assert!(matches!(&ev[1], AgentEvent::ToolImages { id, images } if id == "m1" && matches!(&images[0], larrier_core::Part::Image { mime: Some(m), .. } if m == "image/png")));
+        assert!(matches!(&ev[1], AgentEvent::ToolImages { id, images } if id == "m1" && matches!(&images[0], lary_core::Part::Image { mime: Some(m), .. } if m == "image/png")));
         assert!(matches!(&ev[2], AgentEvent::ToolUpdate { output: Some(o), .. } if o == "Captured"));
     }
 

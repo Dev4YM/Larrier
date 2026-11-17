@@ -6,13 +6,13 @@
 //! * [`export_native`] writes an LSF session into an agent's own store so the
 //!   agent can resume it natively (Claude Code, Codex, Gemini CLI, Pi).
 //! * [`export_string`] renders a session in a portable file format.
-//! * [`sync`] incrementally imports everything new into the Larrier store.
+//! * [`sync`] incrementally imports everything new into the Lary store.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use larrier_core::{AgentKind, NativeLink, Role, Session, Store};
+use lary_core::{AgentKind, NativeLink, Role, Session, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -118,8 +118,8 @@ impl ExportFormat {
     ];
     pub fn label(self) -> &'static str {
         match self {
-            ExportFormat::LsfJsonl => "Larrier Session (.lsf.jsonl)",
-            ExportFormat::LsfJson => "Larrier Session (.lsf.json)",
+            ExportFormat::LsfJsonl => "Lary Session (.lsf.jsonl)",
+            ExportFormat::LsfJson => "Lary Session (.lsf.json)",
             ExportFormat::Markdown => "Markdown (.md)",
             ExportFormat::ClaudeCode => "Claude Code session (.jsonl)",
             ExportFormat::Codex => "Codex rollout (.jsonl)",
@@ -144,7 +144,7 @@ pub struct SyncReport {
     pub updated: usize,
     pub skipped: usize,
     pub errors: Vec<String>,
-    /// Larrier ids of the sessions that were imported or updated.
+    /// Lary ids of the sessions that were imported or updated.
     #[serde(default)]
     pub changed: Vec<String>,
     /// Those among `changed` whose agent added to the conversation since the
@@ -158,7 +158,7 @@ pub struct SyncReport {
 
 /// Agents whose native sessions this crate can read.
 pub fn importable_agents() -> Vec<AgentKind> {
-    larrier_core::agent::catalog().iter().filter(|s| s.can_import).map(|s| s.kind.clone()).collect()
+    lary_core::agent::catalog().iter().filter(|s| s.can_import).map(|s| s.kind.clone()).collect()
 }
 
 /// Agents this crate can write native, resumable session files for.
@@ -388,7 +388,7 @@ pub fn sync_skipping(store: &Store, agents: &[AgentKind], busy: &dyn Fn(&str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrier_core::{Message, WorkspaceRef};
+    use lary_core::{Message, WorkspaceRef};
 
     /// A turn still running in the agent's app shows its unanswered calls as
     /// running, not done.
@@ -406,8 +406,8 @@ mod tests {
         let s = import_native(&claude::file_info(&path).unwrap()).unwrap();
         assert!(s.external_turn);
         let status = |id: &str| s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| t.id == id).map(|t| t.status);
-        assert_eq!(status("t1"), Some(larrier_core::ToolStatus::Completed));
-        assert_eq!(status("t2"), Some(larrier_core::ToolStatus::Running));
+        assert_eq!(status("t1"), Some(lary_core::ToolStatus::Completed));
+        assert_eq!(status("t2"), Some(lary_core::ToolStatus::Running));
     }
 
     fn sample() -> Session {
@@ -416,9 +416,9 @@ mod tests {
         s.push(Message::user_text("refactor the parser"));
         let mut a = Message::assistant(AgentKind::ClaudeCode, Some("claude-sonnet-4-5".into()));
         a.push_text("Refactored.");
-        let mut t = larrier_core::ToolCall::new("t1", "Bash", serde_json::json!({"command": "cargo test"}));
+        let mut t = lary_core::ToolCall::new("t1", "Bash", serde_json::json!({"command": "cargo test"}));
         t.output = Some("ok".into());
-        a.parts.push(larrier_core::Part::Tool(t));
+        a.parts.push(lary_core::Part::Tool(t));
         s.push(a);
         s.push(Message::user_text("thanks"));
         s

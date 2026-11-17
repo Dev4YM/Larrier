@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use larrier_core::{FileDiff, ToolKind, ToolStatus};
+use lary_core::{FileDiff, ToolKind, ToolStatus};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -89,7 +89,7 @@ impl LineParser for CursorStream {
             "system" => {
                 if s(&v, "subtype") == Some("init") {
                     if let Some(id) = s(&v, "session_id") {
-                        let path = self.workspace.as_deref().map(|w| larrier_formats::cursor::chat_db(w, id).to_string_lossy().to_string());
+                        let path = self.workspace.as_deref().map(|w| lary_formats::cursor::chat_db(w, id).to_string_lossy().to_string());
                         sink.send(AgentEvent::NativeSession { id: id.to_string(), path });
                     }
                     if let Some(m) = s(&v, "model") {
@@ -272,12 +272,12 @@ impl CursorStream {
                     if kind == ToolKind::Shell && s(r, "reason").unwrap_or("").is_empty() {
                         self.refusal_noted = true;
                         sink.notice(format!(
-                            "Cursor refused `{}`: it isn't on your Cursor allowlist, and Cursor's CLI can't ask for approval when Larrier runs it. Pick Auto-review or Run everything under Permissions to let it run commands.",
+                            "Cursor refused `{}`: it isn't on your Cursor allowlist, and Cursor's CLI can't ask for approval when Lary runs it. Pick Auto-review or Run everything under Permissions to let it run commands.",
                             s(&args, "command").unwrap_or("the command")
                         ));
                     } else if name == "AskQuestion" {
                         self.refusal_noted = true;
-                        sink.notice("Cursor's CLI can't wait for answers when Larrier runs it, so it went on without them. Answer the question here and Cursor gets your answers as your next message.");
+                        sink.notice("Cursor's CLI can't wait for answers when Lary runs it, so it went on without them. Answer the question here and Cursor gets your answers as your next message.");
                     }
                 }
                 (if k == "rejected" { ToolStatus::Cancelled } else { ToolStatus::Failed }, msg, k != "rejected")
@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(output(&ev, "get_mcp_tools")[0].1, "Loaded TodoWrite");
         assert_eq!(output(&ev, "grep")[0].1, ".\\notes.txt:3:gamma line");
         let plans: Vec<_> = ev.iter().filter_map(|e| match e { AgentEvent::Plan { entries } => Some(entries), _ => None }).collect();
-        assert!(plans.last().unwrap().iter().all(|p| p.status == larrier_core::PlanStatus::Completed), "TODO_STATUS_COMPLETED");
+        assert!(plans.last().unwrap().iter().all(|p| p.status == lary_core::PlanStatus::Completed), "TODO_STATUS_COMPLETED");
         assert!(streamed(&ev).ends_with("then mark the todos done.Done."), "{}", streamed(&ev));
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })));
     }

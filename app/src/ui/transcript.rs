@@ -9,7 +9,7 @@
 use std::hash::{Hash, Hasher};
 
 use dioxus::prelude::*;
-use larrier_core::{
+use lary_core::{
     lsf::{short_path, MediaSource},
     FileDiff, Message, Part, PlanEntry, PlanStatus, Role, ToolCall, ToolKind, ToolStatus,
 };
@@ -214,8 +214,8 @@ pub fn Transcript(id: String) -> Element {
                 NavItem {
                     ti: *i,
                     uid: t.user_id.clone().unwrap_or_default(),
-                    prompt: larrier_core::lsf::preview_line(&q, 300),
-                    answer: larrier_core::lsf::preview_line(&answer, 360),
+                    prompt: lary_core::lsf::preview_line(&q, 300),
+                    answer: lary_core::lsf::preview_line(&answer, 360),
                     meta: match worked { Some(w) => format!("{when} · {w}"), None => when },
                 }
             })
@@ -513,8 +513,8 @@ pub fn Transcript(id: String) -> Element {
 struct Turn {
     user: Option<Message>,
     replies: Vec<Message>,
-    /// Larrier's notes before the replies, and after them (one that came
-    /// after the agent's words, like "Interrupted when Larrier closed",
+    /// Lary's notes before the replies, and after them (one that came
+    /// after the agent's words, like "Interrupted when Lary closed",
     /// shows after them).
     system: Vec<Message>,
     after: Vec<Message>,
@@ -1231,7 +1231,7 @@ fn is_running(t: &ToolCall) -> bool {
 fn verb_target(t: &ToolCall) -> (&'static str, String) {
     let running = is_running(t);
     let pick = |a: &'static str, b: &'static str| if running { a } else { b };
-    let arg = |keys: &[&str]| keys.iter().find_map(|k| t.input.get(*k).and_then(|v| v.as_str())).map(|v| larrier_core::lsf::first_line(v).to_string()).unwrap_or_default();
+    let arg = |keys: &[&str]| keys.iter().find_map(|k| t.input.get(*k).and_then(|v| v.as_str())).map(|v| lary_core::lsf::first_line(v).to_string()).unwrap_or_default();
     // Tools named by what they do, whatever kind their name suggests.
     let named = match t.name.as_str() {
         "AskUserQuestion" | "ask_user" | "request_user_input" => Some((pick("Asking", "Asked"), question_text(t))),
@@ -1389,7 +1389,7 @@ fn delta(old: &str, new: &str) -> (u32, u32) {
     if a * b > 250_000 {
         return (b as u32, a as u32);
     }
-    larrier_core::lsf::line_delta(old, new)
+    lary_core::lsf::line_delta(old, new)
 }
 
 /// The argument that best describes a call to an unfamiliar tool.
@@ -1398,7 +1398,7 @@ fn generic_arg(t: &ToolCall) -> String {
     KEYS.iter()
         .find_map(|k| t.input.get(*k).and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()))
         .map(|v| {
-            let l = larrier_core::lsf::first_line(v);
+            let l = lary_core::lsf::first_line(v);
             if l.chars().count() > 80 { l.chars().take(77).collect::<String>() + "…" } else { l.to_string() }
         })
         .unwrap_or_default()
@@ -1604,7 +1604,7 @@ fn ToolImages(images: Vec<Part>) -> Element {
 fn TodoCard(tool: ToolCall) -> Element {
     // Claude {todos: [{content, status}]}, Codex {plan: [{step, status}]},
     // Droid {todos: "1. [completed] …"}.
-    let Some(entries) = larrier_formats::util::plan_from(&tool.input) else {
+    let Some(entries) = lary_formats::util::plan_from(&tool.input) else {
         return rsx! { Step { tool } };
     };
     rsx! { PlanCard { entries } }
@@ -1831,7 +1831,7 @@ fn CommandCard(tool: ToolCall) -> Element {
                         span { class: if running { "desc shimmer" } else { "desc" }, "{d}" }
                         span { class: "meta", "{programs}" }
                     },
-                    None => rsx! { span { class: "desc mono", style: "font-size: var(--ui-xs);", "{larrier_core::lsf::first_line(&command)}" } },
+                    None => rsx! { span { class: "desc mono", style: "font-size: var(--ui-xs);", "{lary_core::lsf::first_line(&command)}" } },
                 }
                 if let Some(label) = skipped { span { class: "skip-tag", "{label}" } }
             }
@@ -1873,14 +1873,14 @@ fn clip(s: String, max: usize) -> String {
     format!("{}\n… ({} more bytes)", &s[..cut], s.len() - cut)
 }
 
-/// A count in short form, as everywhere in Larrier ("950", "12.3K", "4.5M").
+/// A count in short form, as everywhere in Lary ("950", "12.3K", "4.5M").
 pub fn human_count(n: u64) -> String {
     super::usage::fmt_tokens(n)
 }
 
 #[cfg(test)]
 mod tests {
-    use larrier_core::{ToolCall, ToolKind};
+    use lary_core::{ToolCall, ToolKind};
     use serde_json::json;
 
     fn call(name: &str, kind: ToolKind, input: serde_json::Value) -> ToolCall {

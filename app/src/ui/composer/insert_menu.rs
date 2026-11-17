@@ -6,8 +6,8 @@
 //! way back at its top; typing searches every kind at once.
 
 use dioxus::prelude::*;
-use larrier_agents::harness::ItemKind;
-use larrier_core::AgentKind;
+use lary_agents::harness::ItemKind;
+use lary_core::AgentKind;
 
 use super::{harness_items, mode_icon, pick_rows, strip_tokens};
 use crate::icons::I;
@@ -27,8 +27,8 @@ pub enum Level {
 pub enum SuggAct {
     /// Turn the token being typed into this object.
     Chip(MentionChip),
-    /// Run a Larrier command.
-    Larrier(&'static str),
+    /// Run a Lary command.
+    Lary(&'static str),
     /// Run the new chat as this agent of the agent's own.
     RunAs(String, AgentKind),
     /// Open a page of the menu.
@@ -319,7 +319,7 @@ fn subagents(ctx: &Ctx, ql: &str) -> Vec<Sugg> {
 
 // ------------------------------------------------------------------ /
 
-/// Larrier's own commands: the command, its name, its icon.
+/// Lary's own commands: the command, its name, its icon.
 const SLASH: &[(&str, &str, I)] = &[
     ("/plan", "Plan mode", I::List),
     ("/agent", "Agent mode", I::Code),
@@ -335,8 +335,8 @@ const SLASH: &[(&str, &str, I)] = &[
     ("/settings", "Settings", I::Settings),
 ];
 
-/// Which of Larrier's commands make sense here.
-fn larrier_commands(ctx: &Ctx) -> Vec<Sugg> {
+/// Which of Lary's commands make sense here.
+fn lary_commands(ctx: &Ctx) -> Vec<Sugg> {
     SLASH
         .iter()
         .filter(|(c, ..)| match *c {
@@ -349,7 +349,7 @@ fn larrier_commands(ctx: &Ctx) -> Vec<Sugg> {
         })
         .map(|&(c, label, icon)| {
             let icon = if c == "/plan" { mode_icon("plan") } else { icon };
-            Sugg::new("Larrier", icon, label, SuggAct::Larrier(c)).cmd(c).on(c == "/plan" && ctx.in_plan)
+            Sugg::new("Lary", icon, label, SuggAct::Lary(c)).cmd(c).on(c == "/plan" && ctx.in_plan)
         })
         .collect()
 }
@@ -397,16 +397,16 @@ fn command_row(ctx: &Ctx, group: &'static str, name: &str, desc: &str) -> Sugg {
 }
 
 fn slash_first(ctx: &Ctx) -> Vec<Sugg> {
-    let mut cmds = larrier_commands(ctx);
+    let mut cmds = lary_commands(ctx);
     let mut out: Vec<Sugg> = Vec::new();
     // Modes first, then the model and how hard it thinks, then the rest.
-    let modes = cmds.iter().take_while(|s| matches!(s.act, SuggAct::Larrier("/plan" | "/agent" | "/ask"))).count();
+    let modes = cmds.iter().take_while(|s| matches!(s.act, SuggAct::Lary("/plan" | "/agent" | "/ask"))).count();
     out.extend(cmds.drain(..modes));
     let r = now(ctx);
     let model_now = r.family.clone().or(r.model.clone()).map(|m| crate::agent_models::short_name(ctx.app, ctx.agent, &m)).unwrap_or_default();
     out.push(Sugg::new("", I::Box, "Model", SuggAct::Open(Level::Kind("Model"))).sub(model_now));
     if !effort_choices(ctx).is_empty() {
-        let e = r.effort.as_deref().map(larrier_agents::models::effort_label).unwrap_or_else(|| "Default".into());
+        let e = r.effort.as_deref().map(lary_agents::models::effort_label).unwrap_or_else(|| "Default".into());
         out.push(Sugg::new("", I::Brain, "Reasoning", SuggAct::Open(Level::Kind("Reasoning"))).sub(e));
     }
     out.extend(cmds);
@@ -419,12 +419,12 @@ fn slash_first(ctx: &Ctx) -> Vec<Sugg> {
     out
 }
 
-/// Typing after /: Larrier's commands, models, then the agent's commands,
+/// Typing after /: Lary's commands, models, then the agent's commands,
 /// skills and MCP prompts.
 fn slash_search(ctx: &Ctx, ql: &str) -> Vec<Sugg> {
-    let mut out: Vec<Sugg> = larrier_commands(ctx).into_iter().filter(|s| s.cmd[1..].starts_with(ql) || s.label.to_lowercase().contains(ql)).collect();
+    let mut out: Vec<Sugg> = lary_commands(ctx).into_iter().filter(|s| s.cmd[1..].starts_with(ql) || s.label.to_lowercase().contains(ql)).collect();
     if "reasoning".starts_with(ql) || "effort".starts_with(ql) {
-        out.extend(slash_first(ctx).into_iter().filter(|s| s.act == SuggAct::Open(Level::Kind("Reasoning"))).map(|s| Sugg { group: "Larrier", ..s }));
+        out.extend(slash_first(ctx).into_iter().filter(|s| s.act == SuggAct::Open(Level::Kind("Reasoning"))).map(|s| Sugg { group: "Lary", ..s }));
     }
     out.extend(models(ctx, ql).into_iter().filter(|s| s.label.to_lowercase().contains(ql)).take(6).map(|s| Sugg { group: "Models", ..s }));
     let mut theirs: Vec<Sugg> = agent_commands(ctx).iter().filter(|(_, n, _)| n.to_lowercase().contains(ql)).take(60).map(|&(g, ref n, ref d)| command_row(ctx, g, n, d)).collect();
@@ -458,7 +458,7 @@ fn efforts(ctx: &Ctx) -> Vec<Sugg> {
     let mut out = vec![Sugg::new("", I::Gauge, "Default", SuggAct::Effort(None)).on(ctx.effort.is_none())];
     for e in effort_choices(ctx) {
         let on = ctx.effort == Some(e.as_str());
-        out.push(Sugg::new("", I::Gauge, larrier_agents::models::effort_label(&e), SuggAct::Effort(Some(e))).on(on));
+        out.push(Sugg::new("", I::Gauge, lary_agents::models::effort_label(&e), SuggAct::Effort(Some(e))).on(on));
     }
     out
 }

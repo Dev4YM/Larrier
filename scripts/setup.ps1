@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Check that this machine has what developing Larrier needs, and say how to
+  Check that this machine has what developing Lary needs, and say how to
   get what's missing. Changes nothing.
 
 .EXAMPLE

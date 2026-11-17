@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use larrier_core::{AgentKind, Config};
+use lary_core::{AgentKind, Config};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -150,7 +150,7 @@ fn extract_version(line: &str) -> Option<String> {
 
 /// Detect every runnable built-in agent concurrently.
 pub async fn detect_all(cfg: &Config) -> Vec<Detected> {
-    let kinds: Vec<AgentKind> = larrier_core::agent::runnable().filter(|s| !s.binaries.is_empty()).map(|s| s.kind.clone()).collect();
+    let kinds: Vec<AgentKind> = lary_core::agent::runnable().filter(|s| !s.binaries.is_empty()).map(|s| s.kind.clone()).collect();
     let futs = kinds.into_iter().map(|k| {
         let ov = cfg.agent(&k).binary.clone();
         async move {
@@ -198,11 +198,11 @@ mod tests {
 
 #[cfg(test)]
 mod machine {
-    /// `cargo test -p larrier-agents detect_this_machine -- --ignored --nocapture`
+    /// `cargo test -p lary-agents detect_this_machine -- --ignored --nocapture`
     #[tokio::test]
     #[ignore]
     async fn detect_this_machine() {
-        let cfg = larrier_core::Config::default();
+        let cfg = lary_core::Config::default();
         for d in super::detect_all(&cfg).await {
             let launch = d.path.as_ref().map(|p| crate::request::unwrap_shim(p));
             println!("{:<14} {:<22} {:?} {:?} {:?}", d.kind.id(), d.version.clone().unwrap_or_default(), d.path, launch, d.note);

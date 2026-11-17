@@ -164,7 +164,7 @@
 }
 .ap-preview-foot { margin-top: 8px; font-size: 11px; color: var(--fg-3); text-align: center; }
 
-/* The preview is a real, themed Larrier scope drawn at 80%. */
+/* The preview is a real, themed Lary scope drawn at 80%. */
 .ap-wrap .app.ap-mini {
   position: absolute; top: 0; left: 0; width: 125%; height: 125%;
   transform: scale(0.8); transform-origin: 0 0;

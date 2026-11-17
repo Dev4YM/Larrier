@@ -1,11 +1,11 @@
 //! Settings → Appearance: theme, presets, colors, fonts, layout and motion,
-//! next to a live preview built from Larrier's real UI pieces so every
+//! next to a live preview built from Lary's real UI pieces so every
 //! change shows the moment it is made.
 
 use std::collections::{BTreeMap, HashMap};
 
 use dioxus::prelude::*;
-use larrier_core::{config::SidebarGroup, ButtonCorners, Density, Settings, TextSize, Theme};
+use lary_core::{config::SidebarGroup, ButtonCorners, Density, Settings, TextSize, Theme};
 
 use super::{Dropdown, Toggle};
 use crate::icons::{Icon, Lucide, I};
@@ -119,17 +119,17 @@ struct Preset {
     contrast: bool,
 }
 
-const LARRIER_LIGHT: Base = Base {
+const LARY_LIGHT: Base = Base {
     win: "#f2f1ed", pane: "#f7f7f4", card: "#f7f7f4", card2: "#fbfbf9", selected: "#ebeae5", chip: "#e6e5e0", chip2: "#e1e0db",
     fg: "#26251e", blue: "#3a6a9f", green: "#1f8a65", red: "#cf2d56", amber: "#c08532",
 };
-const LARRIER_DARK: Base = Base {
+const LARY_DARK: Base = Base {
     win: "#161512", pane: "#1b1a17", card: "#201f1b", card2: "#23221e", selected: "#262520", chip: "#2b2a25", chip2: "#33322c",
     fg: "#e9e7e0", blue: "#7ba7d8", green: "#4cb88a", red: "#ee6a8a", amber: "#d9a149",
 };
 
 const PRESETS: &[Preset] = &[
-    Preset { name: "Larrier", note: "Warm paper and ink", light: LARRIER_LIGHT, dark: LARRIER_DARK, contrast: false },
+    Preset { name: "Lary", note: "Warm paper and ink", light: LARY_LIGHT, dark: LARY_DARK, contrast: false },
     Preset {
         name: "Neutral",
         note: "Clean grays, crisp white cards",
@@ -235,7 +235,7 @@ fn derive(b: &Base, dark: bool, contrast: bool) -> Vec<(&'static str, String)> {
 
 /// The `custom_colors` map a preset writes (empty for the built-in theme).
 fn preset_colors(p: &Preset) -> BTreeMap<String, String> {
-    if p.name == "Larrier" {
+    if p.name == "Lary" {
         return BTreeMap::new();
     }
     let mut m = BTreeMap::new();
@@ -413,7 +413,7 @@ pub fn AppearancePage() -> Element {
     let export = move |_| {
         let s = app.config.read().settings.clone();
         let v = serde_json::json!({
-            "larrier_theme": 1,
+            "lary_theme": 1,
             "accent": s.accent,
             "custom_colors": s.custom_colors,
             "code_theme_light": s.code_theme_light,
@@ -462,7 +462,7 @@ pub fn AppearancePage() -> Element {
             div { class: "ap-head",
                 div { class: "grow",
                     h1 { "Appearance" }
-                    div { class: "ap-sub", "Make Larrier yours. Every change shows in the preview as you make it." }
+                    div { class: "ap-sub", "Make Lary yours. Every change shows in the preview as you make it." }
                 }
                 div { class: "ap-head-actions",
                     button { class: "ghost-btn", title: "Copy this look as JSON", onclick: export, Lucide { name: "share", size: 13 } "Export" }
@@ -605,7 +605,7 @@ pub fn AppearancePage() -> Element {
                                 onchange: move |v: String| { edit_dark.set(false); app.update_config(|c| c.settings.code_theme_light = if v.is_empty() { None } else { Some(v) }) } }
                         }
                         div { class: "set-row",
-                            div { class: "lbl", div { class: "t", "Dark Code Theme" } div { class: "d", "Used when Larrier is dark." } }
+                            div { class: "lbl", div { class: "t", "Dark Code Theme" } div { class: "d", "Used when Lary is dark." } }
                             super::Select { value: s.code_theme_dark.clone().unwrap_or_default(), options: code_opts, wide: true,
                                 onchange: move |v: String| { edit_dark.set(true); app.update_config(|c| c.settings.code_theme_dark = if v.is_empty() { None } else { Some(v) }) } }
                         }
@@ -708,7 +708,7 @@ pub fn AppearancePage() -> Element {
                     div { class: "set-group-title", Lucide { name: "wind", size: 13 } "Motion" }
                     div { class: "set-card",
                         div { class: "set-row",
-                            div { class: "lbl", div { class: "t", "Reduce Motion" } div { class: "d", "Minimize animations and transitions across Larrier." } }
+                            div { class: "lbl", div { class: "t", "Reduce Motion" } div { class: "d", "Minimize animations and transitions across Lary." } }
                             Toggle { on: s.reduce_motion, onchange: move |v: bool| app.update_config(|c| c.settings.reduce_motion = v) }
                         }
                     }
@@ -740,10 +740,10 @@ pub fn AppearancePage() -> Element {
 }
 
 /// Parse an exported theme and return the settings change it makes.
-fn import_theme(text: &str) -> anyhow::Result<impl FnOnce(&mut larrier_core::Config)> {
-    let v: serde_json::Value = serde_json::from_str(text.trim()).map_err(|_| anyhow::anyhow!("the clipboard doesn't hold a Larrier theme"))?;
-    if v.get("larrier_theme").is_none() {
-        anyhow::bail!("the clipboard doesn't hold a Larrier theme");
+fn import_theme(text: &str) -> anyhow::Result<impl FnOnce(&mut lary_core::Config)> {
+    let v: serde_json::Value = serde_json::from_str(text.trim()).map_err(|_| anyhow::anyhow!("the clipboard doesn't hold a Lary theme"))?;
+    if v.get("lary_theme").is_none() {
+        anyhow::bail!("the clipboard doesn't hold a Lary theme");
     }
     let colors: BTreeMap<String, String> = v
         .get("custom_colors")
@@ -762,7 +762,7 @@ fn import_theme(text: &str) -> anyhow::Result<impl FnOnce(&mut larrier_core::Con
     let size: Option<TextSize> = v.get("text_size").and_then(|t| serde_json::from_value(t.clone()).ok())
         .or_else(|| v.get("font_size").and_then(|x| x.as_u64()).map(|n| TextSize::nearest(n as u32)));
     let density: Option<Density> = v.get("density").and_then(|d| serde_json::from_value(d.clone()).ok());
-    Ok(move |c: &mut larrier_core::Config| {
+    Ok(move |c: &mut lary_core::Config| {
         let st = &mut c.settings;
         st.custom_colors = colors;
         if let Some(a) = accent {
@@ -980,7 +980,7 @@ fn FontPicker(mono: bool, installed: HashMap<String, bool>) -> Element {
     }
 }
 
-/// A miniature Larrier window made of the app's own components and
+/// A miniature Lary window made of the app's own components and
 /// classes, themed exactly like the real thing.
 #[component]
 fn PreviewPane(dark: bool) -> Element {
@@ -1010,7 +1010,7 @@ fn PreviewPane(dark: bool) -> Element {
                             div { class: "nav-row", span { class: "ic", Icon { i: I::CalendarClock, size: 15, stroke: 1.5 } } "Automations" }
                         }
                         div { class: "ap-m-sec", "Projects" }
-                        div { class: "repo-row", span { class: "ic", Icon { i: I::FolderOpen, size: 15, stroke: 1.5 } } span { class: "nm", "larrier" } }
+                        div { class: "repo-row", span { class: "ic", Icon { i: I::FolderOpen, size: 15, stroke: 1.5 } } span { class: "nm", "lary" } }
                         div { class: "chat-row selected", span { class: "bullet", span { class: "pt" } } span { class: "t", "Refactor parser" } span { class: "tm", "2m" } }
                         div { class: "chat-row", span { class: "bullet", super::loaders::Orbit { size: 13 } } span { class: "t", "Add dark mode" } span { class: "tm", "now" } }
                         div { class: "chat-sub", "Editing theme.rs" }

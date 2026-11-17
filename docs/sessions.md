@@ -1,12 +1,12 @@
 # Sessions
 
-Every conversation in Larrier is one file in the
-[Larrier Session Format](LSF.md): text, reasoning, tool calls with their
+Every conversation in Lary is one file in the
+[Lary Session Format](LSF.md): text, reasoning, tool calls with their
 output, diffs, plans, images and token usage, whichever agent produced them.
 
 ## Importing
 
-Larrier reads the native session stores of:
+Lary reads the native session stores of:
 
 | Agent | Store |
 |---|---|
@@ -29,16 +29,16 @@ Importing only reads the agents' folders.
 
 ## Live sync
 
-With **Settings → Sessions → Live sync** on, Larrier watches those folders and
+With **Settings → Sessions → Live sync** on, Lary watches those folders and
 updates sessions as the agents write them. A chat running in another app
-(a terminal, the agent's own app) shows as running in Larrier, and Larrier
+(a terminal, the agent's own app) shows as running in Lary, and Lary
 won't run it at the same time.
 
 ## Continuing with another agent
 
 Any chat can continue with any agent:
 
-1. **Native resume** (Claude Code, Codex, Gemini CLI, Pi): Larrier writes a
+1. **Native resume** (Claude Code, Codex, Gemini CLI, Pi): Lary writes a
    real session file in the target agent's store and the agent resumes it
    with its full history.
 2. **Context handoff** (every other agent): the messages that agent hasn't
@@ -51,13 +51,13 @@ merged record of everything every agent did.
 
 ## Forks and edits
 
-Editing an earlier prompt sends it as a fork: Larrier rewinds the agent's
+Editing an earlier prompt sends it as a fork: Lary rewinds the agent's
 own session to that point where the agent supports it (Claude Code, Codex,
 Gemini CLI, Pi) and continues from there. Forks are linked to the chat they
 came from.
 
 ## Export
 
-**File → Export Agent…** (or a chat's ⋯ menu, or `larrier export`) writes a session as LSF (JSON Lines or
+**File → Export Agent…** (or a chat's ⋯ menu, or `lary export`) writes a session as LSF (JSON Lines or
 one JSON document), Markdown, or a native session for Claude Code, Codex,
 Gemini CLI or Pi.

@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use larrier_core::lsf::is_narration_block;
-use larrier_core::{AgentKind, FileDiff, Message, Part, Session, ToolCall, Usage};
+use lary_core::lsf::is_narration_block;
+use lary_core::{AgentKind, FileDiff, Message, Part, Session, ToolCall, Usage};
 use rusqlite::Connection;
 use serde_json::Value;
 
@@ -359,7 +359,7 @@ mod tests {
         ];
         let child = |id: &str| {
             assert_eq!(id, "ses_child");
-            vec![Message::new(larrier_core::Role::User, vec![Part::Text { text: "look".into() }])]
+            vec![Message::new(lary_core::Role::User, vec![Part::Text { text: "look".into() }])]
         };
         let s = build(list, Meta { native_id: "ses_1".into(), ..Default::default() }, &child).unwrap();
         assert!(s.external_turn, "the last reply has not completed");

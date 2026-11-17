@@ -3,8 +3,8 @@
 
 use chrono::{Datelike, Local, Timelike};
 use dioxus::prelude::*;
-use larrier_core::automation::{templates, Automation, Template, Trigger, CATEGORIES};
-use larrier_core::AgentKind;
+use lary_core::automation::{templates, Automation, Template, Trigger, CATEGORIES};
+use lary_core::AgentKind;
 
 use super::{AgentGlyph, Toggle};
 use crate::icons::{Icon, Lucide, I};
@@ -133,7 +133,7 @@ pub fn AutomationsView() -> Element {
                     button { class: "au-black", onclick: { let mut n = new_from.clone(); move |_| n(None) }, "New Automation" }
                 }
 
-                div { class: "au-label", "From Larrier" }
+                div { class: "au-label", "From Lary" }
                 div { class: "au-hero",
                     div { class: "au-hero-art", Upcoming { autos: autos.clone() } }
                     div { class: "au-hero-body",
@@ -310,7 +310,7 @@ fn AutoRow(a: Automation, onedit: EventHandler<Automation>) -> Element {
                 span { class: "nm", title: "{a.prompt}", "{a.name}" }
                 span { class: "pr",
                     if let Some(w) = ws { "{w} · " }
-                    "{larrier_core::lsf::preview_line(&a.prompt, 90)}"
+                    "{lary_core::lsf::preview_line(&a.prompt, 90)}"
                 }
             }
             div { class: "cell",
@@ -361,7 +361,7 @@ fn set_enabled(app: App, id: &str, on: bool) {
 #[component]
 fn RunsTable(query: String) -> Element {
     let app = use_app();
-    let runs: Vec<larrier_core::SessionSummary> = app
+    let runs: Vec<lary_core::SessionSummary> = app
         .sessions
         .read()
         .iter()
@@ -447,7 +447,7 @@ enum Kind {
 fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Element {
     let app = use_app();
     let mut a = use_signal(|| initial.clone());
-    // Changes so far are kept (until saved or cancelled), in case Larrier closes.
+    // Changes so far are kept (until saved or cancelled), in case Lary closes.
     use_effect(move || crate::keep::set_value(crate::keep::WINDOW, "automations.editing", &Some((a.read().clone(), is_new))));
     let mut error = use_signal(String::new);
     let kind = use_signal(|| match initial.trigger {
@@ -566,7 +566,7 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
                         value: cur.agent.id().to_string(),
                         wide: true,
                         lead: rsx! { AgentGlyph { kind: cur.agent.clone() } },
-                        options: larrier_core::agent::runnable()
+                        options: lary_core::agent::runnable()
                             .map(|s| (s.kind.id().to_string(), s.name.to_string()))
                             .chain(customs.iter().map(|c| (AgentKind::Custom(c.id.clone()).id().to_string(), c.name.clone())))
                             .collect::<Vec<_>>(),

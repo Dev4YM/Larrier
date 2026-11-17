@@ -1,11 +1,11 @@
 //! Agent Client Protocol client (protocol version 1): newline-delimited
 //! JSON-RPC 2.0 over the agent's stdio.
 //!
-//! Larrier implements the client side: `fs/read_text_file`,
+//! Lary implements the client side: `fs/read_text_file`,
 //! `fs/write_text_file`, the `terminal/*` methods and
 //! `session/request_permission` (surfaced to the user, or auto-approved in
 //! Full auto). Sessions are resumed with `session/load` when the agent
-//! supports it; replayed history is ignored because Larrier already has it.
+//! supports it; replayed history is ignored because Lary already has it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::Engine;
-use larrier_core::{
+use lary_core::{
     lsf::MediaSource, AgentKind, FileDiff, Message, Part, RunMode, Session, ToolCall, ToolKind, ToolStatus,
 };
 use serde_json::{json, Value};
@@ -403,7 +403,7 @@ impl Acp {
                 self.terminals.remove(&tid);
                 self.respond(id, Value::Null);
             }
-            other => self.respond_error(id, -32601, format!("method not supported by Larrier: {other}")),
+            other => self.respond_error(id, -32601, format!("method not supported by Lary: {other}")),
         }
     }
 
@@ -416,7 +416,7 @@ impl Acp {
         }
     }
 
-    /// MCP servers Larrier adds to the agent's session (its browser).
+    /// MCP servers Lary adds to the agent's session (its browser).
     fn mcp_servers(&self) -> Value {
         Value::Array(self.req.browser.iter().map(|b| b.acp()).collect())
     }
@@ -438,7 +438,7 @@ impl Acp {
             self.respond(id, json!({ "outcome": { "outcome": "cancelled" } }));
             return;
         }
-        // Larrier's own browser tools are always allowed.
+        // Lary's own browser tools are always allowed.
         let browser = self.req.browser.is_some() && params["toolCall"].to_string().contains(crate::browser::SERVER_NAME);
         if self.req.run_mode == RunMode::FullAuto || approves_all(&self.req) || browser {
             let pick = options
@@ -636,7 +636,7 @@ impl Acp {
     }
 
     /// A tool's text with each embedded terminal replaced by what that
-    /// terminal printed (Larrier runs the agent's terminals itself).
+    /// terminal printed (Lary runs the agent's terminals itself).
     fn terminal_text(&self, u: &Value) -> Option<String> {
         let items = u["content"].as_array()?;
         if !items.iter().any(|c| s(c, "type") == Some("terminal")) {
@@ -686,7 +686,7 @@ impl Acp {
                 json!({
                     "protocolVersion": PROTOCOL_VERSION,
                     "clientCapabilities": { "fs": { "readTextFile": true, "writeTextFile": true }, "terminal": true },
-                    "clientInfo": { "name": "larrier", "title": "Larrier", "version": larrier_core::APP_VERSION },
+                    "clientInfo": { "name": "lary", "title": "Lary", "version": lary_core::APP_VERSION },
                 }),
             )
             .await;
@@ -994,7 +994,7 @@ fn full_history(req: &TurnRequest) -> String {
 mod tests {
     use super::*;
     use crate::request::Launch;
-    use larrier_core::Protocol;
+    use lary_core::Protocol;
 
     fn req(run_mode: RunMode) -> TurnRequest {
         TurnRequest {
@@ -1044,7 +1044,7 @@ mod tests {
                     let _ = to_client.send(upd(json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"On it."}})));
                     let _ = to_client.send(upd(json!({"sessionUpdate":"tool_call","toolCallId":"t1","title":"Edit src/a.rs","kind":"edit","status":"pending","rawInput":{"file_path":"src/a.rs"}})));
                     // Ask the client to read a file and for permission.
-                    let _ = to_client.send(json!({"jsonrpc":"2.0","id":100,"method":"fs/read_text_file","params":{"sessionId":"acp-1","path":"definitely-missing-larrier.txt"}}));
+                    let _ = to_client.send(json!({"jsonrpc":"2.0","id":100,"method":"fs/read_text_file","params":{"sessionId":"acp-1","path":"definitely-missing-lary.txt"}}));
                     let _ = to_client.send(json!({"jsonrpc":"2.0","id":101,"method":"session/request_permission","params":{"sessionId":"acp-1","toolCall":{"toolCallId":"t1","title":"Edit src/a.rs"},"options":[{"optionId":"ok","name":"Allow","kind":"allow_once"},{"optionId":"no","name":"Reject","kind":"reject_once"}]}}));
                     // Wait for the permission answer before finishing.
                     while let Some(r) = from_client.recv().await {

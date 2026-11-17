@@ -1,4 +1,4 @@
-//! Larrier's built-in Chat agent: streaming chat over provider HTTP APIs.
+//! Lary's built-in Chat agent: streaming chat over provider HTTP APIs.
 //!
 //! * OpenAI-compatible `/chat/completions` (OpenAI, OpenRouter, Ollama, custom)
 //! * Anthropic `/v1/messages`
@@ -9,7 +9,7 @@
 
 use base64::Engine;
 use futures::StreamExt;
-use larrier_core::{lsf::MediaSource, ApiKind, Message, Part, Role, Usage};
+use lary_core::{lsf::MediaSource, ApiKind, Message, Part, Role, Usage};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -17,12 +17,12 @@ use super::{s, u};
 use crate::events::{AgentEvent, EventSink, TurnCommand};
 use crate::request::{ChatTarget, TurnRequest};
 
-const SYSTEM_PROMPT: &str = "You are a helpful assistant running inside Larrier, a workspace for coding agents and AI chats. \
+const SYSTEM_PROMPT: &str = "You are a helpful assistant running inside Lary, a workspace for coding agents and AI chats. \
 Answer clearly; use Markdown for structure and fenced code blocks for code.";
 
 pub async fn run(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
     let Some(target) = req.chat.clone() else {
-        sink.error("Larrier Chat has no API account. Add one in Settings → Harnesses → Larrier Chat.");
+        sink.error("Lary Chat has no API account. Add one in Settings → Harnesses → Lary Chat.");
         sink.done(false, Some("error".into()));
         return;
     };
@@ -84,7 +84,7 @@ pub fn history_turns(history: &[Message]) -> Vec<Turn> {
                 Part::Tool(t) => {
                     text.push_str(&format!("\n[tool] {}", t.title.clone().unwrap_or_else(|| t.name.clone())));
                     if let Some(o) = t.output.as_deref().filter(|o| !o.trim().is_empty()) {
-                        let o = larrier_core::lsf::truncate_middle(o.trim(), 800);
+                        let o = lary_core::lsf::truncate_middle(o.trim(), 800);
                         text.push_str(&format!("\n→ {o}"));
                     }
                 }
@@ -198,7 +198,7 @@ async fn stream_chat(target: &ChatTarget, turns: &[Turn], sink: &EventSink) -> R
                 rb = rb.bearer_auth(key);
             }
             if target.kind == ApiKind::OpenRouter {
-                rb = rb.header("HTTP-Referer", "https://github.com/Dev4YM/Larrier").header("X-Title", "Larrier");
+                rb = rb.header("HTTP-Referer", "https://github.com/Dev4YM/Lary").header("X-Title", "Lary");
             }
             (rb, Decoder::OpenAi(None))
         }
@@ -337,7 +337,7 @@ impl Decoder {
                         "text_delta" => sink.text(s(d, "text").unwrap_or("")),
                         "thinking_delta" => sink.send(AgentEvent::ReasoningDelta { text: s(d, "thinking").unwrap_or("").to_string() }),
                         // Narration arrives as a thinking block; its signature says so.
-                        "signature_delta" if larrier_core::lsf::is_narration_signature(s(d, "signature").unwrap_or("")) => {
+                        "signature_delta" if lary_core::lsf::is_narration_signature(s(d, "signature").unwrap_or("")) => {
                             sink.send(AgentEvent::ReasoningToText { back: 0 })
                         }
                         _ => {}
@@ -453,7 +453,7 @@ impl SseParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrier_core::{AgentKind, ToolCall};
+    use lary_core::{AgentKind, ToolCall};
     use tokio::sync::mpsc;
 
     fn collect(dec: &mut Decoder, events: Vec<SseEvent>) -> Vec<AgentEvent> {

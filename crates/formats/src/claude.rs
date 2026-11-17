@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::Utc;
-use larrier_core::lsf::{close_active_tools, find_tool_deep_mut, is_narration_block, slim_transcript, title_from_prompt};
-use larrier_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
+use lary_core::lsf::{close_active_tools, find_tool_deep_mut, is_narration_block, slim_transcript, title_from_prompt};
+use lary_core::{AgentKind, FileDiff, Message, NativeLink, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -493,8 +493,8 @@ pub fn parse(text: &str, path: Option<&Path>, fallback_id: &str) -> Result<Sessi
     Ok(session)
 }
 
-/// The Larrier mode for a recorded Claude Code permission mode. Bypass is
-/// never carried over: continuing in Larrier must not skip permission
+/// The Lary mode for a recorded Claude Code permission mode. Bypass is
+/// never carried over: continuing in Lary must not skip permission
 /// prompts unless the user picks that mode here.
 fn imported_mode(m: &str) -> Option<&'static str> {
     Some(match m {
@@ -1104,7 +1104,7 @@ pub fn export_lines(session: &Session, sid: &str) -> String {
                 obj.insert(
                     "message".into(),
                     json!({
-                        "id": format!("msg_larrier_{i:04}"),
+                        "id": format!("msg_lary_{i:04}"),
                         "type": "message",
                         "role": "assistant",
                         "model": model,
@@ -1138,7 +1138,7 @@ pub enum Rewind {
 }
 
 /// The rewind point for the prompt `later` prompts before the newest one on
-/// the session's active branch. `text` is the prompt as Larrier shows it,
+/// the session's active branch. `text` is the prompt as Lary shows it,
 /// to make sure the right one was found; `None` when it can't be told.
 /// The branch is followed back to the last compaction only: Claude Code
 /// can't resume a conversation from before it.
@@ -1322,7 +1322,7 @@ mod tests {
 
     #[test]
     fn encodes_paths() {
-        assert_eq!(encode_project(r"D:\src\Projects\Server\Larrier"), "D--src-Projects-Server-Larrier");
+        assert_eq!(encode_project(r"D:\src\Projects\Server\Lary"), "D--src-Projects-Server-Lary");
         assert_eq!(encode_project(r"C:\Users\dev"), "C--Users-dev");
     }
 
@@ -1343,7 +1343,7 @@ mod tests {
         assert_eq!(prs.len(), 1);
         assert_eq!(prs[0]["number"], 7);
 
-        // Bypass is never carried into Larrier.
+        // Bypass is never carried into Lary.
         let bypass = [lines[0], r#"{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"S"}"#];
         assert_eq!(parse(&bypass.join("
 "), None, "S").unwrap().mode, None);
@@ -1573,9 +1573,9 @@ mod tests {
 
     #[test]
     fn export_roundtrip() {
-        let mut s = Session::new(AGENT, Some(larrier_core::WorkspaceRef::from_path("/tmp/x")));
-        s.push(larrier_core::Message::user_text("hello"));
-        let mut a = larrier_core::Message::assistant(AGENT, None);
+        let mut s = Session::new(AGENT, Some(lary_core::WorkspaceRef::from_path("/tmp/x")));
+        s.push(lary_core::Message::user_text("hello"));
+        let mut a = lary_core::Message::assistant(AGENT, None);
         a.push_text("world");
         s.push(a);
         let text = export_lines(&s, "SID");

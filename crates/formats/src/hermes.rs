@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use larrier_core::{AgentKind, Session, ToolCall, Usage};
+use lary_core::{AgentKind, Session, ToolCall, Usage};
 use serde_json::Value;
 
 use crate::util::{self, content_text, env_dir, finish, json_or_string, open_sqlite, s, ts_from_secs, Conv, Meta};

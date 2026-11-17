@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use larrier_core::lsf::{close_active_tools, is_narration_block, slim_transcript, title_from_prompt, MediaSource};
-use larrier_core::{AgentKind, FileDiff, Message, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
+use lary_core::lsf::{close_active_tools, is_narration_block, slim_transcript, title_from_prompt, MediaSource};
+use lary_core::{AgentKind, FileDiff, Message, Part, Role, Session, ToolCall, ToolKind, ToolStatus, Usage};
 use serde_json::Value;
 
 use crate::util::{self, content_text, env_dir, finish, head_lines, json_lines, json_or_string, open_sqlite, parse_ts, s, string, ts_from_ms, Conv, Meta};
@@ -379,7 +379,7 @@ pub fn import(info: &NativeSessionInfo) -> Result<Session> {
     };
     if s.workspace.is_none() {
         if let Some(c) = &info.cwd {
-            s.workspace = Some(larrier_core::WorkspaceRef::from_path(c.clone()));
+            s.workspace = Some(lary_core::WorkspaceRef::from_path(c.clone()));
         }
     }
     Ok(s)
@@ -499,7 +499,7 @@ fn bubble_into(conv: &mut Conv, b: &Value) {
         let args = s(tf, "params").filter(|p| !p.is_empty()).or_else(|| s(tf, "rawArgs").filter(|p| !p.is_empty())).map(json_or_string).unwrap_or(Value::Null);
         // Cursor wraps some params one level deep ({"relativeWorkspacePath":..} etc.)
         let input = normalize_args(args);
-        let id = s(tf, "toolCallId").filter(|i| !i.is_empty()).map(String::from).unwrap_or_else(larrier_core::lsf::new_id);
+        let id = s(tf, "toolCallId").filter(|i| !i.is_empty()).map(String::from).unwrap_or_else(lary_core::lsf::new_id);
         let tool = ToolCall::new(id.clone(), name, input);
         let status = s(tf, "status").unwrap_or("completed");
         conv.tool(tool, ts, None);
@@ -1056,7 +1056,7 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(cli_chat_in(chats, "chat-1", None, Some(r"c:\users\me\")).unwrap().db, blank, "the session's own folder wins");
         }
-        assert_eq!(cli_chat_in(chats, "chat-1", Some(&home), Some(r"C:\Users\me")).unwrap().db, home, "where Larrier last saw it wins");
+        assert_eq!(cli_chat_in(chats, "chat-1", Some(&home), Some(r"C:\Users\me")).unwrap().db, home, "where Lary last saw it wins");
         assert!(cli_chat_in(chats, "chat-2", None, None).is_none(), "not a CLI chat (made in the Cursor app)");
         // A store whose folder doesn't match its workspace can't be resumed.
         let moved = chat_store(chats, r"D:\a", "chat-3", 2);
@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     /// Every chat on this machine gets its folder (`cargo test -p
-    /// larrier-formats real_cursor_workspaces -- --ignored --nocapture`).
+    /// lary-formats real_cursor_workspaces -- --ignored --nocapture`).
     #[test]
     #[ignore]
     fn real_cursor_workspaces() {

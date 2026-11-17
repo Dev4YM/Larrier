@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use dioxus::prelude::*;
 
 use super::loaders::{Orbit, Stamp};
-use larrier_core::{Message, Part, Role, ToolCall, ToolKind, ToolStatus};
+use lary_core::{Message, Part, Role, ToolCall, ToolKind, ToolStatus};
 
 use crate::icons::{Icon, I};
 use crate::state::{use_app, App, RightTab, View};
@@ -253,7 +253,7 @@ pub fn SubagentTranscript(session_id: String, tool_id: String) -> Element {
                         }
                         Fact { icon: I::Layers, k: "Tools", v: tools }
                         if let Some(c) = info.context {
-                            Fact { icon: I::Gauge, k: "Context", v: larrier_core::models::tokens_short(c) }
+                            Fact { icon: I::Gauge, k: "Context", v: lary_core::models::tokens_short(c) }
                         }
                         span { class: "tk-fact", title: "Run time",
                             span { class: "tk-ic", Icon { i: I::Timer, size: 12 } }
@@ -839,7 +839,7 @@ fn sub_info(t: &ToolCall, now: DateTime<Utc>) -> SubInfo {
         .iter()
         .find_map(|m| m.model.clone())
         .or_else(|| input_str(t, &["model"]).map(str::to_string))
-        .map(|m| larrier_core::models::display_name(&m));
+        .map(|m| lary_core::models::display_name(&m));
     let effort = input_str(t, &["reasoning_effort", "model_reasoning_effort", "effort"]).map(|e| {
         let mut c = e.chars();
         c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
@@ -885,7 +885,7 @@ pub fn status_word(status: ToolStatus, error: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use larrier_core::AgentKind;
+    use lary_core::AgentKind;
     use serde_json::json;
 
     fn msg(tools: Vec<ToolCall>) -> Message {

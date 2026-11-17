@@ -1,14 +1,14 @@
-//! Larrier's browser engine: Chromium, run by Larrier itself through the
+//! Lary's browser engine: Chromium, run by Lary itself through the
 //! Chromium Embedded Framework, the way an Electron app runs its views. Each
 //! page tab is a Chromium browser made as a child window of a frame laid
-//! over the Browser tab's area. Larrier does what a browser's own chrome
+//! over the Browser tab's area. Lary does what a browser's own chrome
 //! would: it shows its own page for an address that can't be reached,
 //! opens pop-ups and new windows as tabs, and DevTools in a tab; agents
 //! drive the very same pages over the engine's DevTools port.
 //!
 //! The engine's runtime (libcef.dll and its files, about 410 MB) isn't part
-//! of Larrier's program: it's fetched once per engine version into the
-//! user's `%LOCALAPPDATA%\Larrier\engine\<version>` and loaded on first use
+//! of Lary's program: it's fetched once per engine version into the
+//! user's `%LOCALAPPDATA%\Lary\engine\<version>` and loaded on first use
 //! (libcef.dll is delay-loaded). Its helper processes are this program,
 //! started with `--type=…` (see [`subprocess`]).
 
@@ -50,7 +50,7 @@ pub fn version() -> &'static str {
     })
 }
 
-/// Where engine runtimes are kept: the user's own Larrier folder, which
+/// Where engine runtimes are kept: the user's own Lary folder, which
 /// every install can write to (one for everyone can't write beside the
 /// program).
 pub fn root() -> PathBuf {
@@ -58,9 +58,9 @@ pub fn root() -> PathBuf {
 }
 
 /// Where this build's engine runtime is: `<root>/<version>`
-/// (`LARRIER_CEF_DIR` points elsewhere, for development).
+/// (`LARY_CEF_DIR` points elsewhere, for development).
 pub fn dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("LARRIER_CEF_DIR") {
+    if let Some(d) = std::env::var_os("LARY_CEF_DIR") {
         return d.into();
     }
     root().join(version())
@@ -92,7 +92,7 @@ pub fn present() -> bool {
 /// Its profile: cookies, sign-ins, cache, and the DevTools port file the
 /// agents' tools read.
 pub fn profile() -> PathBuf {
-    larrier_agents::browser::engine_dir()
+    lary_agents::browser::engine_dir()
 }
 
 /// Let libcef.dll (delay-loaded) be found where the runtime is.
@@ -131,7 +131,7 @@ wrap_app! {
             cl.append_switch(Some(&CefString::from("disable-renderer-backgrounding")));
             cl.append_switch(Some(&CefString::from("disable-background-timer-throttling")));
             cl.append_switch(Some(&CefString::from("disable-backgrounding-occluded-windows")));
-            // Larrier's own browser: not the extensions other programs
+            // Lary's own browser: not the extensions other programs
             // register for Google Chrome on this computer.
             cl.append_switch(Some(&CefString::from("disable-extensions")));
         }
@@ -219,10 +219,10 @@ fn announce(port: u16, profile: PathBuf) {
 // ------------------------------------------------------------- fetching it
 
 /// The engine's runtime for this version, published as a release of its
-/// own (it changes far less often than Larrier).
+/// own (it changes far less often than Lary).
 fn source() -> (String, String) {
     let v = version();
-    let base = format!("https://github.com/{}/releases/download/engine-{v}/Larrier-engine-{v}-windows-x64.zip", crate::update::repo());
+    let base = format!("https://github.com/{}/releases/download/engine-{v}/Lary-engine-{v}-windows-x64.zip", crate::update::repo());
     (base.clone(), format!("{base}.sha256"))
 }
 
@@ -247,7 +247,7 @@ pub fn ensure() {
 async fn fetch(progress: impl Fn(u64, u64)) -> Result<(), String> {
     use sha2::Digest;
     let (url, sha_url) = source();
-    let client = reqwest::Client::builder().user_agent(concat!("Larrier/", env!("CARGO_PKG_VERSION"))).build().map_err(|e| e.to_string())?;
+    let client = reqwest::Client::builder().user_agent(concat!("Lary/", env!("CARGO_PKG_VERSION"))).build().map_err(|e| e.to_string())?;
     let want = client.get(&sha_url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?;
     let want = want.split_whitespace().next().unwrap_or("").to_lowercase();
     let mut resp = client.get(&url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
@@ -350,7 +350,7 @@ static QUEUED: Mutex<Vec<Cmd>> = Mutex::new(Vec::new());
 static NEXT_ID: AtomicU64 = AtomicU64::new(1 << 40);
 /// Where DevTools goes and how big, as the user left it.
 static TOOLS_AT: Mutex<Option<DevtoolsLayout>> = Mutex::new(None);
-/// Larrier's theme is dark (the frame's own color, between page and DevTools).
+/// Lary's theme is dark (the frame's own color, between page and DevTools).
 static DARK: AtomicBool = AtomicBool::new(false);
 
 fn tools_at() -> DevtoolsLayout {
@@ -584,17 +584,17 @@ fn created(id: u64, browser: Option<Browser>) {
 }
 
 fn mark_js(id: u64) -> String {
-    format!("Object.defineProperty(window, '__larrierTab', {{ value: {id}, configurable: true }});")
+    format!("Object.defineProperty(window, '__laryTab', {{ value: {id}, configurable: true }});")
 }
 
-/// What reaches Larrier from a page's annotate script: a console message
+/// What reaches Lary from a page's annotate script: a console message
 /// starting with this (taken, never shown).
-const POST: &str = "\u{1}larrier-post:";
+const POST: &str = "\u{1}lary-post:";
 
-/// Larrier's scripts for a page of tab `id`, run as it starts: its tab, the
+/// Lary's scripts for a page of tab `id`, run as it starts: its tab, the
 /// annotate script, and the way that reports back (the console).
 fn page_js(id: u64) -> String {
-    let post = "if (!window.__larrierPost) Object.defineProperty(window, '__larrierPost', { value: (s) => console.debug('\\u0001larrier-post:' + s), configurable: true });";
+    let post = "if (!window.__laryPost) Object.defineProperty(window, '__laryPost', { value: (s) => console.debug('\\u0001lary-post:' + s), configurable: true });";
     format!("{}\n{post}\n{}", mark_js(id), ANNOTATE.get().cloned().unwrap_or_default())
 }
 
@@ -714,7 +714,7 @@ pub fn set_tools_layout(l: DevtoolsLayout) {
     lay_out();
 }
 
-/// Larrier's theme, for the frame's own color.
+/// Lary's theme, for the frame's own color.
 pub fn set_dark(dark: bool) {
     if DARK.swap(dark, Ordering::Relaxed) != dark {
         let frame = FRAME.load(Ordering::Relaxed);
@@ -805,7 +805,7 @@ wrap_life_span_handler! {
             _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
             // A link to a new tab or window, a pop-up (a sign-in window):
-            // a tab of Larrier's, still reaching the page that opened it.
+            // a tab of Lary's, still reaching the page that opened it.
             let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
             if let Some(w) = window_info {
                 *w = child_info();
@@ -831,8 +831,8 @@ wrap_life_span_handler! {
         }
 
         fn do_close(&self, browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
-            // The page's window sits inside Larrier's: close just it (the
-            // default would ask Larrier's own window to close).
+            // The page's window sits inside Lary's: close just it (the
+            // default would ask Lary's own window to close).
             if let Some(h) = browser.and_then(|b| b.host()) {
                 let hwnd = h.window_handle().0 as isize;
                 on_ui(move || unsafe {
@@ -943,7 +943,7 @@ wrap_load_handler! {
         fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _transition_type: TransitionType) {
             if is_main(&frame) {
                 emit(Ev::PageError { id: self.tab, code: None });
-                // Larrier's scripts, as the page starts.
+                // Lary's scripts, as the page starts.
                 if let Some(f) = frame {
                     f.execute_java_script(Some(&CefString::from(page_js(self.tab).as_str())), Some(&CefString::from("")), 0);
                 }
@@ -1110,14 +1110,14 @@ fn make_frame(main: isize) -> Option<isize> {
             RegisterClassW(&WNDCLASSW {
                 lpfnWndProc: Some(frame_proc),
                 hInstance: inst,
-                lpszClassName: w!("LarrierBrowserFrame"),
+                lpszClassName: w!("LaryBrowserFrame"),
                 hbrBackground: HBRUSH(GetStockObject(WHITE_BRUSH).0),
                 ..Default::default()
             })
         });
         let frame = CreateWindowExW(
             WS_EX_NOPARENTNOTIFY,
-            w!("LarrierBrowserFrame"),
+            w!("LaryBrowserFrame"),
             w!(""),
             WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
             AWAY,

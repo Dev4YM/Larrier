@@ -5,6 +5,17 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.48 — 2026-11-18
+
+### New
+
+- A Claude setup token account shows the command to copy or run, with shorter explanations
+- Lary keeps its own sessions, imports one from File → Import Session or sends one as context with @, and Companion mode still syncs every harness's
+
+### Fixed
+
+- Claude Code, Codex, Cursor and Grok connect only their official way, and the tab that shows it is called Connection
+- Harness logos show in full colour in the sidebar, menus and settings, not greyed out
 ## 0.1.47 — 2026-11-18
 
 ### New

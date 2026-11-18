@@ -586,6 +586,10 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
     };
     let model = session.model.clone().or(ac.default_model.clone()).filter(|m| m != "default" && !m.is_empty());
     let effort = session.effort.clone().or(ac.default_effort.clone()).filter(|e| !e.is_empty() && e != "default");
+    // Claude Code's Ultracode is an option beside the effort now; an effort
+    // of `ultracode` (picked before) turns it on, at the agent's own effort.
+    let ultracode = *agent == AgentKind::ClaudeCode && (session.ultracode || effort.as_deref() == Some("ultracode"));
+    let effort = effort.filter(|e| e != "ultracode");
     // The agent's own modes (Claude Code permission modes, Codex plan +
     // permissions, …): session pick, else the agent's default, else the
     // global autonomy level.
@@ -629,14 +633,21 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         if ml.model.is_some() {
             model = ml.model.clone();
         }
-        // Fast: Claude Code's fast mode, Codex's priority tier; this
-        // session only.
-        if session.fast {
-            match agent {
-                AgentKind::ClaudeCode => ml.args.extend(["--settings".into(), r#"{"fastMode":true}"#.into()]),
-                AgentKind::Codex => ml.args.extend(["-c".into(), r#"service_tier="fast""#.into()]),
-                _ => {}
+        // Fast: Claude Code's fast mode, Codex's priority tier; Ultracode:
+        // Claude Code's own setting. This session only.
+        match agent {
+            AgentKind::ClaudeCode if session.fast || ultracode => {
+                let mut s = serde_json::Map::new();
+                if session.fast {
+                    s.insert("fastMode".into(), serde_json::Value::Bool(true));
+                }
+                if ultracode {
+                    s.insert("ultracode".into(), serde_json::Value::Bool(true));
+                }
+                ml.args.extend(["--settings".into(), serde_json::Value::Object(s).to_string()]);
             }
+            AgentKind::Codex if session.fast => ml.args.extend(["-c".into(), r#"service_tier="fast""#.into()]),
+            _ => {}
         }
         launch.extra_args.splice(0..0, ml.args);
         launch.env.extend(ml.env);

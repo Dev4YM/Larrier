@@ -102,7 +102,7 @@ fn plan_option(agent: &AgentKind) -> Option<&'static str> {
 /// Model and effort for the composer button ("Opus 5.5", "Extra high"):
 /// the session's picks, else the defaults — the agent's own for the
 /// chat's account when Lary has none, so it reads what will really run.
-fn model_display(app: &App, agent: &AgentKind, account: Option<&str>, model: &Option<String>, effort: &Option<String>, fast: bool) -> (String, String) {
+fn model_display(app: &App, agent: &AgentKind, account: Option<&str>, model: &Option<String>, effort: &Option<String>, fast: bool, ultracode: bool) -> (String, String) {
     use crate::agent_models as am;
     if agent.spec().protocol == Protocol::HttpChat {
         let name = match model {
@@ -124,9 +124,12 @@ fn model_display(app: &App, agent: &AgentKind, account: Option<&str>, model: &Op
             extra.push(p.contexts.iter().find(|(v, _)| v == ctx).map(|(_, l)| l.clone()).unwrap_or_else(|| ctx.to_uppercase()));
         }
     }
-    extra.extend(r.effort.as_deref().map(lary_agents::models::effort_label));
+    extra.extend(r.effort.as_deref().filter(|e| *e != "ultracode").map(lary_agents::models::effort_label));
     if r.fast || (fast && offers_fast(app, agent, model.as_deref())) {
         extra.push("Fast".into());
+    }
+    if ultracode && *agent == AgentKind::ClaudeCode {
+        extra.push("Ultracode".into());
     }
     (name, extra.join(" · "))
 }
@@ -209,6 +212,7 @@ struct SessInfo {
     permission: Option<String>,
     effort: Option<String>,
     fast: bool,
+    ultracode: bool,
     worktree: bool,
     /// The worktree it runs in, when that was there before the chat.
     existing: Option<String>,
@@ -427,6 +431,7 @@ pub fn Composer(
             permission: s.permission.clone(),
             effort: s.effort.clone(),
             fast: s.fast,
+            ultracode: s.ultracode || s.effort.as_deref() == Some("ultracode"),
             worktree: matches!(s.environment, lary_core::Environment::Worktree { .. }),
             existing: match &s.environment {
                 lary_core::Environment::Worktree { path, branch, .. } if !branch.starts_with("lary/") && !branch.starts_with("larrier/") => Some(path.clone()),
@@ -488,6 +493,12 @@ pub fn Composer(
     let fast = match &session_id {
         Some(_) => sess.read().as_ref().is_some_and(|s| s.fast),
         None => app.draft.read().fast,
+    };
+    // Claude Code's Ultracode, the same way (an effort of `ultracode` from
+    // before it was a switch counts as on).
+    let ultracode = match &session_id {
+        Some(_) => sess.read().as_ref().is_some_and(|s| s.ultracode),
+        None => app.draft.read().ultracode,
     };
     // One of the agent's own agents the chat runs as (Claude Code's
     // `--agent`), chosen from @ before the first message.
@@ -586,7 +597,7 @@ pub fn Composer(
         Some(_) => sess.read().as_ref().and_then(|s| s.account.clone()),
         None => app.draft.read().account_id.clone(),
     };
-    let (model_text, effort_text) = model_display(&app, &agent, account_now.as_deref(), &model, &effort, fast);
+    let (model_text, effort_text) = model_display(&app, &agent, account_now.as_deref(), &model, &effort, fast, ultracode);
 
     // "@" mentions and "/" commands: one menu for the token typed just
     // before the caret, keyboard navigable, its pages opened in place.
@@ -788,6 +799,20 @@ pub fn Composer(
                 d.effort = e;
                 if claude {
                     d.fast = fast;
+                }
+            }
+        }
+    };
+    // Claude Code's Ultracode for the chat (or the new chat's draft).
+    let set_ultracode = move |on: bool, sid: Option<String>| {
+        let mut app = app;
+        match &sid {
+            Some(id) => app.set_session_ultracode(id, on),
+            None => {
+                let mut d = app.draft.write();
+                d.ultracode = on;
+                if d.effort.as_deref() == Some("ultracode") {
+                    d.effort = None;
                 }
             }
         }
@@ -1088,6 +1113,11 @@ pub fn Composer(
             model: model.clone(),
             effort: effort.clone(),
             fast,
+            ultracode,
+            onultracode: {
+                let sid = session_id.clone();
+                move |on: bool| set_ultracode(on, sid.clone())
+            },
             account: match &session_id {
                 Some(_) => sess.read().as_ref().and_then(|s| s.account.clone()),
                 None => app.draft.read().account_id.clone(),
@@ -1734,6 +1764,9 @@ fn ModelPicker(
     effort: Option<String>,
     /// Claude Code's fast mode is on for the chat.
     fast: bool,
+    /// Claude Code's Ultracode is on for the chat.
+    ultracode: bool,
+    onultracode: EventHandler<bool>,
     /// The account the chat runs as (None: the agent's default).
     account: Option<String>,
     onpick: EventHandler<(AgentKind, Option<String>)>,
@@ -2052,8 +2085,20 @@ fn ModelPicker(
                     let choice = crate::agent_models::choices(&app, &ek).into_iter().find(|c| c.id == eid);
                     let using = ek == agent && (model.as_deref() == Some(eid.as_str()) || family.as_deref() == Some(eid.as_str()));
                     let (sel_effort, sel_fast) = if using { (cur_effort.clone(), cur_fast) } else { (choice.as_ref().and_then(|c| c.default_effort.clone()), false) };
-                    let efforts = choice.as_ref().map(|c| c.efforts.clone()).unwrap_or_default();
+                    let efforts: Vec<String> = choice.as_ref().map(|c| c.efforts.clone()).unwrap_or_default().into_iter().filter(|e| e != "ultracode").collect();
                     let has_fast = choice.as_ref().is_some_and(|c| c.fast);
+                    // Claude Code's Ultracode: a switch beside the effort.
+                    let has_ultra = ek == AgentKind::ClaudeCode && choice.as_ref().is_some_and(|c| c.ultracode);
+                    let sel_ultra = using && ultracode;
+                    let (ek3, eid3) = (ek.clone(), eid.clone());
+                    let toggle_ultra = move |_| {
+                        let mut ed = edit;
+                        ed.set(None);
+                        if !using {
+                            onpick.call((ek3.clone(), Some(eid3.clone())));
+                        }
+                        onultracode.call(!sel_ultra);
+                    };
                     let context = choice.as_ref().and_then(|c| c.context);
                     // Context sizes to choose from (Cursor), the one in use checked.
                     let params = choice.as_ref().and_then(|c| c.params.clone()).filter(|p| p.contexts.len() > 1);
@@ -2121,17 +2166,26 @@ fn ModelPicker(
                                     }
                                 }
                             }
-                            if has_fast {
+                            if has_fast || has_ultra {
                                 if context.is_some() || params.is_some() || !efforts.is_empty() { div { class: "menu-sep" } }
                                 div { class: "menu-label", "Options" }
-                                {
-                                    let se = sel_effort.clone();
-                                    rsx! {
-                                        button { class: "menu-item", title: "Faster responses, at a higher price",
-                                            onclick: move |_| pick2(se.clone(), !sel_fast),
-                                            span { "Fast" }
-                                            span { class: if sel_fast { "toggle on sm" } else { "toggle sm" } }
+                                if has_fast {
+                                    {
+                                        let se = sel_effort.clone();
+                                        rsx! {
+                                            button { class: "menu-item", title: "Faster responses, at a higher price",
+                                                onclick: move |_| pick2(se.clone(), !sel_fast),
+                                                span { "Fast" }
+                                                span { class: if sel_fast { "toggle on sm" } else { "toggle sm" } }
+                                            }
                                         }
+                                    }
+                                }
+                                if has_ultra {
+                                    button { class: "menu-item", title: "Claude Code runs big tasks as workflows of many agents in the background, at the effort picked. Uses much more of your plan.",
+                                        onclick: toggle_ultra,
+                                        span { "Ultracode" }
+                                        span { class: if sel_ultra { "toggle on sm" } else { "toggle sm" } }
                                     }
                                 }
                             }

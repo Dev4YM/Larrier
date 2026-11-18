@@ -83,6 +83,16 @@ pub struct Session {
     /// price) for the models that offer it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fast: bool,
+    /// Claude Code's Ultracode (standing orchestration of subagents for
+    /// big tasks), an option beside the effort, at any effort.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ultracode: bool,
+    /// The chat's own look in the sidebar: an icon (Lucide name,
+    /// `emoji:…` or `image:…`, as a project's) and its colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
     /// One of the agent's own named agents the chat runs as (Claude Code's
@@ -925,6 +935,9 @@ impl Session {
             permission: None,
             effort: None,
             fast: false,
+            ultracode: false,
+            icon: None,
+            color: None,
             account_id: None,
             run_as: None,
             workspace,
@@ -1090,6 +1103,8 @@ impl Session {
             parent_id: self.parent.as_ref().map(|p| p.session_id.clone()),
             usage: self.usage.clone(),
             managed: self.is_managed(),
+            icon: self.icon.clone(),
+            color: self.color.clone(),
         }
     }
 
@@ -1376,6 +1391,11 @@ pub struct SessionSummary {
     /// Lary's own (see `Session::is_managed`): what Normal mode shows.
     #[serde(default)]
     pub managed: bool,
+    /// Its own icon and colour, when given one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 impl SessionSummary {

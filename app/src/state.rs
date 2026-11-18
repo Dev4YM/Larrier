@@ -227,6 +227,8 @@ pub enum Modal {
     WhatsNew(String, bool),
     /// File → Import Session: a harness session on this computer, or a file.
     ImportSession,
+    /// A chat's name, icon and colour, pinned and archived (its id).
+    EditChat(String),
     /// Delete a deleted chat for good (its id), or all of them (`None`).
     PurgeChats(Option<String>),
 }
@@ -303,6 +305,8 @@ pub struct Ui {
     pub chat_issues: HashMap<String, String>,
     /// The last chat, not opened again at start, and why (shown on Home).
     pub startup_issue: Option<(String, String)>,
+    /// The chat whose name is being edited in place in the sidebar.
+    pub renaming: Option<String>,
 }
 
 impl Ui {
@@ -456,6 +460,9 @@ pub struct Draft {
     pub effort: Option<String>,
     /// Claude Code's fast mode.
     pub fast: bool,
+    /// Claude Code's Ultracode.
+    #[serde(default)]
+    pub ultracode: bool,
     pub account_id: Option<String>,
     /// The agent's own named agent the new chat runs as (Claude Code's
     /// `--agent`).
@@ -560,6 +567,7 @@ impl App {
             permission: None,
             effort: None,
             fast: false,
+            ultracode: false,
             account_id: None,
             run_as: None,
             workspace: cfg.workspaces.first().map(|w| w.path.clone()),
@@ -613,6 +621,7 @@ impl App {
             opening: None,
             chat_issues: HashMap::new(),
             startup_issue: None,
+            renaming: None,
         };
         App {
             sessions: root_signal(listed(&cfg)),
@@ -2030,6 +2039,7 @@ impl App {
         s.model = d.model.clone();
         s.effort = d.effort.clone();
         s.fast = d.fast && lary_agents::request::takes_fast(&d.agent);
+        s.ultracode = d.ultracode && d.agent == AgentKind::ClaudeCode;
         s.mode = d.mode.clone();
         s.permission = d.permission.clone();
         s.account_id = d.account_id.clone();
@@ -2479,6 +2489,56 @@ impl App {
     /// Claude Code's fast mode for this chat (from its next turn).
     pub fn set_session_fast(self, id: &str, fast: bool) {
         self.update_session(id, |s| s.fast = fast);
+    }
+
+    pub fn set_session_ultracode(self, id: &str, on: bool) {
+        self.update_session(id, |s| {
+            s.ultracode = on;
+            // From before it was an option: the effort it stood in for.
+            if s.effort.as_deref() == Some("ultracode") {
+                s.effort = None;
+            }
+        });
+    }
+
+    /// A chat's name, icon and colour, and whether it's pinned or archived
+    /// (its Edit dialog).
+    pub fn edit_chat(self, id: &str, title: String, icon: Option<String>, color: Option<String>, pinned: bool, archived: bool) {
+        let at = archived.then(chrono::Utc::now);
+        let was_archived = self.sessions.peek().iter().find(|s| s.id == id).is_some_and(|s| s.archived);
+        let title = title.trim().to_string();
+        let (t1, i1, c1) = (title.clone(), icon.clone(), color.clone());
+        self.set_flags(
+            id,
+            move |s| {
+                if !title.is_empty() {
+                    s.title = title;
+                }
+                s.icon = icon;
+                s.color = color;
+                s.pinned = pinned;
+                if s.archived != archived {
+                    s.archived = archived;
+                    s.archived_at = at;
+                }
+            },
+            move |s| {
+                if !t1.is_empty() {
+                    s.title = t1;
+                }
+                s.icon = i1;
+                s.color = c1;
+                s.pinned = pinned;
+                if s.archived != archived {
+                    s.archived = archived;
+                    s.archived_at = at;
+                }
+            },
+        );
+        if archived && !was_archived && self.current_id().as_deref() == Some(id) {
+            self.forget_tabs(id);
+            self.set_view(View::Home);
+        }
     }
 
     pub fn set_session_mode(self, id: &str, mode: Option<String>) {

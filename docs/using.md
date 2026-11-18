@@ -251,8 +251,20 @@ each agent's own configuration and tagged with the agents that use it.
 
 ## Lary reopens as you left it
 
+While Lary starts, its loading screen shows the Lary mark and what it's
+doing ("Opening “…”"). It opens the chat you left again, loaded in the
+background; any other page (Settings, Customize, …) opens Home instead. A
+chat that can't be opened, or that Lary closed while opening last time,
+isn't opened again: Lary starts on Home, says which and why, and marks the
+chat in the sidebar.
+
+Opening a chat later works the same way: the chat area greys while it
+loads (the rest of the window keeps working, and another chat can be
+picked meanwhile); one that can't be opened leaves you where you were,
+with the reason and a mark on its row.
+
 Whether Lary was closed, updated or stopped, it comes back on the same
-chat or page, with each chat's tabs, side panel (browser pages, terminals
+chat, with each chat's tabs, side panel (browser pages, terminals
 with their recent output, open files, the commit message being typed),
 scroll position, queued and half-typed messages, the sidebar's state, the
 cards and groups left open or folded, and the searches and filters of

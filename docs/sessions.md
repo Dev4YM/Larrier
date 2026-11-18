@@ -19,6 +19,18 @@ Switching hides or shows the harnesses' sessions; nothing is deleted. A
 session imported by hand, or continued in Lary, is Lary's own in both
 modes.
 
+## Archived and deleted chats
+
+**Settings → Sessions** lists both:
+
+- **Archived** chats stay until you unarchive or delete them. **Delete
+  archived chats** can move them to Deleted after 30 days, 90 days or a
+  year instead (off by default).
+- **Deleted** chats are kept 10 days by default (or 30, 90, or until you
+  delete them), then go for good with the worktrees Lary made for them.
+  Each can be restored, or deleted for good at once; **Delete all** empties
+  the list. A deleted chat isn't imported again meanwhile.
+
 ## A harness's session, by hand
 
 - **File → Import Session…** (Ctrl+Shift+I in Normal mode) lists the

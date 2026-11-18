@@ -110,7 +110,16 @@ agent records them (Claude Code, Codex, Cursor, Gemini CLI).
 
 Lary reads each agent's own model list and defaults (Claude Code's model
 menu, Codex's model list, Cursor's enabled models, OpenCode and Hermes
-providers, …), so the picker shows exactly what the agent offers. A model's
+providers, …), so the picker shows exactly what the agent offers. It reads
+them per account, the way that account's chats run (its folder, token or
+key): what an agent offers and what its **Default** runs depend on the
+account (a subscription's plan picks Claude Code's default), so the
+Default row says what that account really gets. The picker reads a
+harness's list again when it opens and the list is a few minutes old.
+
+Each reply records the model the agent reported running; when that isn't
+the one picked (a plan without it, a limit reached, a fallback), the reply
+says so. A model's
 **Edit** sets its options where the agent has them: reasoning effort,
 context size (for example Cursor's 256K / 500K variants), speed. You can add
 your own models, on the agent's own service or served by one of its API

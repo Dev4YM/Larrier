@@ -1338,6 +1338,7 @@ fn Shortcuts() -> Element {
         ("Stop the reply", &["Ctrl", "."]),
         ("Settings", &["Ctrl", ","]),
         ("Import sessions", &["Ctrl", "Shift", "I"]),
+        ("Rename the chat, in the list", &["F2"]),
         ("Files", &["Ctrl", "Shift", "E"]),
         ("Send", &["Enter"]),
         ("New line", &["Shift", "Enter"]),

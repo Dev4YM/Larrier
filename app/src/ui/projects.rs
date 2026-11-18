@@ -104,8 +104,11 @@ pub fn ProjectMark(
     #[props(default = false)] open: bool,
     #[props(default = false)] home: bool,
     #[props(default = false)] tile: bool,
+    /// The icon with none picked (a chat's: a speech bubble).
+    #[props(default)]
+    fallback: Option<&'static str>,
 ) -> Element {
-    let fallback = if home { "house" } else if open { "folder-open" } else { "folder" };
+    let fallback = fallback.unwrap_or(if home { "house" } else if open { "folder-open" } else { "folder" });
     let look = look_of(icon.as_deref(), fallback);
     if !tile && color.is_none() && matches!(look, Look::Icon(_)) {
         let Look::Icon(name) = look else { return rsx! {} };
@@ -354,14 +357,77 @@ pub fn ProjectModal(id: Option<String>, path: Option<String>) -> Element {
     }
 }
 
-/// The look picker: Icons (every bundled one, searchable), Emojis
-/// (searchable) or a Custom image; then the color behind it.
+/// Edit a chat: its icon and colour, its name, and whether it's pinned or
+/// archived. Laid out as a project's dialog.
 #[component]
-fn LookPicker(w: Signal<Workspace>) -> Element {
+pub fn ChatModal(id: String) -> Element {
+    let mut app = use_app();
+    let s = app.sessions.read().iter().find(|s| s.id == id).cloned();
+    let Some(s) = s else {
+        return rsx! { div { class: "modal-body", "That chat is gone." } };
+    };
+    // Its look, carried the way the picker takes a project's.
+    let mut w = use_signal(|| {
+        let mut w = Workspace::new("");
+        w.id = s.id.clone();
+        w.name = s.title.clone();
+        w.icon = s.icon.clone();
+        w.color = s.color.clone();
+        w
+    });
+    let mut pinned = use_signal(|| s.pinned);
+    let mut archived = use_signal(|| s.archived);
+    let mut picker = use_signal(|| false);
+    let cur = w.read().clone();
+    let id2 = id.clone();
+    let save = move |_| {
+        let v = w.read().clone();
+        app.edit_chat(&id2, v.name, v.icon, v.color, pinned(), archived());
+        app.ui.write().modal = None;
+    };
+    rsx! {
+        div { class: "pjd-head",
+            span { class: "t", "Edit chat" }
+            button { class: "icon-btn", title: "Close", onclick: move |_| app.ui.write().modal = None, Icon { i: I::X, size: 15 } }
+        }
+        div { class: "pjd-hero",
+            div { class: "menu-anchor",
+                button { class: if picker() { "pjd-avatar open" } else { "pjd-avatar" }, title: "Icon, emoji or image, and its color", onclick: move |_| picker.set(true),
+                    ProjectMark { icon: cur.icon.clone(), color: cur.color.clone(), size: 72, tile: true, fallback: Some("message-square") }
+                }
+                Dropdown { open: picker, up: false, class: "pjd-picker center".to_string(),
+                    LookPicker { w, fallback: Some("message-square") }
+                }
+            }
+            input { class: "pjd-name", autofocus: true, placeholder: "Chat name", value: "{cur.name}", spellcheck: "false",
+                oninput: move |e| w.write().name = e.value() }
+        }
+        div { class: "pjd-rows",
+            div { class: "pjd-row",
+                span { class: "lbl", "Pinned" }
+                super::Toggle { on: pinned(), onchange: move |v: bool| pinned.set(v) }
+            }
+            div { class: "pjd-row",
+                span { class: "lbl", "Archived" }
+                super::Toggle { on: archived(), onchange: move |v: bool| archived.set(v) }
+            }
+        }
+        div { class: "modal-foot",
+            button { class: "ghost-btn danger pj-remove", onclick: { let i = id.clone(); move |_| app.ui.write().modal = Some(crate::state::Modal::ConfirmDelete(i.clone())) }, "Delete chat" }
+            button { class: "primary-btn", disabled: cur.name.trim().is_empty(), onclick: save, "Save" }
+        }
+    }
+}
+
+/// The look picker: Icons (every bundled one, searchable), Emojis
+/// (searchable) or a Custom image; then the color behind it. A chat's look
+/// goes through it too (in a `Workspace` carrying its icon and colour).
+#[component]
+pub fn LookPicker(w: Signal<Workspace>, #[props(default)] fallback: Option<&'static str>) -> Element {
     let mut w = w;
     let cur = w.read().clone();
     // The icon it shows with none picked: Home's house, a project's folder.
-    let fallback: &'static str = if cur.id == lary_core::config::HOME_PROJECT { "house" } else { "folder" };
+    let fallback: &'static str = fallback.unwrap_or(if cur.id == lary_core::config::HOME_PROJECT { "house" } else { "folder" });
     let start = match look_of(cur.icon.as_deref(), fallback) {
         Look::Emoji(_) => 1,
         Look::Image(_) => 2,

@@ -257,7 +257,8 @@ pub fn TabMenu() -> Element {
                 {item("Open Side by Side", I::Columns, "", true, Box::new(move || app.open_split(&s1)))}
             }
             if is_agent {
-                {item("Rename…", I::Pencil, "", true, Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::Rename(s2.clone())); }))}
+                {item("Rename…", I::Pencil, "F2", true, Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::Rename(s2.clone())); }))}
+                {item("Edit…", I::Settings, "", true, { let i = s3.clone(); Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::EditChat(i.clone())); }) })}
                 {item("Fork", I::Fork, "", true, Box::new(move || app.fork(&s3, None)))}
             }
         }
@@ -309,7 +310,9 @@ pub fn ContextMenu() -> Element {
                 a.ui.write().compose_inbox.push((target, format!("@agent:{short}")));
             }) })}
             div { class: "menu-sep" }
-            {item("Rename", I::Pencil, Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::Rename(i2.clone())); }))}
+            // In place, in the list (F2 too); Edit… has the rest.
+            {item("Rename", I::Pencil, Box::new(move || { let mut a = app; a.ui.write().renaming = Some(i2.clone()); }))}
+            {item("Edit…", I::Settings, { let i = id.clone(); Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::EditChat(i.clone())); }) })}
             {item(if s.pinned { "Unpin" } else { "Pin" }, I::Pin, Box::new(move || app.toggle_pin(&i3)))}
             {item(if s.unread { "Mark as Read" } else { "Mark as Unread" }, I::Circle, { let u = !s.unread; Box::new(move || app.set_unread(&i4, u)) })}
             {item("Fork", I::Fork, Box::new(move || app.fork(&i5, None)))}
@@ -381,7 +384,7 @@ pub fn ModalHost() -> Element {
     let mut app = use_app();
     let modal = app.ui.read().modal.clone();
     let Some(modal) = modal else { return rsx! {} };
-    let wide = matches!(modal, Modal::Project(..));
+    let wide = matches!(modal, Modal::Project(..) | Modal::EditChat(_));
     let close = move |_| app.ui.write().modal = None;
     rsx! {
         div { class: "overlay", onclick: close,
@@ -406,6 +409,7 @@ pub fn ModalHost() -> Element {
                     Modal::WhatsNew(version, updated) => rsx! { WhatsNewModal { version, updated } },
                     Modal::ImportSession => rsx! { super::import_session::ImportSessionModal {} },
                     Modal::PurgeChats(id) => rsx! { PurgeModal { id } },
+                    Modal::EditChat(id) => rsx! { super::projects::ChatModal { id } },
                 }
             }
         }

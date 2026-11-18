@@ -1496,7 +1496,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .am-row .eff, .am-row .ctx { font-size: var(--ui-xs); color: var(--fg-3); white-space: nowrap; text-align: right; }
 .am-row.off .nm, .am-row.off .lg { opacity: .55; }
 .am-row .toggle { justify-self: end; }
-.am-row > .mr-tag { justify-self: start; }
+.am-row > .mr-tags { justify-self: start; display: inline-flex; gap: 4px; }
 .am-add { flex-wrap: wrap; gap: 8px; }
 .am-add .input { width: 180px; }
 .am-add .input.wide { flex: 1; min-width: 200px; }
@@ -1566,7 +1566,7 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .app.no-motion .am-tab { transition: none; }
 @media (max-width: 760px) {
   .am-row { grid-template-columns: 18px minmax(0, 1fr) auto; height: auto; padding: 8px 12px; }
-  .am-row .id, .am-row .eff, .am-row .ctx, .am-row > .mr-tag { display: none; }
+  .am-row .id, .am-row .eff, .am-row .ctx, .am-row > .mr-tags { display: none; }
 }
 
 /* Release notes */
@@ -1973,6 +1973,13 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 @keyframes open-spin { to { transform: rotate(360deg); } }
 @keyframes open-wait-in { from { opacity: 0; } to { opacity: 1; } }
 .app.no-motion .open-spin { animation-duration: 2s; }
+
+/* A chat's name edited in place in the list (Rename, F2). Rows take focus
+   for F2; the keyboard's focus shows, a click's doesn't. */
+.chat-rename { flex: 1; min-width: 0; height: 22px; margin: 0 -2px; padding: 0 6px; border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--input); color: var(--fg); font: inherit; outline: none; user-select: text; }
+.chat-rename:focus { border-color: color-mix(in srgb, var(--accent-c) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c) 14%, transparent); }
+.chat-row:focus { outline: none; }
+.chat-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent-c) 45%, transparent); outline-offset: -2px; }
 
 /* A chat that couldn't be opened: a small mark on its row, and on Home the
    last chat Lary didn't open again. */

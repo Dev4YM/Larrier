@@ -673,6 +673,18 @@ pub fn Root() -> Element {
                 return;
               }
               if (e.altKey && (k === 'arrowleft' || k === 'arrowright')) { e.preventDefault(); dioxus.send({ t: 'nav', d: k === 'arrowleft' ? -1 : 1 }); return; }
+              // F2: rename the chat shown, in place in the list (a chat row
+              // with the focus handles its own), unless typing somewhere.
+              if (k === 'f2' && !mod && !e.altKey) {
+                const el = e.target && e.target.nodeType === 1 && e.target.closest ? e.target : null;
+                const typing = el && el.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .monaco-editor, .xterm');
+                if (!typing && !(el && el.closest('.chat-row'))) {
+                  e.preventDefault();
+                  const row = document.querySelector('.chat-row.selected[data-drag-session]');
+                  dioxus.send({ t: 'rename', id: row && row.getClientRects().length ? row.getAttribute('data-drag-session') : null });
+                }
+                return;
+              }
               // Typing with nothing to type into (no field, no menu or dialog
               // open): the letters go to the message box, the chat's own in
               // a side-by-side view.
@@ -1147,6 +1159,16 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
             app.ui.write().system_dark = v["dark"].as_bool().unwrap_or(false);
             app.apply_theme();
         }
+        // F2: the chat shown, renamed in place in the list; when its row
+        // isn't on screen (a folded project), in the Rename dialog.
+        Some("rename") => match v["id"].as_str() {
+            Some(id) => app.ui.write().renaming = Some(id.to_string()),
+            None => {
+                if let Some(id) = app.current_id() {
+                    app.ui.write().modal = Some(crate::state::Modal::Rename(id));
+                }
+            }
+        },
         Some("key") => {
             let k = v["k"].as_str().unwrap_or("");
             let shift = v["shift"].as_bool().unwrap_or(false);

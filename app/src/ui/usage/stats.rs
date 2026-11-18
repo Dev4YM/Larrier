@@ -425,6 +425,8 @@ mod tests {
             usage: Usage::default(),
             account_id: None,
             managed: true,
+            icon: None,
+            color: None,
         };
         let st = compute(&p, &sum);
         assert!(st.estimated);

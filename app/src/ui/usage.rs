@@ -1449,6 +1449,8 @@ mod tests {
             usage: Usage::default(),
             account_id: None,
             managed: true,
+            icon: None,
+            color: None,
         }
     }
 

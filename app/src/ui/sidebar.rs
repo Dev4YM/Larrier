@@ -758,16 +758,47 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
         Some(why) => format!("{} · {}\nCouldn't open it: {why}", s.agent.display_name(), s.title),
         None => format!("{} · {}", s.agent.display_name(), s.title),
     };
+    // Its name edited in place (Rename, or F2 on the row): Enter keeps it,
+    // Escape leaves it as it was, clicking away keeps it.
+    let renaming = app.ui.read().renaming.as_deref() == Some(s.id.as_str());
+    let mut new_title = use_signal(String::new);
+    let t0 = s.title.clone();
+    use_effect(use_reactive!(|renaming| {
+        if renaming {
+            new_title.set(t0.clone());
+        }
+    }));
+    let (id6, id7, id8) = (s.id.clone(), s.id.clone(), s.id.clone());
+    let mut finish = move |keep: bool, id: String| {
+        if app.ui.peek().renaming.as_deref() != Some(id.as_str()) {
+            return;
+        }
+        app.ui.write().renaming = None;
+        if keep {
+            app.rename(&id, new_title());
+        }
+    };
     rsx! {
         div {
             class: "{cls}",
             role: "button",
+            tabindex: "0",
             title: "{tip}",
             "data-ctx": "session",
             "data-drag-session": "{s.id}",
             "data-drag-title": "{s.title}",
+            // F2: rename it here.
+            onkeydown: move |e: KeyboardEvent| {
+                if e.key() == Key::F2 && !renaming {
+                    e.prevent_default();
+                    app.ui.write().renaming = Some(id6.clone());
+                }
+            },
             // Click: show it. Ctrl / middle click: side by side.
             onclick: move |e| {
+                if renaming {
+                    return;
+                }
                 if e.modifiers().ctrl() || e.modifiers().meta() {
                     app.open_split(&id);
                 } else {
@@ -789,6 +820,10 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             span { class: "bullet",
                 if running {
                     super::loaders::Orbit { size: 14 }
+                } else if s.icon.is_some() || s.color.is_some() {
+                    // Its own look (from its Edit dialog).
+                    super::projects::ProjectMark { icon: s.icon.clone(), color: s.color.clone(), size: 14, fallback: Some("message-square") }
+                    if s.unread { span { class: "unread-dot" } }
                 } else if logo {
                     AgentGlyph { kind: s.agent.clone() }
                     if s.unread { span { class: "unread-dot" } }
@@ -796,7 +831,28 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
                     span { class: "pt" }
                 }
             }
-            span { class: "t", dir: "auto", "{s.title}" }
+            if renaming {
+                input { class: "chat-rename", value: "{new_title}", spellcheck: "false", dir: "auto",
+                    onmounted: move |e| async move {
+                        let _ = e.set_focus(true).await;
+                        document::eval("const i = document.querySelector('.chat-rename'); if (i) i.select();");
+                    },
+                    onclick: move |e| e.stop_propagation(),
+                    ondoubleclick: move |e| e.stop_propagation(),
+                    oninput: move |e| new_title.set(e.value()),
+                    onkeydown: move |e: KeyboardEvent| {
+                        e.stop_propagation();
+                        match e.key() {
+                            Key::Enter => finish(true, id7.clone()),
+                            Key::Escape => finish(false, id7.clone()),
+                            _ => {}
+                        }
+                    },
+                    onblur: move |_| finish(true, id8.clone()),
+                }
+            } else {
+                span { class: "t", dir: "auto", "{s.title}" }
+            }
             if issue.is_some() {
                 span { class: "row-issue", Icon { i: I::Alert, size: 12 } }
             }

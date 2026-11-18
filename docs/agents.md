@@ -117,6 +117,16 @@ account (a subscription's plan picks Claude Code's default), so the
 Default row says what that account really gets. The picker reads a
 harness's list again when it opens and the list is a few minutes old.
 
+Claude Code's menu names its models by family (Opus, Sonnet, …), each
+always running the newest of it. Lary's picker shows the real models
+those run now, by version (Opus 5.5, Sonnet 5.5, …). In **Settings →
+Harnesses → Claude Code → Models**, **All** also lists the family names
+(tagged **Alias**, to always run the newest) and every older model Claude
+Code still takes, each to turn on for the picker. **Ultracode** is not an
+effort: it's a switch beside Fast on every Claude Code model but Haiku,
+passed to Claude Code as its `ultracode` setting, at whatever effort the
+chat runs.
+
 Each reply records the model the agent reported running; when that isn't
 the one picked (a plan without it, a limit reached, a fallback), the reply
 says so. A model's

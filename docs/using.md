@@ -28,6 +28,11 @@ bar and the traffic lights sit over Lary's top bar.
   starts its new chats) and whether its new chats run in the folder or a
   new worktree. A folder your chats ran in shows as a project on its own;
   edit it to give it all of this.
+- **A chat's** right-click menu has **Rename**, which turns its title in
+  the list into a field (Enter or clicking away saves, Esc cancels), and
+  **Edit…**, a dialog like a project's: its picture (icon, emoji or image,
+  and a color), its name, Pinned and Archived, and Delete. **F2** renames
+  the chat in focus in the list, or the open one.
 - The filter menu groups by status, project or agent, sorts by activity,
   creation or name, and can show archived chats. Search opens from the
   magnifier icon.
@@ -100,12 +105,16 @@ onto the chat area:
   each of your enabled harnesses) and the chosen one's models; typing
   searches every model. Star a model to keep it under Favorites. A model's
   **Edit** shows its options (context size, reasoning effort, speed).
-  Claude Code's efforts end with **Ultracode** (Extra high, and big tasks
-  run as workflows of many agents, using much more of your plan), Codex's
-  with **Ultra** where it offers it, and Pi's models take a thinking level.
+  Claude Code's models are listed by their real versions (Opus 5.5,
+  Sonnet 5.5, …), and its **Default** row names the model the chat's
+  account really gets. Codex's efforts end with **Ultra** where it offers
+  it, and Pi's models take a thinking level. Under Options:
   **Fast** (the same model, faster, at a higher price) is a switch on
   Claude Code's Fable 5.2, Opus 5.5 and Opus 5 and on Codex's models with a
-  Fast tier; the
+  Fast tier, and **Ultracode** is a switch on Claude Code's models (not
+  Haiku): big tasks run as workflows of many agents in the background, at
+  whatever effort you picked, using much more of your plan. The picker
+  shows it beside the model ("Opus 5.5 High · Ultracode"). The
   accounts the chat can run as sit above the models, and the gear at the
   bottom of the rail opens that harness's models in Settings.
 - `@` opens on what you can mention: **Files** (browse the project's

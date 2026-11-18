@@ -560,8 +560,8 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
     let link = session.native_link(agent);
     let mut resume_id = link.map(|l| l.id.clone());
-    let resume_path = link.and_then(|l| l.path.clone()).filter(|p| Path::new(p).exists());
-    let resume_at = link.and_then(|l| l.resume_at.clone()).filter(|_| resume_id.is_some());
+    let mut resume_path = link.and_then(|l| l.path.clone()).filter(|p| Path::new(p).exists());
+    let mut resume_at = link.and_then(|l| l.resume_at.clone()).filter(|_| resume_id.is_some());
     let mut notice = None;
     let mut from = engine::unsynced_from(session, agent);
     if *agent == AgentKind::Cursor && protocol == Protocol::CursorStream {
@@ -576,14 +576,6 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
             }
         }
     }
-    let handoff = if protocol != Protocol::HttpChat && engine::has_unsynced(session, from) {
-        let upto = session.messages.len().saturating_sub(1);
-        let mut s = session.clone();
-        s.messages.truncate(upto);
-        Some(s.handoff_context(from, 60_000))
-    } else {
-        None
-    };
     let model = session.model.clone().or(ac.default_model.clone()).filter(|m| m != "default" && !m.is_empty());
     let effort = session.effort.clone().or(ac.default_effort.clone()).filter(|e| !e.is_empty() && e != "default");
     // Claude Code's Ultracode is an option beside the effort now; an effort
@@ -652,6 +644,32 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         launch.extra_args.splice(0..0, ml.args);
         launch.env.extend(ml.env);
     }
+    // Claude Code finds the chat only in the folder this turn runs in (see
+    // `claude_sessions`): its newest copy is brought there, or, when it's
+    // nowhere, the conversation so far goes along instead.
+    if *agent == AgentKind::ClaudeCode && !matches!(protocol, Protocol::HttpChat | Protocol::Acp) {
+        if let Some(id) = resume_id.clone() {
+            let home = crate::claude_sessions::home_of(&launch.env);
+            match crate::claude_sessions::place(&id, resume_path.as_deref().map(Path::new), &home, &cwd) {
+                Some(p) => resume_path = Some(p.to_string_lossy().to_string()),
+                None => {
+                    resume_id = None;
+                    resume_path = None;
+                    resume_at = None;
+                    from = 0;
+                    notice = Some("Claude Code's own copy of this chat wasn't found, so the conversation so far goes along with this message.".into());
+                }
+            }
+        }
+    }
+    let handoff = if protocol != Protocol::HttpChat && engine::has_unsynced(session, from) {
+        let upto = session.messages.len().saturating_sub(1);
+        let mut s = session.clone();
+        s.messages.truncate(upto);
+        Some(s.handoff_context(from, 60_000))
+    } else {
+        None
+    };
 
     let cwd_for_dirs = cwd.clone();
     Ok(TurnRequest {

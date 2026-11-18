@@ -2608,6 +2608,13 @@ impl App {
             if s.native_link(&agent).is_none() || s.messages.is_empty() {
                 return;
             }
+            // Claude Code's own transcript goes along as it is: its next turn
+            // brings it into that account's folder.
+            if agent == AgentKind::ClaudeCode {
+                note = format!("Now runs as “{label}”");
+                s.push(Message::new(Role::System, vec![Part::Notice { text: note.clone() }]));
+                return;
+            }
             let home = account_home(&cfg, &agent, Some(&account));
             match lary_formats::supports_native_export(&agent).then(|| lary_formats::export_native(s, &agent, home.as_deref())) {
                 Some(Ok(link)) => {
@@ -3346,12 +3353,14 @@ pub fn signed_in_as(account: &lary_core::Account) -> (bool, Option<String>) {
     }
 }
 
-/// Config dir for accounts that use a separate login directory.
+/// The folder an agent's chats run in as an account (the chat's, else the
+/// default), where its sessions go: the account's own folder, Lary's folder
+/// for it, or None for the agent's default one (your own sign-in).
 pub fn account_home(cfg: &Config, agent: &AgentKind, account_id: Option<&str>) -> Option<PathBuf> {
-    let acc = account_id.and_then(|id| cfg.account(id)).or_else(|| cfg.default_account(agent))?;
-    match &acc.auth {
-        AccountAuth::ConfigDir { path } => Some(PathBuf::from(path)),
-        _ => None,
+    let acc = cfg.account_for(agent, account_id);
+    match acc.map(|a| &a.auth) {
+        Some(AccountAuth::ConfigDir { path }) => Some(PathBuf::from(path)),
+        _ => lary_agents::request::lary_home(agent, acc),
     }
 }
 

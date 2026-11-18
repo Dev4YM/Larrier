@@ -115,7 +115,8 @@ fn signature(path: &Path) -> u64 {
     h.finish()
 }
 
-fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
+/// Copy a file, or a folder with all it holds, over what's at `to`.
+pub(crate) fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
     if from.is_dir() {
         std::fs::create_dir_all(to)?;
         for e in std::fs::read_dir(from)?.flatten() {

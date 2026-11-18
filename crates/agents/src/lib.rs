@@ -3,6 +3,7 @@
 //! LSF sessions.
 
 pub mod browser;
+pub mod claude_sessions;
 pub mod detect;
 pub mod drivers;
 pub mod engine;

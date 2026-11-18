@@ -311,7 +311,7 @@ pub fn ContextMenu() -> Element {
             }) })}
             div { class: "menu-sep" }
             // In place, in the list (F2 too); Edit… has the rest.
-            {item("Rename", I::Pencil, Box::new(move || { let mut a = app; a.ui.write().renaming = Some(i2.clone()); }))}
+            {item("Rename", I::Pencil, { let place = ctx.place; Box::new(move || { let mut a = app; let mut ui = a.ui.write(); ui.renaming = Some(i2.clone()); ui.renaming_place = Some(place); }) })}
             {item("Edit…", I::Settings, { let i = id.clone(); Box::new(move || { let mut a = app; a.ui.write().modal = Some(Modal::EditChat(i.clone())); }) })}
             {item(if s.pinned { "Unpin" } else { "Pin" }, I::Pin, Box::new(move || app.toggle_pin(&i3)))}
             {item(if s.unread { "Mark as Read" } else { "Mark as Unread" }, I::Circle, { let u = !s.unread; Box::new(move || app.set_unread(&i4, u)) })}

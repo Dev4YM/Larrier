@@ -348,7 +348,7 @@ pub fn Sidebar(#[props(default)] parked: bool) -> Element {
                     div { class: "side-sec",
                         div { class: "side-sec-head", span { class: "grow", "Pinned" } }
                         for s in pinned {
-                            ChatRow { key: "pin-{s.id}", s: s.clone(), ctx: ctx.clone(), logo: true }
+                            ChatRow { key: "pin-{s.id}", s: s.clone(), ctx: ctx.clone(), logo: true, place: "pin" }
                         }
                     }
                 }
@@ -724,7 +724,7 @@ fn DraftRow(s: SessionSummary, logo: bool) -> Element {
 }
 
 #[component]
-fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
+fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool, #[props(default = "list")] place: &'static str) -> Element {
     if s.id == DRAFT_ID {
         return rsx! { DraftRow { s, logo } };
     }
@@ -760,7 +760,12 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
     };
     // Its name edited in place (Rename, or F2 on the row): Enter keeps it,
     // Escape leaves it as it was, clicking away keeps it.
-    let renaming = app.ui.read().renaming.as_deref() == Some(s.id.as_str());
+    // A pinned chat is listed twice: only the row it was asked in edits (two
+    // fields would take the focus from each other, and losing it saves).
+    let renaming = {
+        let ui = app.ui.read();
+        ui.renaming.as_deref() == Some(s.id.as_str()) && ui.renaming_place.unwrap_or(if s.pinned { "pin" } else { "list" }) == place
+    };
     let mut new_title = use_signal(String::new);
     let t0 = s.title.clone();
     use_effect(use_reactive!(|renaming| {
@@ -773,7 +778,11 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
         if app.ui.peek().renaming.as_deref() != Some(id.as_str()) {
             return;
         }
-        app.ui.write().renaming = None;
+        {
+            let mut ui = app.ui.write();
+            ui.renaming = None;
+            ui.renaming_place = None;
+        }
         if keep {
             app.rename(&id, new_title());
         }
@@ -785,13 +794,16 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             tabindex: "0",
             title: "{tip}",
             "data-ctx": "session",
+            "data-place": "{place}",
             "data-drag-session": "{s.id}",
             "data-drag-title": "{s.title}",
             // F2: rename it here.
             onkeydown: move |e: KeyboardEvent| {
                 if e.key() == Key::F2 && !renaming {
                     e.prevent_default();
-                    app.ui.write().renaming = Some(id6.clone());
+                    let mut ui = app.ui.write();
+                    ui.renaming = Some(id6.clone());
+                    ui.renaming_place = Some(place);
                 }
             },
             // Click: show it. Ctrl / middle click: side by side.
@@ -815,7 +827,7 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
             oncontextmenu: move |e| {
                 e.prevent_default();
                 let c = e.client_coordinates();
-                app.ui.write().ctx = Some(CtxMenu { session_id: id2.clone(), x: c.x, y: c.y });
+                app.ui.write().ctx = Some(CtxMenu { session_id: id2.clone(), x: c.x, y: c.y, place });
             },
             span { class: "bullet",
                 if running {
@@ -866,7 +878,7 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
                     onclick: move |e| {
                         e.stop_propagation();
                         let c = e.client_coordinates();
-                        app.ui.write().ctx = Some(CtxMenu { session_id: id3.clone(), x: c.x, y: c.y });
+                        app.ui.write().ctx = Some(CtxMenu { session_id: id3.clone(), x: c.x, y: c.y, place });
                     },
                     Icon { i: I::More, size: 14 }
                 }

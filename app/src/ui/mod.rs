@@ -695,8 +695,9 @@ pub fn Root() -> Element {
                 const typing = el && el.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .monaco-editor, .xterm');
                 if (!typing && !(el && el.closest('.chat-row'))) {
                   e.preventDefault();
-                  const row = document.querySelector('.chat-row.selected[data-drag-session]');
-                  dioxus.send({ t: 'rename', id: row && row.getClientRects().length ? row.getAttribute('data-drag-session') : null });
+                  // The open chat's row in sight (a pinned chat has two).
+                  const row = [...document.querySelectorAll('.chat-row.selected[data-drag-session]')].find((r) => r.getClientRects().length);
+                  dioxus.send({ t: 'rename', id: row ? row.getAttribute('data-drag-session') : null, place: row ? row.getAttribute('data-place') : null });
                 }
                 return;
               }
@@ -1177,7 +1178,11 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
         // F2: the chat shown, renamed in place in the list; when its row
         // isn't on screen (a folded project), in the Rename dialog.
         Some("rename") => match v["id"].as_str() {
-            Some(id) => app.ui.write().renaming = Some(id.to_string()),
+            Some(id) => {
+                let mut ui = app.ui.write();
+                ui.renaming = Some(id.to_string());
+                ui.renaming_place = Some(if v["place"].as_str() == Some("pin") { "pin" } else { "list" });
+            }
             None => {
                 if let Some(id) = app.current_id() {
                     app.ui.write().modal = Some(crate::state::Modal::Rename(id));

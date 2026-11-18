@@ -311,6 +311,9 @@ pub struct Ui {
     pub startup_issue: Option<(String, String)>,
     /// The chat whose name is being edited in place in the sidebar.
     pub renaming: Option<String>,
+    /// In which of its rows (a pinned chat is listed twice: "pin" and
+    /// "list"); `None`: the first it has.
+    pub renaming_place: Option<&'static str>,
 }
 
 impl Ui {
@@ -448,6 +451,8 @@ pub struct CtxMenu {
     pub session_id: String,
     pub x: f64,
     pub y: f64,
+    /// Which of the chat's rows it came from (a pinned chat has two).
+    pub place: &'static str,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -634,6 +639,7 @@ impl App {
             chat_issues: HashMap::new(),
             startup_issue: None,
             renaming: None,
+            renaming_place: None,
         };
         App {
             sessions: root_signal(listed(&cfg)),

@@ -1138,6 +1138,7 @@ fn Sessions() -> Element {
                 }
             }
         }
+        ArchiveAndTrash {}
         div { class: "set-group-title", "Storage" }
         div { class: "set-card",
             Row { title: "Folder".to_string(), desc: Some(root.clone()),
@@ -1165,6 +1166,112 @@ fn Sessions() -> Element {
                         "A session is a JSON Lines file: a header line (id, title, agent, model, workspace, environment, native ids per agent) followed by one line per message. Messages carry typed parts — text, reasoning, tool calls with inputs, outputs and file diffs, plans, images, files and notices — plus usage and cost. "
                         "When you continue a session with a different agent, Lary writes a native resumable session for agents that support it (Claude Code, Codex, Gemini CLI, Pi) and hands the transcript over as context for the rest."
                     }
+                }
+            }
+        }
+    }
+}
+
+/// Archived and deleted chats: each list with what happens to them over
+/// time. Deleted ones are kept 10 days by default, then go for good;
+/// archived ones stay unless their own deletion is turned on.
+#[component]
+fn ArchiveAndTrash() -> Element {
+    let mut app = use_app();
+    let _ = crate::state::TRASH_SEEN();
+    let companion = app.config.read().settings.session_mode == SessionMode::Companion;
+    let (trash_days, archive_days) = {
+        let s = &app.config.read().settings;
+        (s.trash_days, s.archive_days)
+    };
+    // Archived chats this mode shows (as the sidebar has them, current at
+    // once), the latest archived first.
+    let mut archived: Vec<lary_core::SessionSummary> = app.sessions.read().iter().filter(|s| s.archived && (companion || s.managed)).cloned().collect();
+    archived.sort_by(|a, b| b.archived_at.unwrap_or(b.updated_at).cmp(&a.archived_at.unwrap_or(a.updated_at)));
+    let deleted = store().trashed();
+    let now = chrono::Utc::now();
+    let days = |opt: Option<u32>| opt.map(|d| d.to_string()).unwrap_or_else(|| "never".into());
+    let parse = |v: &str| v.parse::<u32>().ok();
+    const SHOW: usize = 100;
+    let (n_arch, n_del) = (archived.len(), deleted.len());
+    rsx! {
+        div { class: "set-group-title", "Archived" }
+        div { class: "set-card",
+            Row { title: "Delete archived chats".to_string(), desc: Some("They move to Deleted after this long, and are kept there as set below.".to_string()),
+                super::Select {
+                    value: days(archive_days),
+                    options: vec![("never".into(), "Never".into()), ("30".into(), "After 30 days".into()), ("90".into(), "After 90 days".into()), ("365".into(), "After a year".into())],
+                    onchange: move |v: String| { app.update_config(move |c| c.settings.archive_days = parse(&v)); app.sweep(); },
+                }
+            }
+            if archived.is_empty() {
+                div { class: "set-row", div { class: "lbl", div { class: "d", "No archived chats" } } }
+            }
+            for s in archived.into_iter().take(SHOW) {
+                {
+                    let (id1, id2) = (s.id.clone(), s.id.clone());
+                    let when = crate::state::rel_time(s.archived_at.unwrap_or(s.updated_at));
+                    let goes = archive_days.map(|d| {
+                        let left = d as i64 - (now - s.archived_at.unwrap_or(s.updated_at)).num_days();
+                        if left <= 1 { " · moves to Deleted today".to_string() } else { format!(" · moves to Deleted in {left} days") }
+                    }).unwrap_or_default();
+                    rsx! {
+                        div { key: "{s.id}", class: "set-row tr-row",
+                            AgentGlyph { kind: s.agent.clone(), class: "md" }
+                            div { class: "lbl",
+                                div { class: "t", "{s.title}" }
+                                div { class: "d", "Archived {when}{goes}" }
+                            }
+                            button { class: "ghost-btn sm", onclick: move |_| app.toggle_archive(&id1), "Unarchive" }
+                            button { class: "icon-btn sm", title: "Delete", onclick: move |_| app.delete(&id2), Icon { i: I::Trash, size: 13 } }
+                        }
+                    }
+                }
+            }
+            if n_arch > SHOW {
+                div { class: "set-row", div { class: "lbl", div { class: "d", "And {n_arch - SHOW} more, the oldest" } } }
+            }
+        }
+        div { class: "set-group-title", "Deleted" }
+        div { class: "set-card",
+            Row { title: "Keep deleted chats".to_string(), desc: Some("Then they go for good, with the worktrees Lary made for them.".to_string()),
+                super::Select {
+                    value: days(trash_days),
+                    options: vec![("10".into(), "10 days".into()), ("30".into(), "30 days".into()), ("90".into(), "90 days".into()), ("never".into(), "Until I delete them".into())],
+                    onchange: move |v: String| { app.update_config(move |c| c.settings.trash_days = parse(&v)); app.sweep(); },
+                }
+            }
+            if deleted.is_empty() {
+                div { class: "set-row", div { class: "lbl", div { class: "d", "No deleted chats" } } }
+            }
+            for t in deleted.into_iter().take(SHOW) {
+                {
+                    let s = t.summary.clone();
+                    let (id1, id2) = (s.id.clone(), s.id.clone());
+                    let when = crate::state::rel_time(t.deleted_at);
+                    let goes = trash_days.map(|d| {
+                        let left = d as i64 - (now - t.deleted_at).num_days();
+                        if left <= 1 { " · goes for good today".to_string() } else { format!(" · goes for good in {left} days") }
+                    }).unwrap_or_default();
+                    rsx! {
+                        div { key: "{s.id}", class: "set-row tr-row",
+                            AgentGlyph { kind: s.agent.clone(), class: "md" }
+                            div { class: "lbl",
+                                div { class: "t", "{s.title}" }
+                                div { class: "d", "Deleted {when}{goes}" }
+                            }
+                            button { class: "ghost-btn sm", onclick: move |_| app.restore_chat(&id1), "Restore" }
+                            button { class: "icon-btn sm", title: "Delete for good", onclick: move |_| app.ui.write().modal = Some(Modal::PurgeChats(Some(id2.clone()))), Icon { i: I::Trash, size: 13 } }
+                        }
+                    }
+                }
+            }
+            if n_del > SHOW {
+                div { class: "set-row", div { class: "lbl", div { class: "d", "And {n_del - SHOW} more, the oldest" } } }
+            }
+            if n_del > 0 {
+                Row { title: "Delete all now".to_string(), desc: Some(if n_del == 1 { "1 chat goes for good. This can't be undone.".to_string() } else { format!("{n_del} chats go for good. This can't be undone.") }),
+                    button { class: "ghost-btn danger", onclick: move |_| app.ui.write().modal = Some(Modal::PurgeChats(None)), "Delete all" }
                 }
             }
         }

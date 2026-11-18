@@ -105,6 +105,10 @@ pub struct Session {
     pub pinned: bool,
     #[serde(default)]
     pub archived: bool,
+    /// When it was archived (Settings → Sessions → Archived, and archived
+    /// chats' automatic deletion when it's on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub unread: bool,
     /// An imported session whose agent is still mid-turn in its own app
@@ -931,6 +935,7 @@ impl Session {
             tags: Vec::new(),
             pinned: false,
             archived: false,
+            archived_at: None,
             unread: false,
             external_turn: false,
             usage: Usage::default(),
@@ -1079,6 +1084,7 @@ impl Session {
             active_at: self.messages.iter().map(|m| m.created_at).max(),
             pinned: self.pinned,
             archived: self.archived,
+            archived_at: self.archived_at,
             unread: self.unread,
             external_turn: self.external_turn,
             parent_id: self.parent.as_ref().map(|p| p.session_id.clone()),
@@ -1349,6 +1355,8 @@ pub struct SessionSummary {
     pub pinned: bool,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub unread: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

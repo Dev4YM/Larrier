@@ -418,6 +418,7 @@ mod tests {
             message_count: 4,
             pinned: false,
             archived: false,
+            archived_at: None,
             unread: false,
             external_turn: false,
             parent_id: None,

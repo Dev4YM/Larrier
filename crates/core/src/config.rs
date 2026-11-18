@@ -326,6 +326,14 @@ pub struct Settings {
     /// Offer the harnesses' sessions on this computer in @, as context.
     #[serde(default = "yes")]
     pub sessions_in_mentions: bool,
+    /// How many days a deleted chat is kept before it goes for good
+    /// (`None`: kept until deleted by hand).
+    #[serde(default = "ten_days")]
+    pub trash_days: Option<u32>,
+    /// Archived chats move to the deleted ones after this many days
+    /// (`None`, the default: they stay).
+    #[serde(default)]
+    pub archive_days: Option<u32>,
     #[serde(default = "yes")]
     pub auto_import: bool,
     /// Watch the agents' session folders and import changes as they happen.
@@ -675,6 +683,10 @@ fn default_zoom() -> f64 {
     1.0
 }
 
+fn ten_days() -> Option<u32> {
+    Some(10)
+}
+
 fn yes() -> bool {
     true
 }
@@ -740,6 +752,8 @@ impl Default for Settings {
             run_mode: RunMode::default(),
             session_mode: SessionMode::default(),
             sessions_in_mentions: true,
+            trash_days: ten_days(),
+            archive_days: None,
             auto_import: true,
             live_sync: true,
             use_worktrees: false,
@@ -1422,6 +1436,18 @@ mod tests {
         again.migrate();
         assert!(!again.agent(&AgentKind::OpenCode).prefer_acp, "the user's Native is kept");
         assert!(Config::default().agent(&AgentKind::Hermes).prefer_acp, "new configs start on ACP");
+    }
+
+    /// Deleted chats are kept 10 days and archived ones stay, unless set
+    /// otherwise; Normal mode by default, also for configs from before.
+    #[test]
+    fn keeping_chats_and_the_mode_default_sensibly() {
+        let old: Config = serde_json::from_str(r#"{"version": 6, "settings": {}}"#).unwrap();
+        assert_eq!((old.settings.trash_days, old.settings.archive_days, old.settings.session_mode), (Some(10), None, SessionMode::Normal));
+        let forever: Config = serde_json::from_str(r#"{"version": 6, "settings": {"trash_days": null, "archive_days": 30}}"#).unwrap();
+        assert_eq!((forever.settings.trash_days, forever.settings.archive_days), (None, Some(30)));
+        let d = Config::default().settings;
+        assert_eq!((d.trash_days, d.archive_days, d.sessions_in_mentions), (Some(10), None, true));
     }
 
     /// Claude Code on the ACP adapter and Cursor on print mode move to

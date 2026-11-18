@@ -405,6 +405,7 @@ pub fn ModalHost() -> Element {
                     Modal::Project(id, path) => rsx! { super::projects::ProjectModal { id, path } },
                     Modal::WhatsNew(version, updated) => rsx! { WhatsNewModal { version, updated } },
                     Modal::ImportSession => rsx! { super::import_session::ImportSessionModal {} },
+                    Modal::PurgeChats(id) => rsx! { PurgeModal { id } },
                 }
             }
         }
@@ -439,13 +440,48 @@ fn DeleteModal(id: String) -> Element {
     rsx! {
         div { class: "modal-head", "Delete “{title}”?" }
         div { class: "modal-body",
-            "This removes the session from Lary, and it won't be imported again. The agent's own session files are left untouched. Worktrees Lary created for this agent are removed."
+            match app.config.read().settings.trash_days {
+                Some(d) => rsx! { "It moves to Deleted in Settings → Sessions, where you can restore it for {d} days. Then it goes for good, with the worktree Lary made for it. The agent's own session files are left untouched." },
+                None => rsx! { "It moves to Deleted in Settings → Sessions, where you can restore it until you delete it for good. The agent's own session files are left untouched." },
+            }
         }
         div { class: "modal-foot",
             button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
             button { class: "primary-btn", style: "background: var(--red); color: #fff;",
                 onclick: move |_| { app.ui.write().modal = None; app.delete(&id); },
                 "Delete"
+            }
+        }
+    }
+}
+
+/// Delete a deleted chat for good, or all of them.
+#[component]
+fn PurgeModal(id: Option<String>) -> Element {
+    let mut app = use_app();
+    let deleted = crate::state::store().trashed();
+    let title = match &id {
+        Some(i) => format!("Delete “{}” for good?", deleted.iter().find(|t| &t.summary.id == i).map(|t| t.summary.title.clone()).unwrap_or_default()),
+        None => format!("Delete {} chat{} for good?", deleted.len(), if deleted.len() == 1 { "" } else { "s" }),
+    };
+    rsx! {
+        div { class: "modal-head", "{title}" }
+        div { class: "modal-body", "This can't be undone. Worktrees Lary made for them are removed too." }
+        div { class: "modal-foot",
+            button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
+            button { class: "primary-btn", style: "background: var(--red); color: #fff;",
+                onclick: move |_| {
+                    app.ui.write().modal = None;
+                    match &id {
+                        Some(i) => app.purge_chat(i),
+                        None => {
+                            for t in crate::state::store().trashed() {
+                                app.purge_chat(&t.summary.id);
+                            }
+                        }
+                    }
+                },
+                "Delete for good"
             }
         }
     }

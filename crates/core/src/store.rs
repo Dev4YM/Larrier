@@ -116,6 +116,13 @@ fn migrate_dir(old: &Path, new: &Path) -> Result<Option<String>> {
     Ok(Some(format!("moved {from} to {to}; {repaired} worktrees repaired")))
 }
 
+/// A deleted chat kept for a while: its row as it was, and when.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Trashed {
+    pub summary: SessionSummary,
+    pub deleted_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// Fingerprint of an imported native session so re-imports update in place.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 pub struct ImportRecord {
@@ -337,6 +344,100 @@ impl Store {
         Ok(())
     }
 
+    // -- deleted chats ------------------------------------------------------
+    //
+    // A deleted chat is kept a while (Settings → Sessions → Deleted): its
+    // file moves to `trash/`, with its row and when it was deleted in
+    // `trash/index.json`. It can be restored, or deleted for good.
+
+    fn trash_dir(&self) -> PathBuf {
+        self.root.join("trash")
+    }
+
+    fn trash_file(&self, id: &str) -> PathBuf {
+        self.trash_dir().join(format!("{id}.{LSF_EXT_JSONL}"))
+    }
+
+    fn read_trash(&self) -> Vec<Trashed> {
+        std::fs::read_to_string(self.trash_dir().join("index.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    }
+
+    fn write_trash(&self, list: &[Trashed]) -> Result<()> {
+        std::fs::create_dir_all(self.trash_dir())?;
+        atomic_write(&self.trash_dir().join("index.json"), serde_json::to_string(list)?.as_bytes())
+    }
+
+    /// The deleted chats kept, the newest deleted first.
+    pub fn trashed(&self) -> Vec<Trashed> {
+        let mut v: Vec<Trashed> = self.read_trash().into_iter().filter(|t| self.trash_file(&t.summary.id).exists()).collect();
+        v.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        v
+    }
+
+    /// Move a chat to the deleted ones (sync and live sync won't bring it
+    /// back meanwhile).
+    pub fn trash(&self, id: &str) -> Result<()> {
+        let from = self.session_path(id);
+        let summary = self.with_index(|m| m.get(id).cloned()).or_else(|| self.load(id).ok().map(|s| s.summary()));
+        let Some(summary) = summary else { return self.delete(id) };
+        std::fs::create_dir_all(self.trash_dir())?;
+        if from.exists() {
+            std::fs::rename(&from, self.trash_file(id)).with_context(|| format!("moving {} to the deleted chats", from.display()))?;
+        }
+        self.with_index(|m| {
+            m.remove(id);
+            self.flush_index(m);
+        });
+        self.with_imports(|m| {
+            for r in m.values_mut().filter(|r| r.session_id == id) {
+                r.deleted = true;
+            }
+        });
+        self.flush_imports();
+        let mut list = self.read_trash();
+        list.retain(|t| t.summary.id != id);
+        list.push(Trashed { summary, deleted_at: chrono::Utc::now() });
+        self.write_trash(&list)
+    }
+
+    /// A deleted chat back where it was.
+    pub fn restore(&self, id: &str) -> Result<()> {
+        let from = self.trash_file(id);
+        std::fs::rename(&from, self.session_path(id)).with_context(|| format!("restoring {}", from.display()))?;
+        let s = self.load(id)?;
+        self.with_index(|m| {
+            m.insert(id.to_string(), s.summary());
+            self.flush_index(m);
+        });
+        self.with_imports(|m| {
+            for r in m.values_mut().filter(|r| r.session_id == id) {
+                r.deleted = false;
+            }
+        });
+        self.flush_imports();
+        let mut list = self.read_trash();
+        list.retain(|t| t.summary.id != id);
+        self.write_trash(&list)
+    }
+
+    /// A deleted chat as it was (to clean up after it before it goes).
+    pub fn load_trashed(&self, id: &str) -> Result<Session> {
+        let p = self.trash_file(id);
+        let t = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
+        Ok(Session::from_jsonl(&t)?)
+    }
+
+    /// Delete a deleted chat for good.
+    pub fn purge(&self, id: &str) -> Result<()> {
+        let p = self.trash_file(id);
+        if p.exists() {
+            std::fs::remove_file(&p)?;
+        }
+        let mut list = self.read_trash();
+        list.retain(|t| t.summary.id != id);
+        self.write_trash(&list)
+    }
+
     // -- import fingerprints ------------------------------------------------
 
     fn with_imports<R>(&self, f: impl FnOnce(&mut BTreeMap<String, ImportRecord>) -> R) -> R {
@@ -423,6 +524,31 @@ mod tests {
         // Once Lary's folder is there, nothing moves again.
         std::fs::create_dir_all(&old).unwrap();
         assert!(migrate_dir(&old, &new).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Deleting keeps a chat aside (out of the list, its import held off),
+    /// restoring brings it back as it was, and purging removes it for good.
+    #[test]
+    fn deleted_chats_are_kept_aside_until_purged() {
+        let base = std::env::temp_dir().join(format!("lary-trash-{}", crate::lsf::new_id()));
+        let store = Store::open(&base).unwrap();
+        let mut s = Session::new(crate::AgentKind::ClaudeCode, None);
+        s.title = "Keep me".into();
+        s.push(Message::user_text("hello"));
+        store.save(&s).unwrap();
+        store.set_import_record("claude-code:n1", ImportRecord { session_id: s.id.clone(), ..Default::default() });
+        store.trash(&s.id).unwrap();
+        assert!(store.list().iter().all(|x| x.id != s.id) && !store.exists(&s.id));
+        assert!(store.import_record("claude-code:n1").unwrap().deleted, "sync leaves it alone meanwhile");
+        let t = store.trashed();
+        assert_eq!((t.len(), t[0].summary.title.as_str()), (1, "Keep me"));
+        store.restore(&s.id).unwrap();
+        assert!(store.list().iter().any(|x| x.id == s.id) && store.load(&s.id).unwrap().messages.len() == 1);
+        assert!(!store.import_record("claude-code:n1").unwrap().deleted && store.trashed().is_empty());
+        store.trash(&s.id).unwrap();
+        store.purge(&s.id).unwrap();
+        assert!(store.trashed().is_empty() && !store.exists(&s.id) && store.load_trashed(&s.id).is_err());
         let _ = std::fs::remove_dir_all(&base);
     }
 

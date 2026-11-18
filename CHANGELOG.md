@@ -5,6 +5,20 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.51 — 2026-11-18
+
+### New
+
+- The side panel merges with the chat into one row of tabs; its tabs scroll with the wheel, its browser bar fits when narrow, and it keeps a minimum width
+- DevTools dock where you pick in their own menu (right, left, bottom or a window), as in Chrome
+
+### Fixed
+
+- A Claude Code account on a setup token shows its plan's limits (5-hour, week and Fable's week), not "API key"
+- Model lists refresh wherever they're shown (the picker, the / menu, automations), and lists an older Lary read are read again
+- Lary's browser tools never hang: a call the page doesn't answer fails within two minutes, and a call you stop shows as stopped
+- Codex runs its tools on Windows: Lary downloads its whole package, with the command runner it needs
+- A stopped or waiting turn stays open with its steps in order; only a finished one folds under "Worked for", which counts to the turn's end
 ## 0.1.50 — 2026-11-18
 
 ### New

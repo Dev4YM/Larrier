@@ -66,6 +66,12 @@ from your own setup:
   / Skills): copied into the account's folder at each run, kept up to date
   and removed once you delete them, so an agent runs with its prompt, its
   tools and its own MCP servers. `~/.claude` itself is never written.
+  A chat's Claude Code session goes where the chat runs: one imported from
+  your own folder, or last run as another account, is copied into the
+  folder of the account its next turn runs as (its newest copy, with its
+  subagents and tool results), and resumed from there; where it came from
+  stays as it was. If it's nowhere to be found, the conversation so far
+  goes along with the message instead.
 - **Thinking:** Claude Code (2.1.325 and newer) is asked to show its
   thinking as a summary, which Lary shows as the reply's thinking;
   otherwise Claude Code sends it empty.

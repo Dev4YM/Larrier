@@ -751,8 +751,13 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
     }
     let time = rel_time(s.updated_at);
     let (id4, id5) = (s.id.clone(), s.id.clone());
+    // It couldn't be opened: why, on a mark beside its title.
+    let issue = app.ui.read().chat_issues.get(&s.id).cloned();
     // Which agent, and the title in full (the row may cut it short).
-    let tip = format!("{} · {}", s.agent.display_name(), s.title);
+    let tip = match &issue {
+        Some(why) => format!("{} · {}\nCouldn't open it: {why}", s.agent.display_name(), s.title),
+        None => format!("{} · {}", s.agent.display_name(), s.title),
+    };
     rsx! {
         div {
             class: "{cls}",
@@ -792,6 +797,9 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool) -> Element {
                 }
             }
             span { class: "t", dir: "auto", "{s.title}" }
+            if issue.is_some() {
+                span { class: "row-issue", Icon { i: I::Alert, size: 12 } }
+            }
             span { class: "tm", "{time}" }
             div { class: "more",
                 button { class: "icon-btn sm", title: if s.pinned { "Unpin" } else { "Pin" },

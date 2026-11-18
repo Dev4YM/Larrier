@@ -3,6 +3,7 @@
 mod appearance;
 mod ask;
 mod automations;
+mod boot;
 mod chat;
 mod composer;
 mod customize;
@@ -134,6 +135,15 @@ pub fn Root() -> Element {
         }
         // Back where the window was when Lary closed.
         app.restore_layout();
+        // Deleted chats past their days go for good (and archived ones past
+        // theirs, when that's on): soon after start, then every few hours.
+        dioxus::core::spawn_forever(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            loop {
+                app.sweep();
+                tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+            }
+        });
         // `lary-desktop --open <session-id>` opens a session directly.
         let args: Vec<String> = std::env::args().collect();
         if let Some(id) = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1)) {
@@ -1121,6 +1131,7 @@ pub fn Root() -> Element {
             TabMenu {}
             GlobalMenu {}
             Toasts {}
+            boot::Boot {}
             if let Some(src) = lightbox {
                 div { class: "lightbox", onclick: move |_| { let mut a = app; a.ui.write().lightbox = None; },
                     img { src: "{src}" }
@@ -1543,8 +1554,13 @@ fn Main() -> Element {
         View::Subagent { session, tool } => Some((session.clone(), Some(tool.clone()))),
         _ => None,
     };
+    // A chat being opened: what's shown now greys while it loads.
+    let opening = app.ui.read().opening.is_some();
     rsx! {
-        div { class: "main",
+        div { class: if opening { "main opening" } else { "main" },
+            if opening {
+                div { class: "open-wait", "aria-label": "Opening the chat", span { class: "open-spin" } }
+            }
             InterruptedBanner {}
             if let Some((id, sub)) = chat {
                 chat::AgentView { key: "{id}", id, sub }

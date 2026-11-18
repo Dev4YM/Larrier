@@ -505,6 +505,8 @@ pub fn track_window() {
                 WindowEvent::Moved(_) | WindowEvent::Resized(_) => record(false),
                 WindowEvent::CloseRequested | WindowEvent::Destroyed => {
                     record(true);
+                    // Closed normally: the last chat opens again next time.
+                    crate::state::set_opening_marker(None);
                     app.save_running();
                     crate::state::flush_saves();
                     if matches!(event, WindowEvent::CloseRequested) {

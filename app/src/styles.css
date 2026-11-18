@@ -1936,6 +1936,51 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ctx-legend.has-hot .row.hot { opacity: 1; background: var(--hover); }
 
 /* Add account: an existing folder, picked or found at home. */
+/* ------------------------------------------------------------------ starting
+   The loading screen: the Lary mark cut as glass in its own colours (the
+   ink tile in four flat facets, the letter in two), light slowly turning
+   over them; what Lary is doing under it, and a thin line. */
+.boot { position: fixed; inset: 0; z-index: 400; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; background: var(--win); transition: opacity .42s cubic-bezier(.4, 0, .2, 1); }
+.boot.leaving { opacity: 0; pointer-events: none; }
+.boot.leaving .boot-mark { transform: scale(1.03); }
+.boot-mark { display: block; width: 120px; height: 120px; filter: drop-shadow(0 18px 28px rgba(20, 19, 16, .16)) drop-shadow(0 3px 6px rgba(20, 19, 16, .12)); animation: boot-in .6s cubic-bezier(.2, .8, .2, 1) both; transition: transform .42s cubic-bezier(.4, 0, .2, 1); }
+.app[data-theme="dark"] .boot-mark { filter: drop-shadow(0 18px 30px rgba(0, 0, 0, .5)) drop-shadow(0 3px 6px rgba(0, 0, 0, .4)); }
+.boot-mark svg { width: 100%; height: 100%; display: block; }
+.boot-mark .bm-top { fill: #45443e; animation: bm-top 3.4s ease-in-out infinite; }
+.boot-mark .bm-left { fill: #34332e; animation: bm-left 3.4s ease-in-out infinite; }
+.boot-mark .bm-right { fill: #262521; animation: bm-right 3.4s ease-in-out infinite; }
+.boot-mark .bm-bottom { fill: #1a1916; }
+.boot-mark .bm-rim { stroke: rgba(255, 255, 255, .14); stroke-width: 1; }
+.boot-mark .bm-lit { fill: #f4f3ef; }
+.boot-mark .bm-shade { fill: #cfccc4; animation: bm-shade 3.4s ease-in-out infinite; }
+@keyframes bm-top { 0%, 100% { fill: #45443e; } 50% { fill: #3b3a35; } }
+@keyframes bm-left { 0%, 100% { fill: #34332e; } 50% { fill: #3d3c36; } }
+@keyframes bm-right { 0%, 100% { fill: #262521; } 50% { fill: #302f2a; } }
+@keyframes bm-shade { 0%, 100% { fill: #cfccc4; } 50% { fill: #dddad3; } }
+.boot-note { font-size: var(--ui-sm); color: var(--fg-2); min-height: 18px; max-width: 70vw; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: boot-in .6s .1s cubic-bezier(.2, .8, .2, 1) both; }
+.boot-line { width: 112px; height: 2px; border-radius: 2px; background: var(--chip); overflow: hidden; }
+.boot-line span { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--fg-3); animation: boot-line 1.2s cubic-bezier(.45, 0, .55, 1) infinite; }
+@keyframes boot-in { from { opacity: 0; transform: translateY(4px) scale(.95); } to { opacity: 1; transform: none; } }
+@keyframes boot-line { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+.app.no-motion .boot-mark, .app.no-motion .boot-mark *, .app.no-motion .boot-note, .app.no-motion .boot-line span { animation: none; }
+@media (prefers-reduced-motion: reduce) { .boot-mark, .boot-mark *, .boot-note, .boot-line span { animation: none; } }
+/* A chat being opened: the area greys, a spinner over it; the rest of the
+   window keeps working. */
+.main { position: relative; }
+.main.opening > :not(.open-wait) { opacity: .45; filter: saturate(.7); pointer-events: none; transition: opacity .18s ease, filter .18s ease; }
+.open-wait { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; pointer-events: none; animation: open-wait-in .2s .12s ease both; }
+.open-spin { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--chip-2); border-top-color: var(--fg-2); animation: open-spin .8s linear infinite; }
+@keyframes open-spin { to { transform: rotate(360deg); } }
+@keyframes open-wait-in { from { opacity: 0; } to { opacity: 1; } }
+.app.no-motion .open-spin { animation-duration: 2s; }
+
+/* A chat that couldn't be opened: a small mark on its row, and on Home the
+   last chat Lary didn't open again. */
+.row-issue { display: inline-flex; color: var(--red); flex-shrink: 0; }
+.home-issue { display: inline-flex; align-items: center; gap: 8px; max-width: min(560px, 100%); margin: 0 auto 14px; padding: 6px 8px 6px 12px; border-radius: 999px; background: var(--red-bg); color: var(--fg); font-size: var(--ui-sm); line-height: 18px; }
+.home-issue .ic { display: inline-flex; color: var(--red); flex-shrink: 0; }
+.home-issue .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* File → Import Session: a search, then the harnesses' sessions as rows. */
 .imp-body { gap: var(--sp-4); }
 .imp-list { height: min(360px, 52vh); overflow-y: auto; margin: 0 calc(-1 * var(--sp-3)); display: flex; flex-direction: column; gap: 1px; }

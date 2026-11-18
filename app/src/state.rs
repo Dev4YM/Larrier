@@ -21,6 +21,57 @@ use lary_formats::ExportFormat;
 
 static STORE: OnceLock<Store> = OnceLock::new();
 
+/// Bumped when the deleted chats change (Settings → Sessions reads again).
+pub static TRASH_SEEN: GlobalSignal<u32> = Signal::global(|| 0);
+
+fn bump_trash() {
+    *TRASH_SEEN.write() += 1;
+}
+
+/// A deleted chat gone for good, and the worktree Lary made for it (one
+/// that was there before stays).
+fn purge(id: &str) {
+    if let Ok(s) = store().load_trashed(id) {
+        if let (Environment::Worktree { path, branch, .. }, Some(ws)) = (&s.environment, &s.workspace) {
+            // Larrier (Lary's old name) made `larrier/` branches.
+            if branch.starts_with("lary/") || branch.starts_with("larrier/") {
+                let _ = git::remove_worktree(&PathBuf::from(&ws.path), &PathBuf::from(path));
+            }
+        }
+    }
+    crate::keep::forget(id);
+    let _ = store().purge(id);
+}
+
+/// When Lary started (for the loading screen's least time on screen).
+pub fn boot_at() -> Instant {
+    static AT: OnceLock<Instant> = OnceLock::new();
+    *AT.get_or_init(Instant::now)
+}
+
+fn opening_marker_path() -> PathBuf {
+    store().root().join("opening")
+}
+
+/// The chat Lary was opening at start when it last closed, if it closed
+/// then: written before the last chat opens, removed once it has been open
+/// a while (or Lary closes normally).
+pub fn opening_marker() -> Option<String> {
+    std::fs::read_to_string(opening_marker_path()).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+pub fn set_opening_marker(id: Option<&str>) {
+    let p = opening_marker_path();
+    match id {
+        Some(id) => {
+            let _ = std::fs::write(p, id);
+        }
+        None => {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 /// Bumped when what an account's row reads outside the config changes (a
 /// token or key in the keychain, a finished sign-in): the rows read again.
 pub static ACCOUNTS_SEEN: GlobalSignal<u32> = Signal::global(|| 0);
@@ -176,6 +227,8 @@ pub enum Modal {
     WhatsNew(String, bool),
     /// File → Import Session: a harness session on this computer, or a file.
     ImportSession,
+    /// Delete a deleted chat for good (its id), or all of them (`None`).
+    PurgeChats(Option<String>),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -239,6 +292,17 @@ pub struct Ui {
     pub agent_term: Option<(String, String)>,
     /// The harness whose page Settings → Harnesses shows (`None`: the list).
     pub models_agent: Option<AgentKind>,
+    /// Lary is starting: its loading screen shows until the window is ready
+    /// (the last chat opened, or Home), with what it's doing under the logo.
+    pub booting: bool,
+    pub boot_note: String,
+    /// The chat being opened: the chat area is greyed meanwhile; the rest
+    /// of the window keeps working.
+    pub opening: Option<String>,
+    /// Chats that couldn't be opened, and why (a badge on their row).
+    pub chat_issues: HashMap<String, String>,
+    /// The last chat, not opened again at start, and why (shown on Home).
+    pub startup_issue: Option<(String, String)>,
 }
 
 impl Ui {
@@ -541,6 +605,14 @@ impl App {
             tab_ctx: None,
             agent_term: None,
             models_agent: None,
+            booting: {
+                boot_at();
+                true
+            },
+            boot_note: String::new(),
+            opening: None,
+            chat_issues: HashMap::new(),
+            startup_issue: None,
         };
         App {
             sessions: root_signal(listed(&cfg)),
@@ -820,6 +892,10 @@ impl App {
 
     /// Switch views, recording the move for back / forward.
     pub fn navigate(mut self, v: View) {
+        // A chat not loaded yet loads first, off the UI thread.
+        if let Some(id) = v.session_id().filter(|id| !self.is_loaded(id)).map(String::from) {
+            return self.load_then(&id, move |app| app.navigate(v), |_| {});
+        }
         if v.is_tab() {
             self.ensure_tab(&v, false);
         }
@@ -843,6 +919,9 @@ impl App {
     /// swapped in with it; leaving the new agent screen with a message in
     /// it lists that message in the sidebar as a draft.
     pub fn set_view(mut self, v: View) {
+        if let Some(id) = v.session_id().filter(|id| !self.is_loaded(id)).map(String::from) {
+            return self.load_then(&id, move |app| app.set_view(v), |_| {});
+        }
         let (old, was_home) = {
             let cur = self.view.peek();
             (cur.session_id().map(String::from), *cur == View::Home)
@@ -890,15 +969,18 @@ impl App {
         }
     }
 
-    /// Bring back where the window was when Lary closed: the chat or
-    /// page shown (its side panel and browser with it), its tabs, the chat
-    /// beside it, the way back and forward, the sidebar and a prompt being
-    /// edited. Chats deleted since are left out.
+    /// Bring back where the window was when Lary closed: the chat shown
+    /// (its side panel and browser with it), its tabs, the way back and
+    /// forward, the sidebar and a prompt being edited. Only a chat opens
+    /// again; any other page opens Home. The chat loads off the UI thread
+    /// under the loading screen; one that can't be opened, or that Lary
+    /// closed while opening last time, leaves Lary on Home saying so.
     pub fn restore_layout(mut self) {
-        let Some(l) = crate::keep::layout() else { return };
+        let Some(l) = crate::keep::layout() else { return self.booted() };
         let app = self;
         let exists = move |v: &View| v.session_id().map_or(true, |id| app.is_loaded(id) || store().exists(id));
-        let view = l.view.clone().filter(|v| exists(v)).filter(|v| v.session_id().map_or(true, |id| self.ensure_loaded(id))).unwrap_or(View::Home);
+        let last = l.view.clone().and_then(|v| v.session_id().map(String::from)).filter(|id| store().exists(id));
+        let view = View::Home;
         let (mut history, mut pos) = (Vec::new(), 0);
         for (i, v) in l.history.into_iter().enumerate() {
             if !exists(&v) || history.last() == Some(&v) {
@@ -924,12 +1006,8 @@ impl App {
                 ui.models_agent = l.models_agent;
             }
         }
-        self.tabs.set(l.tabs.into_iter().filter(|t| exists(&t.view)).collect());
-        let split = l.split.filter(|id| Some(id.as_str()) != view.session_id() && view.session_id().is_some()).filter(|id| store().exists(id) && self.ensure_loaded(id));
-        if view != View::Home {
-            self.set_view(view);
-        }
-        self.split.set(split);
+        // Chats' tabs only (they load when shown).
+        self.tabs.set(l.tabs.into_iter().filter(|t| t.view.session_id().is_some() && exists(&t.view)).collect());
         // A prompt edited before the chats kept their own edits.
         if let Some(mut ed) = l.editing.filter(|e| e.msg.is_some() && self.editing.peek().msg.is_none()) {
             let id = ed.msg.clone().unwrap_or_default();
@@ -938,6 +1016,50 @@ impl App {
                 self.editing.set(ed);
             }
         }
+        let Some(id) = last else { return self.booted() };
+        let title = self.sessions.peek().iter().find(|s| s.id == id).map(|s| s.title.clone()).unwrap_or_default();
+        // Lary closed while it opened this chat last time: not again.
+        if opening_marker().as_deref() == Some(id.as_str()) {
+            let why = "Lary closed while opening it last time".to_string();
+            {
+                let mut ui = self.ui.write();
+                ui.chat_issues.insert(id.clone(), why.clone());
+                ui.startup_issue = Some((id, why));
+            }
+            set_opening_marker(None);
+            return self.booted();
+        }
+        self.ui.write().boot_note = if title.is_empty() { "Opening your last chat…".into() } else { format!("Opening “{title}”…") };
+        set_opening_marker(Some(&id));
+        let split = l.split.filter(|s| *s != id && store().exists(s));
+        let (id2, id3) = (id.clone(), id.clone());
+        self.load_then(
+            &id3,
+            move |app| {
+                app.navigate(View::Agent(id2.clone()));
+                if let Some(s) = split {
+                    let s2 = s.clone();
+                    app.load_then(&s, move |mut app| app.split.set(Some(s2)), |_| {});
+                }
+                app.booted();
+                // Opened and still running a while later: it's safe to
+                // open again next time.
+                spawn_forever(async move {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    if opening_marker().as_deref() == Some(id2.as_str()) {
+                        set_opening_marker(None);
+                    }
+                });
+            },
+            move |mut app| {
+                set_opening_marker(None);
+                let why = app.ui.peek().chat_issues.get(&id).cloned().unwrap_or_default();
+                if !why.is_empty() {
+                    app.ui.write().startup_issue = Some((id, why));
+                }
+                app.booted();
+            },
+        );
     }
 
     /// Where the window is, for the next launch.
@@ -1262,26 +1384,70 @@ impl App {
     /// Show a session in the window. Big sessions load off the UI thread so
     /// the window never freezes.
     pub fn open_session(self, id: &str) {
+        let id2 = id.to_string();
+        self.load_then(id, move |app| app.show_session(&id2), |_| {});
+    }
+
+    /// Load chat `id` off the UI thread, then `then`. Meanwhile the chat
+    /// area is greyed and the rest of the window keeps working; opening
+    /// another chat replaces this one. A chat that can't be opened leaves
+    /// the window where it was, says why and gets a badge (`failed` runs).
+    pub fn load_then(mut self, id: &str, then: impl FnOnce(App) + 'static, failed: impl FnOnce(App) + 'static) {
         if self.is_loaded(id) {
-            return self.show_session(id);
+            return then(self);
         }
         let id = id.to_string();
+        self.ui.write().opening = Some(id.clone());
         spawn_forever(async move {
             let id2 = id.clone();
-            match tokio::task::spawn_blocking(move || store().load(&id2)).await {
+            let r = tokio::task::spawn_blocking(move || store().load(&id2)).await;
+            // Still the one asked for (not replaced by another since).
+            let current = self.ui.peek().opening.as_deref() == Some(id.as_str());
+            if current {
+                self.ui.write().opening = None;
+            }
+            let why = match r {
                 Ok(Ok(s)) => {
                     if !self.is_loaded(&id) {
                         self.put_session(s);
                     }
-                    self.show_session(&id);
+                    if self.ui.peek().chat_issues.contains_key(&id) {
+                        self.ui.write().chat_issues.remove(&id);
+                    }
+                    if current {
+                        then(self);
+                    }
+                    return;
                 }
                 Ok(Err(_)) if !store().exists(&id) => {
                     self.forget_session(&id);
-                    self.toast("That session no longer exists");
+                    self.toast("That chat no longer exists");
+                    return failed(self);
                 }
-                Ok(Err(e)) => self.toast_err(format!("Could not open session: {e}")),
-                Err(e) => self.toast_err(format!("Could not open session: {e}")),
-            }
+                // (`{e}`: the reason once, not again with its cause.)
+                Ok(Err(e)) => e.to_string(),
+                Err(e) => e.to_string(),
+            };
+            self.chat_failed(&id, why);
+            failed(self);
+        });
+    }
+
+    /// A chat that couldn't be opened: why, in a toast and on its row.
+    pub fn chat_failed(mut self, id: &str, why: String) {
+        let title = self.sessions.peek().iter().find(|s| s.id == id).map(|s| s.title.clone()).unwrap_or_else(|| "this chat".into());
+        self.ui.write().chat_issues.insert(id.to_string(), why.clone());
+        self.toast_err(format!("Couldn't open “{title}”: {why}"));
+    }
+
+    /// The window is ready: the loading screen goes (after a moment at
+    /// least, so it doesn't flash).
+    pub fn booted(mut self) {
+        let shown = boot_at().elapsed();
+        let wait = Duration::from_millis(700).saturating_sub(shown);
+        spawn_forever(async move {
+            tokio::time::sleep(wait).await;
+            self.ui.write().booting = false;
         });
     }
 
@@ -1392,6 +1558,10 @@ impl App {
         let cfg = self.config.read().clone();
         let request = self.peek_session(&id, |s| lary_agents::build_request(&cfg, s, &agent)).expect("loaded");
         let mut recorder = self.mutate_session(&id, |s| TurnRecorder::begin(s, agent.clone(), model, account)).expect("loaded");
+        // A reply that ran another model than the one asked for says so.
+        if let Ok(r) = &request {
+            recorder.asking(r.model.clone());
+        }
         if let Some(text) = notice {
             self.mutate_session(&id, |s| recorder.apply(s, &AgentEvent::Notice { text }));
         }
@@ -2144,7 +2314,18 @@ impl App {
 
     pub fn toggle_archive(self, id: &str) {
         let archived = !self.sessions.peek().iter().find(|s| s.id == id).is_some_and(|s| s.archived);
-        self.set_flags(id, move |s| s.archived = archived, move |s| s.archived = archived);
+        let at = archived.then(chrono::Utc::now);
+        self.set_flags(
+            id,
+            move |s| {
+                s.archived = archived;
+                s.archived_at = at;
+            },
+            move |s| {
+                s.archived = archived;
+                s.archived_at = at;
+            },
+        );
         if archived {
             let cur = self.current_id().as_deref() == Some(id);
             self.forget_tabs(id);
@@ -2154,26 +2335,78 @@ impl App {
         }
     }
 
+    /// Delete a chat: it moves to the deleted ones (Settings → Sessions →
+    /// Deleted), kept for the days set there, its worktree with it, until
+    /// it's restored or goes for good.
     pub fn delete(self, id: &str) {
         self.stop(id);
-        // Clean up a worktree we created (one that was there before stays).
-        if let Some(s) = self.peek_session(id, |s| s.clone()).or_else(|| store().load(id).ok()) {
-            if let (Environment::Worktree { path, branch, .. }, Some(ws)) = (&s.environment, &s.workspace) {
-                // Larrier (Lary's old name) made `larrier/` branches.
-                if branch.starts_with("lary/") || branch.starts_with("larrier/") {
-                    let _ = git::remove_worktree(&PathBuf::from(&ws.path), &PathBuf::from(path));
-                }
-            }
+        if let Some(s) = self.peek_session(id, |s| s.clone()) {
+            // What it holds now, before it goes.
+            let _ = store().save(&s);
         }
-        crate::keep::forget(id);
-        if let Err(e) = store().delete(id) {
-            self.toast_err(format!("Delete failed: {e}"));
+        let title = self.sessions.peek().iter().find(|s| s.id == id).map(|s| s.title.clone()).unwrap_or_default();
+        if let Err(e) = store().trash(id) {
+            return self.toast_err(format!("Delete failed: {e}"));
         }
         let cur = self.view.peek().session_id() == Some(id);
         self.forget_session(id);
         if cur {
             self.navigate(View::Home);
         }
+        self.toast(match self.config.peek().settings.trash_days {
+            Some(d) => format!("Deleted “{title}” · kept {d} days in Settings → Sessions"),
+            None => format!("Deleted “{title}” · kept in Settings → Sessions"),
+        });
+        bump_trash();
+    }
+
+    /// A deleted chat back in the sidebar.
+    pub fn restore_chat(self, id: &str) {
+        match store().restore(id) {
+            Ok(()) => {
+                self.refresh_sessions();
+                self.toast("Restored");
+            }
+            Err(e) => self.toast_err(format!("Couldn't restore it: {e:#}")),
+        }
+        bump_trash();
+    }
+
+    /// Delete a deleted chat for good, and the worktree Lary made for it.
+    pub fn purge_chat(self, id: &str) {
+        purge(id);
+        bump_trash();
+    }
+
+    /// Deleted chats past their days go for good; archived chats past
+    /// theirs (when that's on) move to the deleted ones. At start and every
+    /// few hours.
+    pub fn sweep(self) {
+        let (trash_days, archive_days) = {
+            let s = &self.config.peek().settings;
+            (s.trash_days, s.archive_days)
+        };
+        let now = chrono::Utc::now();
+        if let Some(d) = archive_days {
+            let old: Vec<String> = store()
+                .list()
+                .into_iter()
+                .filter(|s| s.archived && !self.is_running(&s.id))
+                .filter(|s| now - s.archived_at.unwrap_or(s.updated_at) > chrono::Duration::days(d as i64))
+                .map(|s| s.id)
+                .collect();
+            for id in old {
+                self.stop(&id);
+                let _ = store().trash(&id);
+                self.forget_session(&id);
+            }
+        }
+        if let Some(d) = trash_days {
+            for t in store().trashed().into_iter().filter(|t| now - t.deleted_at > chrono::Duration::days(d as i64)) {
+                purge(&t.summary.id);
+            }
+        }
+        bump_trash();
     }
 
     pub fn fork(self, id: &str, message_id: Option<String>) {

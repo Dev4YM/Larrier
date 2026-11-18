@@ -181,6 +181,8 @@ impl TurnRecorder {
                 } else {
                     m.push_reasoning(text);
                 }
+                // Changed as the text does: the view follows it as it's written.
+                session.touch();
                 true
             }
             AgentEvent::ReasoningBlock => {
@@ -199,6 +201,7 @@ impl TurnRecorder {
             AgentEvent::Reasoning { text, duration_ms } => {
                 self.close_reasoning(session);
                 self.msg(session).parts.push(Part::Reasoning { text: text.clone(), duration_ms: *duration_ms });
+                session.touch();
                 true
             }
             AgentEvent::ToolStart { tool } => {

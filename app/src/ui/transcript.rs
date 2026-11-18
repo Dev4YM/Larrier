@@ -222,7 +222,8 @@ pub fn Transcript(id: String) -> Element {
             .collect();
         let running = app.is_active(&id);
         let waiting = running && s.messages.last().map(|m| m.role == Role::User).unwrap_or(false);
-        (rows, nav, total, s.messages.is_empty(), waiting, s.updated_at)
+        let last_prompt = s.messages.iter().rev().find(|m| m.role == Role::User).map(|m| m.id.clone()).unwrap_or_default();
+        (rows, nav, total, s.messages.is_empty(), waiting, (s.updated_at, last_prompt))
     };
     let first = total - rows.len();
     let running = app.is_active(&id);
@@ -239,7 +240,7 @@ pub fn Transcript(id: String) -> Element {
     // to the bottom when a session opens.
     let tid2 = tid.clone();
     use_effect(use_reactive!(|updated| {
-        let _ = updated;
+        let (_, last_prompt) = updated;
         document::eval(&format!(
             r#"requestAnimationFrame(() => {{
                 const el = document.getElementById('{tid2}');
@@ -284,6 +285,42 @@ pub fn Transcript(id: String) -> Element {
                     el.addEventListener('wheel', mark, {{ passive: true }});
                     el.addEventListener('touchmove', mark, {{ passive: true }});
                     el.addEventListener('keydown', mark);
+                    // Following the newest: on at the bottom, off the moment
+                    // the user scrolls up (wheel, keys, the bar), on again
+                    // once they're back at the bottom.
+                    el.__stick = !el.dataset.anchor;
+                    let lastTop = el.scrollTop;
+                    el.addEventListener('scroll', () => {{
+                        const d = el.scrollHeight - el.scrollTop - el.clientHeight;
+                        if (d <= 8) el.__stick = true;
+                        else if (el.scrollTop < lastTop - 1) el.__stick = false;
+                        lastTop = el.scrollTop;
+                    }}, {{ passive: true }});
+                    el.addEventListener('wheel', (e) => {{ if (e.deltaY < 0) el.__stick = false; }}, {{ passive: true }});
+                    // Down to the newest: a glide, or a jump with reduced
+                    // motion; it stops as soon as the user scrolls up.
+                    el.__follow = () => {{
+                        if (el.closest('.no-motion')) {{ el.scrollTop = el.scrollHeight; return; }}
+                        if (el.__gliding) return;
+                        el.__gliding = true;
+                        const step = () => {{
+                            const d = el.scrollHeight - el.clientHeight - el.scrollTop;
+                            if (!el.__stick || d <= 1) {{ el.__gliding = false; return; }}
+                            el.scrollTop += Math.max(1, Math.ceil(d * 0.2));
+                            requestAnimationFrame(step);
+                        }};
+                        requestAnimationFrame(step);
+                    }};
+                    // Whatever makes it grow (a reply or its thinking being
+                    // written, output, an image loading) is followed.
+                    el.__grow = new ResizeObserver(() => {{ if (el.__stick && el.dataset.fresh === '0') el.__follow(); }});
+                }}
+                const inner = el.querySelector('.transcript-inner');
+                if (inner && el.__grown !== inner) {{ el.__grown = inner; el.__grow.observe(inner); }}
+                // A new prompt sent: follow again, to show it and its answer.
+                if (el.dataset.prompt !== '{last_prompt}') {{
+                    if (el.dataset.prompt !== undefined) el.__stick = true;
+                    el.dataset.prompt = '{last_prompt}';
                 }}
                 // Timeline: the dash nearest the pointer is "hot" (its card
                 // shows); the card itself keeps it while being read.
@@ -340,22 +377,14 @@ pub fn Transcript(id: String) -> Element {
                         return;
                     }}
                 }}
-                const fresh = el.dataset.fresh !== '0';
-                const near = el.scrollHeight - el.scrollTop - el.clientHeight < 260;
-                if (!fresh && !near) return;
-                el.dataset.fresh = '0';
-                // Opening a chat, or reduced motion: jump. Otherwise glide.
-                if (fresh || el.closest('.no-motion')) {{ el.scrollTop = el.scrollHeight; return; }}
-                if (el.__gliding) return;
-                el.__gliding = true;
-                const step = () => {{
-                    if (performance.now() - (el.__userAt || 0) < 700) {{ el.__gliding = false; return; }}
-                    const d = el.scrollHeight - el.clientHeight - el.scrollTop;
-                    if (d <= 1) {{ el.__gliding = false; return; }}
-                    el.scrollTop += Math.max(1, Math.ceil(d * 0.2));
-                    requestAnimationFrame(step);
-                }};
-                requestAnimationFrame(step);
+                // Opening a chat: at the bottom at once, following.
+                if (el.dataset.fresh !== '0') {{
+                    el.dataset.fresh = '0';
+                    el.__stick = true;
+                    el.scrollTop = el.scrollHeight;
+                    return;
+                }}
+                if (el.__stick) el.__follow();
             }});"#
         ));
     }));

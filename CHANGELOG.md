@@ -5,6 +5,13 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.50 — 2026-11-18
+
+### New
+
+- Claude Code's models show by version (Opus 5.5) first, its aliases and older models under All
+- Ultracode is a switch beside Fast that works at any effort, not an effort level
+- Chats get an Edit dialog with icon and colour, Rename in place in the list, and F2 to rename
 ## 0.1.49 — 2026-11-18
 
 ### New

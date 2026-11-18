@@ -3227,7 +3227,7 @@ dependencies = [
 
 [[package]]
 name = "lary-agents"
-version = "0.1.51"
+version = "0.1.52"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3254,7 +3254,7 @@ dependencies = [
 
 [[package]]
 name = "lary-app"
-version = "0.1.51"
+version = "0.1.52"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3290,7 +3290,7 @@ dependencies = [
 
 [[package]]
 name = "lary-cli"
-version = "0.1.51"
+version = "0.1.52"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3304,7 +3304,7 @@ dependencies = [
 
 [[package]]
 name = "lary-core"
-version = "0.1.51"
+version = "0.1.52"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3320,7 +3320,7 @@ dependencies = [
 
 [[package]]
 name = "lary-formats"
-version = "0.1.51"
+version = "0.1.52"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

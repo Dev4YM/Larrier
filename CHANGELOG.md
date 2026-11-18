@@ -5,6 +5,19 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.52 — 2026-11-18
+
+### Look and feel
+
+- The browser's selected page tab stands out and joins its bar
+
+### Fixed
+
+- A chat run as one of your Claude Code agents gets its prompt, tools and MCP servers: your agents, skills and commands come along to Lary's account folders
+- Claude Code's thinking shows (as its summary)
+- Renaming a pinned chat in place no longer closes at once
+- The home box starts clear after a new chat (no @ agent to run as or / mode left)
+- An update counts by the version it leaves; when Droid's own updater refuses, its installer runs instead
 ## 0.1.51 — 2026-11-18
 
 ### New

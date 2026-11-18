@@ -14,12 +14,22 @@ use lary_agents::{
 use lary_core::{
     lsf::{new_id, MediaSource},
     store::{import_key, ImportRecord},
-    AccountAuth, AgentKind, BusySend, Config, Environment, Message, Part, Role, Session, SessionStatus, SessionSummary, Store,
-    Theme, WorkspaceRef,
+    AccountAuth, AgentKind, BusySend, Config, Environment, Message, Part, Role, Session, SessionMode, SessionStatus, SessionSummary,
+    Store, Theme, WorkspaceRef,
 };
 use lary_formats::ExportFormat;
 
 static STORE: OnceLock<Store> = OnceLock::new();
+
+/// The sessions the sidebar and the rest show: Lary's own, and in
+/// Companion mode every harness's too.
+pub fn listed(cfg: &Config) -> Vec<lary_core::SessionSummary> {
+    let all = store().list();
+    match cfg.settings.session_mode {
+        SessionMode::Companion => all,
+        SessionMode::Normal => all.into_iter().filter(|s| s.managed).collect(),
+    }
+}
 
 pub fn store() -> &'static Store {
     STORE.get_or_init(|| Store::open_default().expect("cannot open Lary data directory"))
@@ -110,7 +120,7 @@ impl SettingsTab {
             SettingsTab::Agents => "Harnesses",
             SettingsTab::Accounts => "Accounts",
             SettingsTab::Models => "Models & API Keys",
-            SettingsTab::Sessions => "Sessions & Import",
+            SettingsTab::Sessions => "Sessions",
             SettingsTab::Workspaces => "Projects",
             SettingsTab::Shortcuts => "Keyboard Shortcuts",
             SettingsTab::About => "About",
@@ -152,6 +162,8 @@ pub enum Modal {
     Project(Option<String>, Option<String>),
     /// A release's notes; `true` when Lary was just updated to it.
     WhatsNew(String, bool),
+    /// File → Import Session: a harness session on this computer, or a file.
+    ImportSession,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -519,7 +531,7 @@ impl App {
             models_agent: None,
         };
         App {
-            sessions: root_signal(store().list()),
+            sessions: root_signal(listed(&cfg)),
             config: root_signal(cfg),
             open: root_signal(HashMap::new()),
             view: root_signal(View::Home),
@@ -567,7 +579,48 @@ impl App {
     }
 
     pub fn refresh_sessions(mut self) {
-        self.sessions.set(store().list());
+        let list = listed(&self.config.peek());
+        self.sessions.set(list);
+    }
+
+    /// Companion mode: every harness's sessions, kept in sync.
+    pub fn companion(&self) -> bool {
+        self.config.peek().settings.session_mode == SessionMode::Companion
+    }
+
+    /// Switch between Lary's own sessions and every harness's.
+    pub fn switch_session_mode(self, mode: SessionMode) {
+        self.update_config(|c| c.settings.session_mode = mode);
+        crate::live::restart(self);
+        self.refresh_sessions();
+        if mode == SessionMode::Companion && self.config.peek().settings.auto_import {
+            self.sync_imports(true);
+        }
+    }
+
+    /// File → Import Session.
+    pub fn open_import_session(mut self) {
+        crate::native_sessions::refresh();
+        self.ui.write().modal = Some(Modal::ImportSession);
+    }
+
+    /// Make a harness's session Lary's own and open it. False when it
+    /// couldn't (the reason is shown).
+    pub async fn import_native_session(mut self, info: lary_formats::NativeSessionInfo) -> bool {
+        let title = crate::native_sessions::title(&info);
+        let err = match tokio::task::spawn_blocking(move || lary_formats::import_one(store(), &info)).await {
+            Ok(Ok(id)) => {
+                self.ui.write().modal = None;
+                self.refresh_sessions();
+                self.open_session(&id);
+                self.toast(format!("Imported “{title}”"));
+                return true;
+            }
+            Ok(Err(e)) => format!("{e:#}"),
+            Err(e) => e.to_string(),
+        };
+        self.toast_err(format!("Couldn't import “{title}”: {err}"));
+        false
     }
 
     pub fn save_config(self) {
@@ -716,31 +769,29 @@ impl App {
     }
 
     /// Persist a session in the background and update its sidebar row now.
-    pub fn save_session(mut self, s: &Session) {
-        let sum = s.summary();
-        {
-            let mut list = self.sessions.write();
-            if let Some(i) = list.iter().position(|x| x.id == sum.id) {
-                list.remove(i);
-            }
+    pub fn save_session(self, s: &Session) {
+        self.put_row(s.summary());
+        save_async(s.clone());
+    }
+
+    /// A session's sidebar row, in its place by time; left out when the
+    /// mode doesn't show it (a harness's session in Normal mode).
+    fn put_row(mut self, sum: SessionSummary) {
+        let shown = sum.managed || self.companion();
+        let mut list = self.sessions.write();
+        if let Some(i) = list.iter().position(|x| x.id == sum.id) {
+            list.remove(i);
+        }
+        if shown {
             let at = list.partition_point(|x| x.updated_at > sum.updated_at);
             list.insert(at, sum);
         }
-        save_async(s.clone());
     }
 
     /// A session changed outside Lary (live sync, already saved): show the
     /// new contents wherever it is open and update its sidebar row.
-    pub fn apply_external(mut self, s: Session) {
-        let sum = s.summary();
-        {
-            let mut list = self.sessions.write();
-            if let Some(i) = list.iter().position(|x| x.id == sum.id) {
-                list.remove(i);
-            }
-            let at = list.partition_point(|x| x.updated_at > sum.updated_at);
-            list.insert(at, sum);
-        }
+    pub fn apply_external(self, s: Session) {
+        self.put_row(s.summary());
         if self.is_loaded(&s.id) {
             self.put_session(s);
         }
@@ -1300,6 +1351,8 @@ impl App {
             s.push(msg);
             s.auto_title();
             s.archived = false;
+            // Continued here: Lary's own, in either mode.
+            s.origin.managed = true;
             (s.agent.clone(), s.model.clone(), s.account_id.clone())
         }) else {
             return;
@@ -2361,7 +2414,11 @@ impl App {
         });
     }
 
+    /// Import every harness's sessions (Companion mode only).
     pub fn sync_imports(mut self, quiet: bool) {
+        if !self.companion() {
+            return;
+        }
         let agents: Vec<AgentKind> = {
             let cfg = self.config.read();
             lary_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect()
@@ -2398,7 +2455,7 @@ impl App {
                 }
                 Err(e) => self.sync_status.set(format!("Import failed: {e}")),
             }
-            self.sessions.set(store().list());
+            self.refresh_sessions();
         });
     }
 
@@ -2412,7 +2469,11 @@ impl App {
             let mut count = 0;
             for f in files {
                 match lary_formats::import_file(f.path()) {
-                    Ok(list) => {
+                    Ok(mut list) => {
+                        // Imported by hand: Lary's own.
+                        for s in &mut list {
+                            s.origin.managed = true;
+                        }
                         count += list.len();
                         let _ = store().save_many(&list);
                     }

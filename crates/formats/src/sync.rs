@@ -29,6 +29,39 @@ enum Plan {
 /// One sync pass at a time, across full and live syncs.
 static SYNC_LOCK: Mutex<()> = Mutex::new(());
 
+/// Import one native session by hand, as Lary's own (see
+/// `Session::is_managed`): a session already imported from it becomes
+/// Lary's own, kept as it is; otherwise it's imported now. Returns the Lary
+/// session's id.
+pub fn import_one(store: &Store, info: &NativeSessionInfo) -> Result<String> {
+    let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let key = import_key(&info.agent, &info.native_id);
+    if let Some(r) = store.import_record(&key).filter(|r| !r.session_id.is_empty() && store.exists(&r.session_id)) {
+        let mut s = store.load(&r.session_id)?;
+        if !s.is_managed() {
+            s.origin.managed = true;
+            store.save(&s)?;
+        }
+        return Ok(s.id);
+    }
+    let mut s = match import_native(info) {
+        Ok(s) => s,
+        Err(e) if e.downcast_ref::<ImportSkip>().is_some() => {
+            // Remembered as empty, so it isn't offered again until it changes.
+            store.set_import_record(&key, ImportRecord { session_id: String::new(), source_mtime: info.mtime_ms, source_len: info.size, importer: IMPORTER_VERSION, ..Default::default() });
+            store.flush_imports();
+            anyhow::bail!("this session has no messages");
+        }
+        Err(e) => return Err(e),
+    };
+    s.origin.managed = true;
+    store.save(&s)?;
+    // Recorded, so a Companion sync updates it instead of adding a copy.
+    store.set_import_record(&key, ImportRecord { session_id: s.id.clone(), source_mtime: info.mtime_ms, source_len: info.size, importer: IMPORTER_VERSION, ..Default::default() });
+    store.flush_imports();
+    Ok(s.id)
+}
+
 pub fn sync(store: &Store, agents: &[AgentKind], skip: &dyn Fn(&str) -> bool) -> SyncReport {
     let infos: Vec<NativeSessionInfo> = agents.iter().flat_map(discover).collect();
     let mut report = apply(store, infos, skip);
@@ -256,6 +289,8 @@ fn grew(new: &Session, old: &Session) -> bool {
 fn merge_user_state(new: &mut Session, old: &Session) {
     new.pinned = old.pinned;
     new.unread = old.unread;
+    // Imported by hand or continued here: still Lary's own.
+    new.origin.managed = old.origin.managed;
     // Thumbs up / down and other Lary-only notes.
     for (k, v) in old.extra.iter().filter(|(k, _)| k.starts_with("feedback:")) {
         new.extra.insert(k.clone(), v.clone());

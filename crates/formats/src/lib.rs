@@ -31,7 +31,7 @@ mod repair;
 mod sync;
 pub mod util;
 
-pub use sync::IMPORTER_VERSION;
+pub use sync::{import_one, IMPORTER_VERSION};
 pub use util::ImportSkip;
 
 /// A session found in an agent's native storage.

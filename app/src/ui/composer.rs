@@ -193,7 +193,7 @@ const TIPS: &[&str] = &[
     "Type @ to mention a file, / for commands",
     "Continue any session with another agent from the model picker",
     "Ctrl+K searches every agent and chat you have",
-    "Import ChatGPT and Claude.ai exports from File → Import File",
+    "Import ChatGPT and Claude.ai exports from File → Import Session",
     "Multitask runs one prompt on several agents in parallel",
     "Right-click anything for Lary's menu",
     "Every session is a portable .lsf file — export it from the … menu",
@@ -833,6 +833,16 @@ pub fn Composer(
         };
         match sg.act {
             SuggAct::Chip(chip) => put(chip),
+            // A harness's session: read now, its conversation as context.
+            SuggAct::Native(info) => {
+                spawn(async move {
+                    match tokio::task::spawn_blocking(move || crate::native_sessions::context_chip(&info)).await {
+                        Ok(Ok(chip)) => put(chip),
+                        Ok(Err(e)) => app.toast_err(format!("Couldn't read that session: {e:#}")),
+                        Err(_) => {}
+                    }
+                });
+            }
             SuggAct::Lary(cmd) => {
                 drop_token();
                 run_slash(cmd, sid.clone());
@@ -1207,7 +1217,12 @@ pub fn Composer(
                         div { class: "menu-sep" }
                     }
                     if suggs.is_empty() {
-                        div { class: "menu-empty", "Nothing matches" }
+                        // The harnesses' sessions take a moment to find.
+                        if menu_title.as_deref() == Some("Sessions") && crate::native_sessions::FOUND.read().is_none() {
+                            div { class: "menu-empty", "Looking for sessions…" }
+                        } else {
+                            div { class: "menu-empty", "Nothing matches" }
+                        }
                     }
                     {
                         // Headings only where results of several kinds mix.

@@ -870,6 +870,7 @@ pub fn finish_as(mut conv: Conv, origin: AgentKind, agent: AgentKind, meta: Meta
         path: path_str.clone(),
         imported_at: Some(now),
         agent_version: meta.version.clone(),
+        managed: false,
     };
     s.messages = conv.messages;
     compact(&mut s);

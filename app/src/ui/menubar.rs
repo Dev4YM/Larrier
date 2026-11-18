@@ -60,8 +60,7 @@ pub fn system_menu() -> dioxus::desktop::muda::Menu {
             &item("new-agent", "New Agent", Some((cmd, Code::KeyN))),
             &item("open-folder", "Open Folder…", Some((cmd, Code::KeyO))),
             &sep(),
-            &item("import-all", "Import Sessions from All Agents", Some((cmd | Modifiers::SHIFT, Code::KeyI))),
-            &item("import-file", "Import File…", None),
+            &item("import-file", "Import Session…", Some((cmd | Modifiers::SHIFT, Code::KeyI))),
             &item("export", "Export Agent…", None),
             &sep(),
             &P::close_window(None),
@@ -155,7 +154,7 @@ fn run(mut app: App, c: Cmd) {
         Cmd::NewAgent => app.new_agent(),
         Cmd::OpenFolder => app.pick_workspace(true),
         Cmd::ImportAll => app.sync_imports(false),
-        Cmd::ImportFile => app.import_files(),
+        Cmd::ImportFile => app.open_import_session(),
         Cmd::Export => {
             if let Some(id) = app.current_id() {
                 app.export(&id, ExportFormat::LsfJsonl);
@@ -209,22 +208,27 @@ fn run(mut app: App, c: Cmd) {
 
 type Entry = Option<(&'static str, &'static str, Cmd)>;
 
-fn entries(menu: &str) -> Vec<Entry> {
+/// A menu's rows. `companion`: every harness's sessions can be imported at
+/// once (Companion mode); otherwise Ctrl+Shift+I imports one session.
+fn entries(menu: &str, companion: bool) -> Vec<Entry> {
     match menu {
-        "File" => vec![
-            Some(("New Agent", "Ctrl+N", Cmd::NewAgent)),
-            Some(("Open Folder…", "", Cmd::OpenFolder)),
-            None,
-            Some(("Import Sessions from All Agents", "Ctrl+Shift+I", Cmd::ImportAll)),
-            Some(("Import File…", "", Cmd::ImportFile)),
-            Some(("Export Agent…", "", Cmd::Export)),
-            None,
-            Some(("Automations", "", Cmd::Automations)),
-            Some(("Customize", "", Cmd::Customize)),
-            Some(("Settings", "Ctrl+,", Cmd::Settings)),
-            None,
-            Some(("Exit", "Alt+F4", Cmd::Exit)),
-        ],
+        "File" => {
+            let mut file = vec![Some(("New Agent", "Ctrl+N", Cmd::NewAgent)), Some(("Open Folder…", "", Cmd::OpenFolder)), None];
+            if companion {
+                file.push(Some(("Import Sessions from All Agents", "Ctrl+Shift+I", Cmd::ImportAll)));
+            }
+            file.extend([
+                Some(("Import Session…", if companion { "" } else { "Ctrl+Shift+I" }, Cmd::ImportFile)),
+                Some(("Export Agent…", "", Cmd::Export)),
+                None,
+                Some(("Automations", "", Cmd::Automations)),
+                Some(("Customize", "", Cmd::Customize)),
+                Some(("Settings", "Ctrl+,", Cmd::Settings)),
+                None,
+                Some(("Exit", "Alt+F4", Cmd::Exit)),
+            ]);
+            file
+        }
         "Edit" => vec![
             Some(("Undo", "Ctrl+Z", Cmd::Edit("undo"))),
             Some(("Redo", "Ctrl+Y", Cmd::Edit("redo"))),
@@ -310,7 +314,7 @@ pub fn MenuBar() -> Element {
                     if open == Some(n) {
                         div { class: "menu mb-menu", style: if i == 0 { "left: 0;" } else { "left: 0;" },
                             onclick: move |e| e.stop_propagation(),
-                            for (j, e) in entries(n).into_iter().enumerate() {
+                            for (j, e) in entries(n, app.companion()).into_iter().enumerate() {
                                 match e {
                                     None => rsx! { div { key: "{j}", class: "menu-sep" } },
                                     Some((label, kb, cmd)) => rsx! {

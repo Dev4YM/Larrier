@@ -1447,6 +1447,7 @@ mod tests {
             parent_id: None,
             usage: Usage::default(),
             account_id: None,
+            managed: true,
         }
     }
 

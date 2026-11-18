@@ -94,7 +94,8 @@ pub fn restart(app: App) {
     let (on, agents) = {
         let cfg = app.config.read();
         let agents: Vec<_> = lary_formats::importable_agents().into_iter().filter(|a| cfg.agent(a).import && cfg.agent(a).enabled).collect();
-        (cfg.settings.live_sync, agents)
+        // Only Companion mode follows the harnesses' own sessions.
+        (cfg.settings.live_sync && cfg.settings.session_mode == lary_core::SessionMode::Companion, agents)
     };
     // Dropping the old watcher stops it.
     *watcher().lock().unwrap() = None;

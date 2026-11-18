@@ -11,6 +11,7 @@ mod files;
 pub mod harness_run;
 mod home;
 mod home_bg;
+mod import_session;
 pub mod loaders;
 pub mod mentions;
 mod meters;
@@ -101,6 +102,7 @@ pub fn Root() -> Element {
                 app.update_config(|c| c.settings.last_version = Some(now.to_string()));
             }
         }
+        // Companion mode brings every harness's sessions in.
         if app.config.read().settings.auto_import {
             app.sync_imports(true);
         }
@@ -1205,7 +1207,13 @@ fn handle_bridge(mut app: App, v: serde_json::Value) {
                         app.navigate(tabs[next].view.clone());
                     }
                 }
-                ("i", true) => app.sync_imports(false),
+                ("i", true) => {
+                    if app.companion() {
+                        app.sync_imports(false)
+                    } else {
+                        app.open_import_session()
+                    }
+                }
                 (".", _) => {
                     if let Some(id) = app.current_id() {
                         app.stop_reply(&id);

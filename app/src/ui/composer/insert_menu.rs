@@ -1,7 +1,8 @@
 //! The @ and / menu above the composer, for the text before the caret.
 //!
-//! `@` starts on the kinds of context there are (files, chats, the agent's
-//! own agents, the diff) and `/` on what can be done (modes, the model,
+//! `@` starts on the kinds of context there are (files, chats, the
+//! harnesses' sessions on this computer, the agent's own agents, the diff)
+//! and `/` on what can be done (modes, the model,
 //! commands, skills). A kind opens as a page of the same menu, with the
 //! way back at its top; typing searches every kind at once.
 
@@ -37,6 +38,8 @@ pub enum SuggAct {
     Model(Option<String>),
     /// Think this hard (None: the model's default).
     Effort(Option<String>),
+    /// A harness's own session, sent as context (read when picked).
+    Native(Box<lary_formats::NativeSessionInfo>),
 }
 
 #[derive(Clone, PartialEq)]
@@ -154,6 +157,7 @@ pub fn page(ctx: &Ctx, trigger: char, q: &str, stack: &[Level]) -> Page {
             let items = match *k {
                 "Files" => files_page(ctx, "", &ql),
                 "Chats" => chats(ctx, &ql, 60),
+                "Sessions" => harness_sessions(ctx, &ql, 120),
                 "Run as" => run_as(ctx, &ql),
                 "Subagents" => subagents(ctx, &ql),
                 "Model" => models(ctx, &ql),
@@ -178,6 +182,11 @@ fn at_kinds(ctx: &Ctx) -> Vec<Sugg> {
     if !chats(ctx, "", 1).is_empty() {
         out.push(Sugg::new("", I::Message, "Chats", SuggAct::Open(Level::Kind("Chats"))).desc("Another chat's conversation, as context"));
     }
+    if sessions_offered(ctx) {
+        // Found in the background, ready by the time the page opens.
+        crate::native_sessions::refresh();
+        out.push(Sugg::new("", I::History, "Sessions", SuggAct::Open(Level::Kind("Sessions"))).desc("A harness session on this computer, as context"));
+    }
     if !run_as(ctx, "").is_empty() {
         out.push(Sugg::new("", I::Orbit, "Run as", SuggAct::Open(Level::Kind("Run as"))).desc(&format!("Run this chat as one of {}'s agents", ctx.agent.display_name())));
     }
@@ -194,6 +203,7 @@ fn at_kinds(ctx: &Ctx) -> Vec<Sugg> {
 fn at_search(ctx: &Ctx, ql: &str) -> Vec<Sugg> {
     let mut out = search_files(ctx, "", ql, 6, 3);
     out.extend(chats(ctx, ql, 4));
+    out.extend(harness_sessions(ctx, ql, 4));
     out.extend(run_as(ctx, ql));
     out.extend(subagents(ctx, ql).into_iter().take(6));
     if "git".starts_with(ql) || ql.starts_with("git") || "diff".starts_with(ql) {
@@ -269,6 +279,32 @@ fn chats(ctx: &Ctx, ql: &str, n: usize) -> Vec<Sugg> {
             Sugg::new("Chats", I::Message, s.title.clone(), SuggAct::Chip(MentionChip::agent(s)))
                 .logo(crate::logos::agent_logo(&s.agent))
                 .sub(format!("{} · {}", s.agent.display_name(), crate::state::rel_time(s.updated_at)))
+        })
+        .collect()
+}
+
+/// Whether @ offers the harnesses' sessions (Settings → Sessions).
+fn sessions_offered(ctx: &Ctx) -> bool {
+    ctx.app.config.peek().settings.sessions_in_mentions
+}
+
+/// The harnesses' sessions on this computer that aren't Lary's own chats
+/// (those are under Chats), newest first.
+fn harness_sessions(ctx: &Ctx, ql: &str, n: usize) -> Vec<Sugg> {
+    if !sessions_offered(ctx) {
+        return Vec::new();
+    }
+    crate::native_sessions::refresh();
+    let found = crate::native_sessions::FOUND.read();
+    let Some(list) = found.as_ref() else { return Vec::new() };
+    let sessions = ctx.app.sessions.read();
+    list.iter()
+        .filter(|i| crate::native_sessions::matches(i, ql) && crate::native_sessions::in_lary(i, &sessions).is_none())
+        .take(n)
+        .map(|i| {
+            Sugg::new("Sessions", I::History, crate::native_sessions::title(i), SuggAct::Native(Box::new(i.clone())))
+                .logo(crate::logos::agent_logo(&i.agent))
+                .sub(crate::native_sessions::detail(i))
         })
         .collect()
 }

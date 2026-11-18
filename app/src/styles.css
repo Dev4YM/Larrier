@@ -566,6 +566,10 @@ svg { flex-shrink: 0; display: block; }
 .set-card { border: 1px solid var(--border); border-radius: var(--r-md); background: var(--card); }
 .set-row { display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-4) var(--sp-5); min-height: 48px; }
 .set-row + .set-row, .set-card > div + div > .set-row:first-child { border-top: 1px solid var(--border); }
+/* What a choice above it costs, in a line: an amber mark, muted text. */
+.set-row.set-warn { align-items: flex-start; min-height: 0; padding-top: var(--sp-4); padding-bottom: var(--sp-4); }
+.set-warn .ic { display: inline-flex; color: var(--amber); margin-top: 2px; flex-shrink: 0; }
+.set-warn .d { font-size: var(--ui-xs); line-height: 18px; color: var(--fg-2); }
 .set-row .lbl { flex: 1; min-width: 0; }
 .set-row .lbl .t { font-size: var(--ui-sm); font-weight: 500; }
 .set-row .lbl .d { font-size: var(--ui-xs); color: var(--fg-2); margin-top: var(--sp-1); line-height: 16px; }
@@ -1926,6 +1930,19 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ctx-legend.has-hot .row.hot { opacity: 1; background: var(--hover); }
 
 /* Add account: an existing folder, picked or found at home. */
+/* File → Import Session: a search, then the harnesses' sessions as rows. */
+.imp-body { gap: var(--sp-4); }
+.imp-list { height: min(360px, 52vh); overflow-y: auto; margin: 0 calc(-1 * var(--sp-3)); display: flex; flex-direction: column; gap: 1px; }
+.imp-row { width: 100%; display: flex; align-items: center; gap: var(--sp-5); padding: var(--sp-3) var(--sp-3); border-radius: var(--r-md); text-align: left; }
+.imp-row:not(:disabled):hover { background: var(--hover); }
+.imp-row:disabled { cursor: default; }
+.imp-row .lbl { flex: 1; min-width: 0; }
+.imp-row .lbl .t { font-size: var(--ui-sm); color: var(--fg); line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-row .lbl .d { font-size: var(--ui-xs); color: var(--fg-3); line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imp-tag { flex-shrink: 0; font-size: var(--ui-xs); color: var(--fg-3); }
+.imp-empty { margin: auto; color: var(--fg-3); font-size: var(--ui-sm); }
+.modal-foot.imp-foot { justify-content: space-between; }
+
 /* A command to run, in a field like the inputs, with run and copy at its end. */
 .cmd-field { height: var(--h-ctl); display: flex; align-items: center; gap: 0; min-width: 0; padding: 0 1px 0 var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--input); }
 .cmd-field .mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-sm); color: var(--fg); user-select: text; }

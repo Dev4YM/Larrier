@@ -3,7 +3,7 @@
 
 use dioxus::prelude::*;
 use lary_core::{
-    agent::catalog, config::CustomAgent, secrets, Account, AccountAuth, AgentKind, Protocol, RunMode,
+    agent::catalog, config::CustomAgent, secrets, Account, AccountAuth, AgentKind, Protocol, RunMode, SessionMode,
 };
 
 use super::{AgentGlyph, DragRegion, Kbd, Toggle};
@@ -142,9 +142,6 @@ fn General() -> Element {
             }
             Row { title: "Window Restoration".to_string(), desc: Some("Reopen Lary with the same size and position.".to_string()),
                 Toggle { on: s.restore_window, onchange: move |v| app.update_config(|c| c.settings.restore_window = v) }
-            }
-            Row { title: "Import Sessions on Startup".to_string(), desc: Some("Pull new conversations from every installed agent when Lary opens.".to_string()),
-                Toggle { on: s.auto_import, onchange: move |v| app.update_config(|c| c.settings.auto_import = v) }
             }
         }
         div { class: "set-group-title", "Notifications" }
@@ -1067,6 +1064,8 @@ fn Sessions() -> Element {
     by_agent.sort_by(|a, b| b.1.cmp(&a.1));
     let root = store().root().to_string_lossy().to_string();
     let sync = app.sync_status.read().clone();
+    let companion = app.config.read().settings.session_mode == SessionMode::Companion;
+    let in_mentions = app.config.read().settings.sessions_in_mentions;
     let live_on = app.config.read().settings.live_sync;
     // Re-read the watcher status shortly after toggling (it starts in the background).
     let mut tick = use_signal(|| 0u32);
@@ -1075,28 +1074,55 @@ fn Sessions() -> Element {
         crate::live::status(live_on)
     };
     rsx! {
-        h1 { "Sessions & Import" }
-        div { class: "sub", "Every conversation is stored in the Lary Session Format (LSF) — one portable file per session that any agent can continue." }
+        h1 { "Sessions" }
+        div { class: "sub", "Every conversation is stored in the Lary Session Format (LSF): one portable file per session that any agent can continue." }
         div { class: "set-card",
-            Row { title: "Live sync".to_string(), desc: Some(format!("Sessions you run in a terminal, an IDE or another app update here as they change. {live_status}")),
-                Toggle { on: live_on, onchange: move |v: bool| {
-                    app.update_config(|c| c.settings.live_sync = v);
-                    crate::live::restart(app);
-                    spawn(async move {
-                        for _ in 0..6 {
-                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                            tick += 1;
-                        }
-                    });
-                } }
+            Row { title: "Mode".to_string(),
+                desc: Some(if companion { "Every harness's sessions, imported and kept in sync with Lary." } else { "Lary's own sessions: the ones started here and the ones you import." }.to_string()),
+                div { class: "seg",
+                    button { class: if !companion { "on" } else { "" }, onclick: move |_| app.switch_session_mode(SessionMode::Normal), "Normal" }
+                    button { class: if companion { "on" } else { "" }, onclick: move |_| app.switch_session_mode(SessionMode::Companion), "Companion" }
+                }
             }
-            Row { title: "Import from installed agents".to_string(), desc: Some(if sync.is_empty() { "Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Pi, Hermes and more.".to_string() } else { sync.clone() }),
-                button { class: "primary-btn", onclick: move |_| app.sync_imports(false), Icon { i: I::Download, size: 13 } "Import now" }
+            if companion {
+                div { class: "set-row set-warn",
+                    span { class: "ic", Icon { i: I::Alert, size: 14 } }
+                    div { class: "d", "Chats can change from outside Lary, some steps may not come across exactly, and Lary keeps reading your harnesses' folders." }
+                }
             }
-            Row { title: "Import a file".to_string(), desc: Some("LSF files, native agent sessions, ChatGPT and Claude.ai data exports (conversations.json).".to_string()),
-                button { class: "ghost-btn", onclick: move |_| app.import_files(), Icon { i: I::Upload, size: 13 } "Choose file…" }
+            Row { title: "Import a session".to_string(), desc: Some("A harness's session on this computer, a Lary session file, or a ChatGPT or Claude.ai export.".to_string()),
+                button { class: "ghost-btn", onclick: move |_| app.open_import_session(), Icon { i: I::Download, size: 13 } "Import Session…" }
             }
-            Row { title: "Storage".to_string(), desc: Some(root.clone()),
+            Row { title: "Harness sessions in @".to_string(), desc: Some("Find a harness's session on this computer with @ in the composer, and send its conversation as context.".to_string()),
+                Toggle { on: in_mentions, onchange: move |v: bool| app.update_config(|c| c.settings.sessions_in_mentions = v) }
+            }
+        }
+        if companion {
+            div { class: "set-group-title", "Companion" }
+            div { class: "set-card",
+                Row { title: "Live sync".to_string(), desc: Some(format!("Sessions you run in a terminal, an IDE or another app update here as they change. {live_status}")),
+                    Toggle { on: live_on, onchange: move |v: bool| {
+                        app.update_config(|c| c.settings.live_sync = v);
+                        crate::live::restart(app);
+                        spawn(async move {
+                            for _ in 0..6 {
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                tick += 1;
+                            }
+                        });
+                    } }
+                }
+                Row { title: "Import from installed agents".to_string(), desc: Some(if sync.is_empty() { "Claude Code, Codex, Cursor, OpenCode, Gemini CLI, Pi, Hermes and more.".to_string() } else { sync.clone() }),
+                    button { class: "primary-btn", onclick: move |_| app.sync_imports(false), Icon { i: I::Download, size: 13 } "Import now" }
+                }
+                Row { title: "Import on startup".to_string(), desc: Some("Bring new sessions in from every harness when Lary opens.".to_string()),
+                    Toggle { on: app.config.read().settings.auto_import, onchange: move |v| app.update_config(|c| c.settings.auto_import = v) }
+                }
+            }
+        }
+        div { class: "set-group-title", "Storage" }
+        div { class: "set-card",
+            Row { title: "Folder".to_string(), desc: Some(root.clone()),
                 button { class: "ghost-btn", onclick: { let r = root.clone(); move |_| { let _ = open::that(&r); } }, Icon { i: I::FolderOpen, size: 13 } "Open folder" }
             }
             Row { title: "Rebuild index".to_string(), desc: Some("Re-scan session files if the sidebar looks out of date.".to_string()),

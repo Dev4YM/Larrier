@@ -71,6 +71,16 @@ impl MentionChip {
         }
     }
 
+    /// A harness's own session (not in Lary), read when it was picked: its
+    /// conversation goes as context, like another chat's.
+    pub fn harness_session(title: &str, agent: &AgentKind, native_id: &str, block: String) -> MentionChip {
+        MentionChip {
+            agent: Some(agent.clone()),
+            block: Some(block),
+            ..MentionChip::new(MentionKind::Agent, native_id.to_string(), title.to_string(), format!("{} · {title} — sent as context", agent.display_name()))
+        }
+    }
+
     /// A file or folder, as a workspace-relative path.
     pub fn path(path: &str, folder: bool) -> MentionChip {
         let trimmed = path.trim_end_matches('/');

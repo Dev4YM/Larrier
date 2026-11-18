@@ -230,14 +230,19 @@ impl Store {
     fn read_index(&self) -> BTreeMap<String, SessionSummary> {
         let p = self.root.join("index.json");
         if let Ok(t) = std::fs::read_to_string(&p) {
-            if let Ok(list) = serde_json::from_str::<Vec<SessionSummary>>(&t) {
+            // An index from before sessions said whether they're Lary's own
+            // is made again, once.
+            let current = t.trim() == "[]" || t.contains("\"managed\"");
+            if let Ok(list) = serde_json::from_str::<Vec<SessionSummary>>(&t).map_err(|_| ()).and_then(|l| if current { Ok(l) } else { Err(()) }) {
                 let mut map: BTreeMap<String, SessionSummary> = list.into_iter().map(|s| (s.id.clone(), s)).collect();
                 // Drop entries whose files vanished.
                 map.retain(|id, _| self.session_path(id).exists());
                 return map;
             }
         }
-        self.rebuild_index_map()
+        let map = self.rebuild_index_map();
+        self.flush_index(&map);
+        map
     }
 
     fn rebuild_index_map(&self) -> BTreeMap<String, SessionSummary> {
@@ -418,6 +423,26 @@ mod tests {
         // Once Lary's folder is there, nothing moves again.
         std::fs::create_dir_all(&old).unwrap();
         assert!(migrate_dir(&old, &new).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// An index from before sessions said whether they're Lary's own is
+    /// made again: a synced session isn't, one started in Lary is.
+    #[test]
+    fn an_old_index_learns_which_sessions_are_larys() {
+        let base = std::env::temp_dir().join(format!("lary-index-{}", crate::lsf::new_id()));
+        let store = Store::open(&base).unwrap();
+        let mut synced = Session::new(crate::AgentKind::ClaudeCode, None);
+        synced.origin.imported_at = Some(chrono::Utc::now());
+        store.save(&synced).unwrap();
+        let mine = Session::new(crate::AgentKind::Codex, None);
+        store.save(&mine).unwrap();
+        let old = std::fs::read_to_string(base.join("index.json")).unwrap().replace(",\"managed\":true", "").replace(",\"managed\":false", "");
+        assert!(!old.contains("managed"));
+        std::fs::write(base.join("index.json"), old).unwrap();
+        let list = Store::open(&base).unwrap().list();
+        let managed = |id: &str| list.iter().find(|x| x.id == id).map(|x| x.managed);
+        assert_eq!((managed(&synced.id), managed(&mine.id)), (Some(false), Some(true)));
         let _ = std::fs::remove_dir_all(&base);
     }
 

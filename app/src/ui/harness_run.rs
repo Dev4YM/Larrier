@@ -210,7 +210,8 @@ pub fn RunPanel(kind: AgentKind) -> Element {
                     }
                 }
             }
-            if spec.can_import {
+            // Companion mode brings each harness's sessions in.
+            if spec.can_import && app.companion() {
                 div { class: "ad-row",
                     span { class: "k", "Import sessions" }
                     div { class: "v",

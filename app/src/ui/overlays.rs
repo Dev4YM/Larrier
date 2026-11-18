@@ -24,8 +24,9 @@ const ACTIONS: &[(&str, &str, I, &[&str])] = &[
     ("browser", "Show Browser", I::Globe, &[]),
     ("terminal", "Show Terminal", I::Terminal, &[]),
     ("files", "Search Files", I::File, &["Ctrl", "Shift", "E"]),
+    // (Companion mode only; Ctrl+Shift+I imports one session otherwise.)
     ("import", "Import Sessions from All Agents", I::Download, &["Ctrl", "Shift", "I"]),
-    ("import-file", "Import File (LSF, ChatGPT, Claude.ai)…", I::Upload, &[]),
+    ("import-file", "Import Session…", I::Download, &[]),
     ("theme", "Toggle Light / Dark Theme", I::Moon, &[]),
     ("harnesses", "Harnesses, Accounts & API Keys", I::Bot, &[]),
     ("workspace", "Open Folder as Workspace…", I::FolderOpen, &[]),
@@ -56,7 +57,7 @@ fn run_action(mut app: App, a: &str) {
             );
         }
         "import" => app.sync_imports(false),
-        "import-file" => app.import_files(),
+        "import-file" => app.open_import_session(),
         "theme" => {
             let dark = app.ui.read().dark;
             app.update_config(|c| c.settings.theme = if dark { lary_core::Theme::Light } else { lary_core::Theme::Dark });
@@ -83,7 +84,12 @@ pub fn Palette() -> Element {
     let q = app.ui.read().palette_query.clone();
     let ql = q.to_lowercase();
 
-    let actions: Vec<_> = ACTIONS.iter().filter(|(_, l, _, _)| ql.is_empty() || l.to_lowercase().contains(&ql)).collect();
+    let companion = app.companion();
+    let actions: Vec<_> = ACTIONS
+        .iter()
+        .filter(|(id, _, _, _)| companion || *id != "import")
+        .filter(|(_, l, _, _)| ql.is_empty() || l.to_lowercase().contains(&ql))
+        .collect();
     let sessions: Vec<_> = app
         .sessions
         .read()
@@ -396,6 +402,7 @@ pub fn ModalHost() -> Element {
                     Modal::AddWorkspace => rsx! { div {} },
                     Modal::Project(id, path) => rsx! { super::projects::ProjectModal { id, path } },
                     Modal::WhatsNew(version, updated) => rsx! { WhatsNewModal { version, updated } },
+                    Modal::ImportSession => rsx! { super::import_session::ImportSessionModal {} },
                 }
             }
         }

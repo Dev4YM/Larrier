@@ -209,11 +209,15 @@ pub struct Origin {
     pub imported_at: Option<DateTime<Utc>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_version: Option<String>,
+    /// An imported session Lary holds as its own: imported by hand, or
+    /// continued here (see [`Session::is_managed`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub managed: bool,
 }
 
 impl Origin {
     pub fn lary(agent: AgentKind) -> Self {
-        Origin { agent, native_id: None, path: None, imported_at: None, agent_version: None }
+        Origin { agent, native_id: None, path: None, imported_at: None, agent_version: None, managed: false }
     }
 }
 
@@ -1038,6 +1042,12 @@ impl Session {
         }
     }
 
+    /// Lary's own session: started here, imported by hand (chat exports
+    /// included) or continued here; not one a companion sync brought in.
+    pub fn is_managed(&self) -> bool {
+        self.origin.imported_at.is_none() || self.origin.managed || matches!(self.origin.agent, AgentKind::Chat | AgentKind::ChatGpt | AgentKind::ClaudeAi)
+    }
+
     pub fn summary(&self) -> SessionSummary {
         let (added, removed, files) = self.diff_stats();
         let preview = self
@@ -1073,6 +1083,7 @@ impl Session {
             external_turn: self.external_turn,
             parent_id: self.parent.as_ref().map(|p| p.session_id.clone()),
             usage: self.usage.clone(),
+            managed: self.is_managed(),
         }
     }
 
@@ -1080,6 +1091,8 @@ impl Session {
     pub fn fork(&self, message_id: Option<&str>) -> Session {
         let mut s = self.clone();
         s.id = new_id();
+        // Made here: Lary's own.
+        s.origin.managed = true;
         s.title = format!("{} (fork)", self.title);
         s.native.clear();
         s.status = SessionStatus::Idle;
@@ -1352,6 +1365,9 @@ pub struct SessionSummary {
     /// The account it runs as, when it picked one (else its harness's default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+    /// Lary's own (see `Session::is_managed`): what Normal mode shows.
+    #[serde(default)]
+    pub managed: bool,
 }
 
 impl SessionSummary {

@@ -17,6 +17,7 @@ mod logo;
 mod logos;
 mod markdown;
 mod models_sync;
+mod native_sessions;
 mod notify;
 mod platform;
 mod quota;

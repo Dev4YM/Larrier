@@ -319,6 +319,13 @@ pub struct Settings {
     pub session_rail_collapsed: bool,
     #[serde(default)]
     pub run_mode: RunMode,
+    /// Normal: Lary's own sessions. Companion: every harness's sessions
+    /// too, imported and kept in sync (`auto_import`, `live_sync`).
+    #[serde(default)]
+    pub session_mode: SessionMode,
+    /// Offer the harnesses' sessions on this computer in @, as context.
+    #[serde(default = "yes")]
+    pub sessions_in_mentions: bool,
     #[serde(default = "yes")]
     pub auto_import: bool,
     /// Watch the agents' session folders and import changes as they happen.
@@ -526,6 +533,18 @@ pub struct Wallpaper {
     pub look: HomeBackground,
 }
 
+/// Which sessions Lary holds.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMode {
+    /// Lary's own sessions: the ones started here and the ones imported by
+    /// hand. Harness sessions come in only when asked for.
+    #[default]
+    Normal,
+    /// Every harness's sessions as well, imported and kept in sync.
+    Companion,
+}
+
 /// What Lary does about new releases on its own.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -719,6 +738,8 @@ impl Default for Settings {
             right_panel_open: true,
             session_rail_collapsed: false,
             run_mode: RunMode::default(),
+            session_mode: SessionMode::default(),
+            sessions_in_mentions: true,
             auto_import: true,
             live_sync: true,
             use_worktrees: false,

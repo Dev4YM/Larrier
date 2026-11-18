@@ -761,7 +761,6 @@ fn BrowserTab() -> Element {
     let mut editing = use_signal(|| false);
     // A tab's right-click menu: (tab, x, y).
     let mut tab_menu = use_signal(|| None::<(u64, f64, f64)>);
-    let mut dock_menu = use_signal(|| false);
     // What the engine draws itself follows the theme.
     let app = use_app();
     use_effect(move || host::set_dark(app.ui.read().dark));
@@ -778,7 +777,6 @@ fn BrowserTab() -> Element {
     let external = has_page && (url_now.starts_with("http://") || url_now.starts_with("https://"));
     let url_open = url_now.clone();
     let tools_on = active.as_ref().is_some_and(|t| t.devtools);
-    let dock_now = host::DEVTOOLS().dock;
     // This chat's tabs (each chat has a browser of its own).
     let mine = st.mine();
     // The agent's tabs are its own while it runs: the user watches them
@@ -924,33 +922,12 @@ fn BrowserTab() -> Element {
                 onclick: move |_| host::annotate(!host::ANNOTATING()),
                 Icon { i: I::Annotate, size: 14 }
             }
-            div { class: "menu-anchor tools-split",
-                button { class: if tools_on { "icon-btn sm tools on" } else { "icon-btn sm tools" },
-                    title: if tools_on { "Developer tools: close (F12)" } else { "Developer tools (F12)" },
-                    disabled: !has_page,
-                    onclick: move |_| host::devtools(),
-                    Icon { i: I::Code, size: 13 }
-                }
-                if cfg!(windows) {
-                    button { class: if dock_menu() { "icon-btn sm dock-btn open" } else { "icon-btn sm dock-btn" }, title: "Where developer tools show",
-                        onclick: move |_| dock_menu.set(true),
-                        Icon { i: I::ChevronDown, size: 10 }
-                    }
-                    super::Dropdown { open: dock_menu, up: false, right: true,
-                        div { class: "menu-label", "Developer tools" }
-                        for (d, label, icon) in [(host::Dock::Right, "Dock to the right", I::PanelRight), (host::Dock::Bottom, "Dock to the bottom", I::PanelBottom), (host::Dock::Window, "Separate window", I::AppWindow)] {
-                            button { key: "{label}", class: "menu-item",
-                                onclick: move |_| {
-                                    dock_menu.set(false);
-                                    host::set_dock(d);
-                                },
-                                span { class: "muted", Icon { i: icon, size: 14 } }
-                                span { "{label}" }
-                                if dock_now == d { span { class: "check", Icon { i: I::Check, size: 13 } } }
-                            }
-                        }
-                    }
-                }
+            // Where they dock is DevTools' own choice (⋮ → Dock side), as in Chrome.
+            button { class: if tools_on { "icon-btn sm tools on" } else { "icon-btn sm tools" },
+                title: if tools_on { "Developer tools: close (F12)" } else { "Developer tools (F12)" },
+                disabled: !has_page,
+                onclick: move |_| host::devtools(),
+                Icon { i: I::Code, size: 13 }
             }
             button { class: "icon-btn sm", title: "Open in your browser", disabled: !external,
                 onclick: move |_| { let _ = open::that(url_open.clone()); },

@@ -368,6 +368,9 @@ static QUEUED: Mutex<Vec<Cmd>> = Mutex::new(Vec::new());
 static NEXT_ID: AtomicU64 = AtomicU64::new(1 << 40);
 /// Where DevTools goes and how big, as the user left it.
 static TOOLS_AT: Mutex<Option<DevtoolsLayout>> = Mutex::new(None);
+/// The side they were last docked on (where they go when their own window
+/// closes), as DevTools names it.
+static LAST_DOCKED: Mutex<String> = Mutex::new(String::new());
 /// Lary's theme is dark (the frame's own color, between page and DevTools).
 static DARK: AtomicBool = AtomicBool::new(false);
 
@@ -693,25 +696,44 @@ fn tools_created(tab: u64, browser: Option<Browser>, window: bool) {
 
 /// Tab `tab`'s DevTools closed (or are moving elsewhere).
 fn tools_closed(tab: u64) {
-    let reopen = pages(|p| p.get_mut(&tab).map(|x| {
-        x.tools = None;
-        std::mem::take(&mut x.reopen_tools)
-    }));
+    let (reopen, was_window) = pages(|p| match p.get_mut(&tab) {
+        Some(x) => {
+            let window = x.tools.as_ref().is_some_and(|t| t.window);
+            x.tools = None;
+            (Some(std::mem::take(&mut x.reopen_tools)), window)
+        }
+        None => (None, false),
+    });
+    // Their own window closed by the user: docked again next time, where
+    // they last were beside the page.
+    if was_window && reopen == Some(false) && CLOSING.load(Ordering::Relaxed) == OPEN {
+        emit(Ev::ToolsDock { dock: Dock::from_side(&LAST_DOCKED.lock().unwrap().clone()).unwrap_or(Dock::Right) });
+    }
     lay_out();
     if reopen.is_some() {
         // Shown closed until (if) they open again elsewhere.
         emit(Ev::Tools { id: tab, open: false });
     }
     if reopen == Some(true) {
-        if let Some(h) = browser(tab).and_then(|b| b.host()) {
-            open_tools(&h, tab, None);
-        }
+        // Once these have gone (opened again while they close, the engine
+        // takes the new ones for them and fails).
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            on_ui(move || {
+                if let Some(h) = browser(tab).and_then(|b| b.host()) {
+                    open_tools(&h, tab, None);
+                }
+            });
+        });
     }
 }
 
 /// Where DevTools shows (the user's choice), its sizes included: open ones
 /// move there.
 pub fn set_tools_layout(l: DevtoolsLayout) {
+    if l.dock != Dock::Window {
+        *LAST_DOCKED.lock().unwrap() = l.dock.side().to_string();
+    }
     let before = TOOLS_AT.lock().unwrap().replace(l);
     if STARTED.get() != Some(&true) {
         return;
@@ -785,7 +807,14 @@ wrap_client! {
         }
 
         fn load_handler(&self) -> Option<LoadHandler> {
-            (self.kind == PAGE).then(|| PageLoad::new(self.tab))
+            match self.kind {
+                PAGE => Some(PageLoad::new(self.tab)),
+                // Docked DevTools: their own Dock side menu drives where Lary
+                // lays them. (A window of their own is Chrome's, as it is:
+                // closing it docks them again.)
+                DOCKED_TOOLS => Some(ToolsLoad::new()),
+                _ => None,
+            }
         }
 
         fn display_handler(&self) -> Option<DisplayHandler> {
@@ -986,6 +1015,94 @@ wrap_load_handler! {
     }
 }
 
+/// DevTools telling Lary where the user docked them (from their own menu).
+const DOCK_POST: &str = "\u{1}lary-dock:";
+
+/// In DevTools: as Lary has them now (`__SIDE__`), then each dock side the
+/// user picks in their own menu (⋮ → Dock side), told to Lary. Lary lays
+/// the page beside them itself, so they fill their own view rather than
+/// keep room for the page (as they do in Chrome's own window).
+const DOCK_JS: &str = r#"(async () => {
+  if (window.__laryDock) return;
+  window.__laryDock = true;
+  const at = (p) => new URL(p, location.href).href;
+  const sides = ['right', 'bottom', 'left', 'undocked'];
+  let last = null;
+  // Once DevTools are up (asked sooner, their parts aren't ready, or one
+  // that can't dock is made in place of theirs): tried again until then.
+  for (let i = 0; i < 100; i++) {
+    try {
+      if (!sides.some((s) => document.body && document.body.classList.contains(s))) throw new Error('DevTools not up yet');
+      const { DockController: m } = await import(at('./ui/legacy/legacy.js'));
+      const dc = m.DockController.instance();
+      if (!dc.canDock()) throw new Error('DevTools not docking yet');
+      const { AdvancedApp: a } = await import(at('./panels/emulation/emulation.js'));
+      a.AdvancedApp.prototype.updateForDocked = function () { return this.updateForUndocked(); };
+      a.AdvancedApp.instance().updateForUndocked();
+      const docked = (s) => s !== 'undocked';
+      if (dc.dockSide() !== '__SIDE__' && docked(dc.dockSide()) && docked('__SIDE__')) dc.setDockSide('__SIDE__');
+      // Into a window of their own or out of one: Lary opens them there
+      // (the engine can't move them itself). Beside the page, they move.
+      const set = dc.setDockSide.bind(dc);
+      dc.setDockSide = (side) => {
+        if ((side === 'undocked') !== ('__SIDE__' === 'undocked')) {
+          console.debug('\u0001lary-dock:' + side);
+          return;
+        }
+        set(side);
+      };
+      dc.addEventListener(m.Events.DOCK_SIDE_CHANGED, () => console.debug('\u0001lary-dock:' + dc.dockSide()));
+      return;
+    } catch (e) {
+      last = e;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+  console.debug('\u0001lary-dock-error:' + (last && last.stack || last));
+})();"#;
+
+wrap_load_handler! {
+    struct ToolsLoad;
+
+    impl LoadHandler {
+        fn on_load_end(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _http_status_code: ::std::os::raw::c_int) {
+            if !is_main(&frame) {
+                return;
+            }
+            let Some(f) = frame else { return };
+            let url = CefString::from(&f.url()).to_string();
+            if !url.starts_with("devtools://") {
+                return;
+            }
+            let Some(b) = browser.cloned() else { return };
+            let Some(host) = b.host() else { return };
+            let side = tools_at().dock.side();
+            // DevTools offer their own Dock side menu, as in Chrome, only when
+            // told they can dock. Starting so, they tell the engine whether
+            // they're docked, from the side they kept: first it's where Lary
+            // shows them (docked, or a window), as the engine can't move them.
+            if !url.contains("can_dock=") {
+                let keep = format!("InspectorFrontendHost.setPreference('currentDockState', JSON.stringify('{side}'))");
+                tell(&host, next_msg(), "Runtime.evaluate", json!({"expression": keep}));
+                let to = format!("{url}&can_dock=true");
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(300));
+                    on_ui(move || {
+                        if let Some(f) = b.main_frame() {
+                            f.load_url(Some(&CefString::from(to.as_str())));
+                        }
+                    });
+                });
+                return;
+            }
+            // Evaluated the DevTools protocol's way, as the page's own code
+            // (its modules, as it loaded them).
+            let js = DOCK_JS.replace("__SIDE__", side);
+            tell(&host, next_msg(), "Runtime.evaluate", json!({"expression": js, "awaitPromise": false}));
+        }
+    }
+}
+
 wrap_display_handler! {
     struct PageDisplay {
         tab: u64,
@@ -1018,11 +1135,22 @@ wrap_display_handler! {
         }
 
         fn on_console_message(&self, _browser: Option<&mut Browser>, _level: LogSeverity, message: Option<&CefString>, _source: Option<&CefString>, _line: ::std::os::raw::c_int) -> ::std::os::raw::c_int {
+            let text = message.map(|m| m.to_string()).unwrap_or_default();
             if self.tools {
+                // Docked elsewhere from their own menu: Lary lays them out so.
+                if let Some(side) = text.strip_prefix(DOCK_POST) {
+                    if let Some(dock) = Dock::from_side(side.trim()) {
+                        emit(Ev::ToolsDock { dock });
+                    }
+                    return 1;
+                }
+                if let Some(e) = text.strip_prefix("\u{1}lary-dock-error:") {
+                    tracing::warn!("browser engine: DevTools' dock script failed: {e}");
+                    return 1;
+                }
                 return 0;
             }
             // The annotate script reporting back: taken, never shown.
-            let text = message.map(|m| m.to_string()).unwrap_or_default();
             match text.strip_prefix(POST) {
                 Some(body) => {
                     emit(Ev::Annotate { id: self.tab, body: body.to_string() });
@@ -1249,6 +1377,10 @@ fn split(size: (i32, i32), tools: bool, l: &DevtoolsLayout) -> [(i32, i32, i32, 
             let th = fit(h, l.bottom);
             [(0, 0, w, (h - th - LINE).max(1)), (0, h - th, w, th), (0, h - th - LINE, w, LINE)]
         }
+        Dock::Left => {
+            let tw = fit(w, l.right);
+            [(tw + LINE, 0, (w - tw - LINE).max(1), h), (0, 0, tw, h), (tw, 0, LINE, h)]
+        }
         _ => {
             let tw = fit(w, l.right);
             [(0, 0, (w - tw - LINE).max(1), h), (w - tw, 0, tw, h), (w - tw - LINE, 0, LINE, h)]
@@ -1278,6 +1410,7 @@ fn drag_to(p: POINT) {
     match l.dock {
         Dock::Bottom => l.bottom = ((size.1 - p.y - LINE / 2) as f64 / size.1.max(1) as f64).clamp(0.1, 0.9),
         Dock::Right => l.right = ((size.0 - p.x - LINE / 2) as f64 / size.0.max(1) as f64).clamp(0.1, 0.9),
+        Dock::Left => l.right = ((p.x - LINE / 2) as f64 / size.0.max(1) as f64).clamp(0.1, 0.9),
         Dock::Window => return,
     }
     *TOOLS_AT.lock().unwrap() = Some(l);

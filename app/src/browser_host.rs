@@ -80,14 +80,38 @@ impl State {
 
 pub static STATE: GlobalSignal<State> = Signal::global(State::default);
 
-/// Where DevTools shows: beside the page (on its right or below it), or in
-/// a window of its own.
+/// Where DevTools shows: beside the page (on its right, left or below it),
+/// or in a window of its own. Picked in DevTools' own menu (⋮ → Dock side),
+/// as in Chrome.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Dock {
     #[default]
     Right,
     Bottom,
     Window,
+    Left,
+}
+
+impl Dock {
+    /// As DevTools names its dock sides.
+    pub fn side(self) -> &'static str {
+        match self {
+            Dock::Right => "right",
+            Dock::Bottom => "bottom",
+            Dock::Left => "left",
+            Dock::Window => "undocked",
+        }
+    }
+
+    pub fn from_side(side: &str) -> Option<Dock> {
+        Some(match side {
+            "right" => Dock::Right,
+            "bottom" => Dock::Bottom,
+            "left" => Dock::Left,
+            "undocked" => Dock::Window,
+            _ => return None,
+        })
+    }
 }
 
 /// Where DevTools shows and its share of the Browser tab when docked, as
@@ -95,7 +119,7 @@ pub enum Dock {
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DevtoolsLayout {
     pub dock: Dock,
-    /// Its share of the width, docked on the right.
+    /// Its share of the width, docked on the right or left.
     pub right: f64,
     /// Its share of the height, docked below.
     pub bottom: f64,
@@ -300,6 +324,9 @@ pub(crate) enum Ev {
     /// Docked DevTools were sized by dragging the line beside them.
     #[cfg(windows)]
     ToolsSize { right: f64, bottom: f64 },
+    /// DevTools were docked elsewhere from their own menu (⋮ → Dock side).
+    #[cfg(windows)]
+    ToolsDock { dock: Dock },
     Failed { id: u64, error: String },
     Nav { id: u64, back: bool, forward: bool },
     /// A message from the page's annotate script.
@@ -550,6 +577,12 @@ pub(crate) fn events() -> tokio::sync::mpsc::UnboundedSender<Ev> {
                                 l.bottom = bottom;
                             }
                             crate::keep::set_value(crate::keep::WINDOW, "browser.devtools", &*DEVTOOLS.peek());
+                        }
+                        #[cfg(windows)]
+                        Ev::ToolsDock { dock } => {
+                            if DEVTOOLS.peek().dock != dock {
+                                set_dock(dock);
+                            }
                         }
                         #[cfg(windows)]
                         Ev::PageError { id, code } => {

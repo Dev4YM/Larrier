@@ -13,7 +13,7 @@ agent needs to resume.
 |---|---|---|---|
 | Claude Code | `claude` | stdio control protocol (stream-json in and out) | Yes |
 | Codex | `codex` | `codex app-server` (JSON-RPC) | Yes |
-| Cursor Agent | `cursor-agent` | stream-json print mode, or ACP (`cursor-agent acp`) | With ACP |
+| Cursor Agent | `cursor-agent` | ACP (`cursor-agent acp`) | Yes |
 | OpenCode | `opencode` | ACP (`opencode acp`) by default, or `opencode run` | Yes |
 | Gemini CLI | `gemini` | stream-json, or ACP (`gemini --acp`) | With ACP |
 | Pi | `pi` | JSON mode, or ACP | With ACP |
@@ -29,23 +29,24 @@ agent needs to resume.
 | Custom | any command | ACP or one of the stream protocols above | Depends |
 | Lary Chat | — | HTTP: OpenAI, Anthropic, Gemini, OpenRouter, Ollama, OpenAI-compatible | — |
 
-**Settings → Harnesses → ‹agent› → How it runs** shows the ways Lary can
-run each agent, with the exact command and what each can do, and marks the
-one its maker documents for an app like Lary: Claude Code's CLI with
-streaming JSON (the channel the Claude Agent SDK uses for approvals) or the
-Claude Agent SDK over ACP; Codex's app server or its ACP adapter; for most
-others their own headless mode or ACP, where they can ask. Where an agent
-can't ask while Lary runs it, Lary says what it refused and lets you
-change the permission mode.
+**Settings → Harnesses → ‹agent› → Connection** shows how Lary connects to
+each agent, with the exact command and what it can do. Claude Code, Codex,
+Cursor and Grok connect only their official way (below); for the others it
+lists each way, marks the one its maker documents for an app like Lary
+(their own headless mode or ACP, where they can ask), and lets you pick.
+Where an agent can't ask while Lary runs it, Lary says what it refused and
+lets you change the permission mode.
 
 ## The official way: Claude Code, Codex, Cursor and Grok
 
 These four run the way their makers support for apps like Lary, and apart
 from your own setup:
 
-- **How they connect:** Claude Code over the stream-JSON control channel
-  the Claude Agent SDK uses; Codex over its app server; Cursor Agent over
-  ACP (`cursor-agent acp`); Grok Build over ACP (`grok agent stdio`).
+- **How they connect:** only their official way. Claude Code over the
+  stream-JSON control protocol the Claude Agent SDK uses; Codex over its
+  app server; Cursor Agent over ACP (`cursor-agent acp`); Grok Build over
+  ACP (`grok agent stdio`). Settings from before, such as Claude Code on
+  the ACP adapter, move to these.
 - **Which program runs:** Lary's own copy by default, downloaded from the
   maker's release source into Lary's folder (Claude Code from
   downloads.claude.ai and Codex from OpenAI's GitHub releases, both checked
@@ -62,7 +63,7 @@ from your own setup:
 
   | Agent | Ways, the first being the default |
   |---|---|
-  | Claude Code | **Setup token** (run `claude setup-token` yourself and paste what it prints) · **Sign in** (Claude Code's own login with your subscription, in Lary's folder) · **API key** · This computer |
+  | Claude Code | **Setup token** (run `claude setup-token`, copied from the dialog or run in a terminal from it, and paste what it prints) · **Sign in** (Claude Code's own login with your subscription, in Lary's folder) · **API key** · This computer |
   | Codex | **ChatGPT** (sign-in through Codex's app server, as its own apps do: OpenAI's page opens in your browser) · **API key** · This computer |
   | Cursor Agent | **API key** · **Sign in** (Cursor's own login, in Lary's folder) · This computer |
   | Grok Build | **API key** (xAI) · **Sign in** (`grok login`, in Lary's folder) · This computer |

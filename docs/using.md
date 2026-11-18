@@ -242,8 +242,8 @@ each agent's own configuration and tagged with the agents that use it.
 - **Harnesses:** Lary Chat and every agent found on this computer
   (the rest wait under Not installed). Each has a page in tabs: its
   **Accounts** (sign-ins, API keys and endpoints, checked when you ask),
-  **Models** and defaults, **How it runs** (the ways Lary can run it,
-  with the command each uses) and **Version**, with updates and turning it
+  **Models** and defaults, **Connection** (how Lary connects to it, with
+  the command each way uses) and **Version**, with updates and turning it
   on or off at the top.
 - **Source Control**, **Sessions** (import and live sync), **Workspaces**,
   **Shortcuts** and **About** (version, update channel, release notes).

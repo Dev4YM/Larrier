@@ -219,7 +219,7 @@ each agent's own configuration and tagged with the agents that use it.
 ## Settings
 
 - **Profile:** your name, photo and a year of your AI work.
-- **General:** startup (tips, window restore, importing sessions),
+- **General:** startup (tips, window restore),
   notifications, completion sound and the tray icon.
 - **Agents:** how agents run: the default agent, autonomy, starting new
   ones in a worktree, sending (Ctrl+Enter, and steer or queue while one
@@ -245,7 +245,8 @@ each agent's own configuration and tagged with the agents that use it.
   **Models** and defaults, **Connection** (how Lary connects to it, with
   the command each way uses) and **Version**, with updates and turning it
   on or off at the top.
-- **Source Control**, **Sessions** (import and live sync), **Workspaces**,
+- **Source Control**, **Sessions** (Normal or Companion mode, importing a
+  session, harness sessions in @), **Workspaces**,
   **Shortcuts** and **About** (version, update channel, release notes).
 
 ## Lary reopens as you left it
@@ -274,7 +275,7 @@ them if it was still running).
 | Focus composer | Ctrl L | ⌘L |
 | Stop agent | Ctrl . | ⌘. |
 | Settings | Ctrl , | ⌘, |
-| Import sessions | Ctrl Shift I | ⌘⇧I |
+| Import a session (all of them, in Companion mode) | Ctrl Shift I | ⌘⇧I |
 
 Lary shows each shortcut the way your system writes it. In the
 terminal, copy and paste are Ctrl+Shift+C / Ctrl+Shift+V on Windows and

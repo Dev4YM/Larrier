@@ -129,7 +129,7 @@ demo data.
 - [Installing and updating](docs/install.md)
 - [Using Lary](docs/using.md): the window, chats, the side panel, shortcuts
 - [Agents](docs/agents.md): how each one connects, accounts, models, versions
-- [Sessions](docs/sessions.md): importing, live sync, porting between agents
+- [Sessions](docs/sessions.md): Normal and Companion modes, importing, porting between agents
 - [Lary Session Format](docs/LSF.md)
 - [Command line](docs/cli.md)
 - [Privacy and data](docs/privacy.md)

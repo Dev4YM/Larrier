@@ -2113,6 +2113,13 @@ impl App {
             }
         }
         let id = s.id.clone();
+        // What was picked in the box for this prompt (@ an agent to run as,
+        // a / mode) went with it: the next new chat starts clear.
+        {
+            let mut d = self.draft.write();
+            d.run_as = None;
+            d.mode = None;
+        }
         self.save_session(&s);
         self.put_session(s);
         self.ensure_tab(&View::Agent(id.clone()), true);

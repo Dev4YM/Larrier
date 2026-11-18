@@ -1014,7 +1014,7 @@ pub fn Composer(
         let agents = multi.read().clone();
         if sid.is_none() && agents.len() > 1 {
             // Multitask: the same prompt on several agents, side by side.
-            let keep = app.draft.read().clone();
+            let mut keep = app.draft.read().clone();
             for k in agents {
                 {
                     let mut d = app.draft.write();
@@ -1022,9 +1022,14 @@ pub fn Composer(
                     d.model = None;
                     d.mode = keep.mode.clone();
                     d.permission = keep.permission.clone();
+                    d.run_as = keep.run_as.clone();
                 }
                 app.send(None, t.clone(), a.clone());
             }
+            // What was picked for this prompt (@ an agent to run as, a /
+            // mode) went with it; the box starts clear.
+            keep.run_as = None;
+            keep.mode = None;
             *app.draft.write() = keep;
             app.toast("Started the prompt on every selected agent");
             return;

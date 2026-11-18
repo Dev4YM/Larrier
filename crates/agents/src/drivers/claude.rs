@@ -34,6 +34,10 @@ async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedRecei
     cmd.current_dir(&req.cwd);
     cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
     cmd.args(["--input-format", "stream-json", "--permission-prompt-tool", "stdio", "--replay-user-messages"]);
+    // Its thinking, as it shows it (otherwise it comes empty).
+    if shows_thinking(&req.launch).await {
+        cmd.args(["--thinking-display", "summarized"]);
+    }
     if let Some(target) = req.resume_path.as_ref().or(req.resume_id.as_ref()) {
         cmd.args(["--resume", target]);
         if let Some(at) = &req.resume_at {
@@ -87,6 +91,9 @@ async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedRece
     let mut cmd = req.launch.command();
     cmd.current_dir(&req.cwd);
     cmd.args(["-p", "--output-format", "stream-json", "--verbose"]);
+    if req.agent == AgentKind::ClaudeCode && shows_thinking(&req.launch).await {
+        cmd.args(["--thinking-display", "summarized"]);
+    }
     if !matches!(req.agent, AgentKind::Custom(_)) {
         cmd.arg("--include-partial-messages");
         // Resuming from the file path is the most robust form (works for
@@ -1548,6 +1555,31 @@ fn rate_limit(info: &Value, bucket: Option<&str>, sink: &EventSink) {
     }
 }
 
+/// Whether this Claude Code shows its thinking when asked
+/// (`--thinking-display summarized`: 2.1.325 and newer; without it the
+/// thinking comes empty, and an older one would refuse to start with it).
+/// Asked once per program file.
+async fn shows_thinking(launch: &crate::request::Launch) -> bool {
+    static SEEN: std::sync::Mutex<Option<HashMap<(std::path::PathBuf, u128), bool>>> = std::sync::Mutex::new(None);
+    let stamp = std::fs::metadata(&launch.program).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+    let key = (launch.program.clone(), stamp);
+    if let Some(known) = SEEN.lock().unwrap().as_ref().and_then(|m| m.get(&key)).copied() {
+        return known;
+    }
+    let lary_copy = crate::runtime::program(&AgentKind::ClaudeCode).is_some_and(|p| p == launch.program);
+    let version = if lary_copy { crate::runtime::version(&AgentKind::ClaudeCode) } else { crate::detect::version_of(&launch.program).await };
+    let ok = version.as_deref().is_some_and(|v| version_at_least(v, (2, 1, 325)));
+    SEEN.lock().unwrap().get_or_insert_with(HashMap::new).insert(key, ok);
+    ok
+}
+
+/// "2.1.327 (Claude Code)" is at least `min`.
+fn version_at_least(v: &str, min: (u64, u64, u64)) -> bool {
+    let nums: Vec<u64> = v.split(|c: char| !c.is_ascii_digit() && c != '.').find(|t| t.contains('.')).unwrap_or("").split('.').map(|p| p.parse().unwrap_or(0)).collect();
+    let got = (nums.first().copied().unwrap_or(0), nums.get(1).copied().unwrap_or(0), nums.get(2).copied().unwrap_or(0));
+    got >= min
+}
+
 /// Claude Code's state file for a run (`.claude.json`): in its config
 /// folder when it has one of Lary's, else in the home folder.
 fn state_file(req: &TurnRequest) -> Option<std::path::PathBuf> {
@@ -1708,6 +1740,16 @@ mod tests {
         let mut q = ClaudeLive { prompt: Some("p1".into()), ..Default::default() };
         let ev = feed(&mut q, &[r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"s1"}"#]);
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })), "{ev:?}");
+    }
+
+    #[test]
+    fn reads_versions() {
+        assert!(version_at_least("2.1.327", (2, 1, 325)));
+        assert!(version_at_least("2.1.325 (Claude Code)", (2, 1, 325)));
+        assert!(version_at_least("3.0.0", (2, 1, 325)));
+        assert!(!version_at_least("2.1.99 (Claude Code)", (2, 1, 325)));
+        assert!(!version_at_least("1.0.128", (2, 1, 325)));
+        assert!(!version_at_least("", (2, 1, 325)));
     }
 
     /// A real line (Claude Code 2.1.327, a setup token on a Fable turn):

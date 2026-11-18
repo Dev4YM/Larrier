@@ -60,7 +60,15 @@ from your own setup:
 - **Where they run:** every account in a folder of Lary's of its own
   (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `CURSOR_CONFIG_DIR`, `GROK_HOME`), so
   your own settings, hooks, plugins and sign-in are never read or changed;
-  only an account set to **This computer** uses your own sign-in.
+  only an account set to **This computer** uses your own sign-in. Your own
+  Claude Code agents, skills and commands (`~/.claude/agents`, `skills`,
+  `commands`) do come along, as Lary offers them (Run as, @ Subagents,
+  / Skills): copied into the account's folder at each run, kept up to date
+  and removed once you delete them, so an agent runs with its prompt, its
+  tools and its own MCP servers. `~/.claude` itself is never written.
+- **Thinking:** Claude Code (2.1.325 and newer) is asked to show its
+  thinking as a summary, which Lary shows as the reply's thinking;
+  otherwise Claude Code sends it empty.
 - **How they sign in:**
 
   | Agent | Ways, the first being the default |
@@ -163,7 +171,11 @@ button gets a dot.
 Updates use the agent's own updater where it has one (`claude update`,
 `codex update`, `cursor-agent update`, `opencode upgrade`, `hermes update`,
 `droid update`, `grok update`); otherwise npm (when npm installed it) or the official
-installer again. Installs use the official installer for your system:
+installer again. An update counts by the version it leaves: when the
+agent's own updater leaves it as it was while a newer one is out (Droid's
+can take an install from its script for npm's and refuse), Lary says so and
+runs the way it was installed instead; if it's still behind, the update
+shows as not gone through, with what was printed. Installs use the official installer for your system:
 PowerShell installers on Windows, the shell installers (`curl … | sh`) on
 macOS and Linux. Lary shows the exact command first and its output as it
 runs.

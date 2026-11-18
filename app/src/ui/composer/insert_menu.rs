@@ -476,7 +476,7 @@ fn slash_search(ctx: &Ctx, ql: &str) -> Vec<Sugg> {
 fn models(ctx: &Ctx, ql: &str) -> Vec<Sugg> {
     let r = now(ctx);
     let current = r.family.clone().or(r.model.clone());
-    pick_rows(ctx.app, ctx.agent, !ql.is_empty())
+    pick_rows(ctx.app, ctx.agent, None, !ql.is_empty())
         .into_iter()
         .filter(|row| ql.is_empty() || row.label.to_lowercase().contains(ql) || row.id.as_deref().is_some_and(|i| i.to_lowercase().contains(ql)))
         .map(|row| {

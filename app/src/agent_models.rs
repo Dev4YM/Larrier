@@ -1,7 +1,10 @@
 //! Each agent's own models, defaults and providers (read by
-//! `lary_agents::models`), cached on disk so the picker has them at
-//! once. The agents' files are re-read at start and whenever their settings
-//! open; the slower CLI listings refresh every few hours.
+//! `lary_agents::models`), per account: what an agent offers and what its
+//! Default runs depend on the account (a subscription's plan, an API), so
+//! they're read the way that account's chats run and kept by account.
+//! Cached on disk so the picker has them at once; re-read at start, when the
+//! picker or the agent's settings open and the list is a few minutes old,
+//! and every few hours.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -14,8 +17,22 @@ use lary_core::AgentKind;
 
 use crate::state::{store, App};
 
-/// How old a CLI model listing may get before it is refreshed.
+/// How old a CLI model listing may get before it is refreshed in the
+/// background.
 const LISTING_TTL_HOURS: i64 = 6;
+
+/// How old a listing may be when the picker opens before it's read again.
+const PICKER_TTL_MINUTES: i64 = 10;
+
+/// Where an agent's models are kept: by the account they were read for
+/// (`None`: the agent's default account), or by the agent when it has no
+/// accounts.
+pub fn models_key(cfg: &lary_core::Config, kind: &AgentKind, account: Option<&str>) -> String {
+    match cfg.account_for(kind, account) {
+        Some(a) => format!("{}@{}", kind.id(), a.id),
+        None => kind.id().to_string(),
+    }
+}
 
 fn cache_path() -> PathBuf {
     store().root().join("cache").join("agent-models.json")
@@ -54,35 +71,77 @@ pub fn start(app: App) {
 }
 
 impl App {
-    /// What `kind` itself offers and prefers, as last read.
+    /// What `kind` offers and prefers for its default account, as last read.
     pub fn agent_models(&self, kind: &AgentKind) -> Option<AgentModels> {
-        self.native_models.read().get(&kind.id()).cloned()
+        self.agent_models_for(kind, None)
     }
 
-    /// Re-read agents' models: `only` one, or every installed agent. With
-    /// `deep`, their CLI listings run too; otherwise only stale ones do.
-    pub fn refresh_agent_models(mut self, only: Option<AgentKind>, deep: bool) {
+    /// What `kind` offers and prefers for `account` (None: its default), as
+    /// last read for it. Until it has been, the list read for the agent
+    /// before Lary kept them by account stands in, without its Default
+    /// (that was read from another setup, and may not be what runs).
+    pub fn agent_models_for(&self, kind: &AgentKind, account: Option<&str>) -> Option<AgentModels> {
+        let key = models_key(&self.config.read(), kind, account);
+        let all = self.native_models.read();
+        all.get(&key).cloned().or_else(|| {
+            all.get(kind.id().as_str()).filter(|_| key != kind.id()).cloned().map(|mut m| {
+                m.default_model = None;
+                m.default_effort = None;
+                m
+            })
+        })
+    }
+
+    /// Re-read agents' models for their default accounts: `only` one, or
+    /// every installed agent. With `deep`, their CLI listings run too;
+    /// otherwise only stale ones do.
+    pub fn refresh_agent_models(self, only: Option<AgentKind>, deep: bool) {
         let detected = self.detected.peek().clone();
-        let targets: Vec<(AgentKind, Option<PathBuf>)> = detected
+        let kinds: Vec<AgentKind> = detected
             .into_iter()
             .filter(|d| d.installed() || only.as_ref() == Some(&d.kind))
             .filter(|d| only.is_some() || self.config.peek().agent(&d.kind).enabled)
             .filter(|d| only.as_ref().map(|k| *k == d.kind).unwrap_or(true))
-            .map(|d| (d.kind, d.path))
+            .map(|d| d.kind)
             .collect();
+        self.read_models(kinds.into_iter().map(|k| (k, None)).collect(), deep, LISTING_TTL_HOURS * 60);
+    }
+
+    /// The picker opened on `kind` for a chat on `account`: read its models
+    /// again when they're more than a few minutes old (or never were).
+    pub fn refresh_models_for(self, kind: &AgentKind, account: Option<&str>) {
+        if self.models_refreshing.peek().contains(&kind.id()) {
+            return;
+        }
+        let key = models_key(&self.config.peek(), kind, account);
+        let fresh = self.native_models.peek().get(&key).and_then(|m| m.listed_at.or(m.fetched_at)).is_some_and(|t| chrono::Utc::now() - t < chrono::Duration::minutes(PICKER_TTL_MINUTES));
+        if !fresh {
+            self.read_models(vec![(kind.clone(), account.map(str::to_string))], false, PICKER_TTL_MINUTES);
+        }
+    }
+
+    /// Read `targets` (an agent and the account), each the way its chats
+    /// run; a CLI listing runs when `deep` or when it is older than
+    /// `max_age` minutes.
+    fn read_models(mut self, targets: Vec<(AgentKind, Option<String>)>, deep: bool, max_age: i64) {
         let busy: HashSet<String> = targets.iter().map(|(k, _)| k.id().to_string()).collect();
         if busy.is_empty() {
             return;
         }
         self.models_refreshing.write().extend(busy.iter().cloned());
         spawn_forever(async move {
-            for (kind, path) in targets {
-                let prev = self.native_models.peek().get(&kind.id()).cloned();
-                let stale = prev.as_ref().and_then(|p| p.listed_at).map(|t| chrono::Utc::now() - t > chrono::Duration::hours(LISTING_TTL_HOURS)).unwrap_or(true)
-                    // Listed before Lary read Claude Code's commands.
-                    || (kind == AgentKind::ClaudeCode && prev.as_ref().is_some_and(|p| p.commands.is_empty()));
-                let m = models::read(&kind, path.as_deref(), deep || stale, prev.as_ref()).await;
-                self.native_models.write().insert(kind.id().to_string(), m);
+            for (kind, account) in targets {
+                let (key, at) = {
+                    let cfg = self.config.peek();
+                    (models_key(&cfg, &kind, account.as_deref()), models::read_for(&cfg, &kind, account.as_deref()))
+                };
+                let prev = self.native_models.peek().get(&key).cloned();
+                let stale = prev.as_ref().and_then(|p| p.listed_at).map(|t| chrono::Utc::now() - t > chrono::Duration::minutes(max_age)).unwrap_or(true)
+                    // Listed before Lary read Claude Code's commands, or
+                    // before it kept the Default its listing names.
+                    || (kind == AgentKind::ClaudeCode && prev.as_ref().is_some_and(|p| p.commands.is_empty() || p.listed_default.is_none()));
+                let m = models::read(&kind, &at, deep || stale, prev.as_ref()).await;
+                self.native_models.write().insert(key, m);
                 self.models_refreshing.write().remove(&kind.id());
             }
             let all = self.native_models.peek().clone();
@@ -220,8 +279,14 @@ pub struct Resolved {
 }
 
 pub fn resolve(app: &App, agent: &AgentKind, model: Option<&str>, effort: Option<&str>) -> Resolved {
+    resolve_for(app, agent, None, model, effort)
+}
+
+/// [`resolve`] for a chat on `account` (None: the agent's default one):
+/// its Default is what that account's chats run.
+pub fn resolve_for(app: &App, agent: &AgentKind, account: Option<&str>, model: Option<&str>, effort: Option<&str>) -> Resolved {
     let ac = app.config.read().agent(agent);
-    let native = app.agent_models(agent);
+    let native = app.agent_models_for(agent, account);
     let mut r = Resolved::default();
     let chosen = model.map(str::to_string).or(ac.default_model.clone()).filter(|m| m != "default" && m != "auto");
     r.model_from_agent = chosen.is_none();

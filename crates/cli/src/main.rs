@@ -9,7 +9,12 @@
 //! lary export <id> --format F      print a session in another format
 //! lary port <id> --to <agent>      write a native resumable session for an agent
 //! lary show <id>                   print a session as Markdown
-//! lary run --agent X [--cwd D] <prompt>   run one turn and record it
+//! lary run --agent X [--cwd D] [--account A] [--model M] <prompt>
+//!                                  run one turn and record it; says which
+//!                                  model was asked for and which ran
+//! lary models --agent X [--account A]
+//!                                  what an agent offers for an account and
+//!                                  what its Default is, read as its chats run
 //! ```
 
 use std::path::PathBuf;
@@ -74,11 +79,32 @@ enum Cmd {
         cwd: Option<PathBuf>,
         #[arg(long)]
         model: Option<String>,
+        /// The account to run as (its id or name); the agent's default if left out.
+        #[arg(long)]
+        account: Option<String>,
         /// Continue an existing session instead of starting a new one.
         #[arg(long)]
         session: Option<String>,
         prompt: Vec<String>,
     },
+    /// What an agent offers for an account, and what its Default runs.
+    Models {
+        #[arg(long, default_value = "claude-code")]
+        agent: String,
+        /// The account (its id or name); the agent's default if left out.
+        #[arg(long)]
+        account: Option<String>,
+    },
+}
+
+/// An account by id or name, for `agent`.
+fn account_id(cfg: &lary_core::Config, agent: &AgentKind, given: Option<&str>) -> Result<Option<String>> {
+    let Some(g) = given else { return Ok(None) };
+    cfg.accounts
+        .iter()
+        .find(|a| &a.agent == agent && (a.id == g || a.label.eq_ignore_ascii_case(g)))
+        .map(|a| Some(a.id.clone()))
+        .ok_or_else(|| anyhow!("no {} account named '{g}'", agent.display_name()))
 }
 
 fn parse_format(s: &str) -> Result<ExportFormat> {
@@ -192,9 +218,26 @@ async fn main() -> Result<()> {
             let s = store.load(&resolve_id(&store, &id)?)?;
             print!("{}", s.to_markdown());
         }
-        Cmd::Run { agent, cwd, model, session, prompt } => {
+        Cmd::Models { agent, account } => {
             let cfg = store.load_config();
             let agent = AgentKind::from_id(&agent);
+            let account = account_id(&cfg, &agent, account.as_deref())?;
+            let at = lary_agents::models::read_for(&cfg, &agent, account.as_deref());
+            let m = lary_agents::models::read(&agent, &at, true, None).await;
+            let acc = cfg.account_for(&agent, account.as_deref()).map(|a| a.label.clone()).unwrap_or_else(|| "(none)".into());
+            println!("{} · account {acc}", agent.display_name());
+            println!("default: {}", m.default_model.as_deref().unwrap_or("(the agent's own, unknown)"));
+            if let Some(e) = &m.error {
+                println!("note: {e}");
+            }
+            for x in &m.models {
+                println!("  {:<28} {}{}", x.id, x.name, if x.aliases.is_empty() { String::new() } else { format!("  → {}", x.aliases.join(", ")) });
+            }
+        }
+        Cmd::Run { agent, cwd, model, account, session, prompt } => {
+            let cfg = store.load_config();
+            let agent = AgentKind::from_id(&agent);
+            let account = account_id(&cfg, &agent, account.as_deref())?;
             let prompt = prompt.join(" ");
             if prompt.trim().is_empty() {
                 return Err(anyhow!("empty prompt"));
@@ -210,11 +253,16 @@ async fn main() -> Result<()> {
             if model.is_some() {
                 s.model = model;
             }
+            if account.is_some() {
+                s.account_id = account;
+            }
             s.push(Message::user_text(prompt));
             s.auto_title();
             let req = build_request(&cfg, &s, &agent)?;
             let (m, acc) = (s.model.clone(), s.account_id.clone());
             let mut rec = TurnRecorder::begin(&mut s, agent.clone(), m, acc);
+            rec.asking(req.model.clone());
+            let asked = req.model.clone();
             let mut handle = start_turn(req);
             while let Some(ev) = handle.events.recv().await {
                 match &ev {
@@ -235,7 +283,9 @@ async fn main() -> Result<()> {
             rec.finish(&mut s, rec.ok || rec.finished);
             store.flush_imports();
             store.save(&s)?;
+            let ran = s.messages.iter().rev().find(|m| m.role == lary_core::Role::Assistant).and_then(|m| m.model.clone());
             println!("\n\nsaved session {} ({})", &s.id, s.status.label());
+            println!("model asked: {} · ran: {}", asked.as_deref().unwrap_or("(default)"), ran.as_deref().unwrap_or("(not reported)"));
         }
     }
     Ok(())

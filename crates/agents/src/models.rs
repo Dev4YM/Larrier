@@ -60,6 +60,11 @@ pub struct AgentModels {
     /// The agent's own default model, as its `--model` takes it.
     #[serde(default)]
     pub default_model: Option<String>,
+    /// What the agent's own listing said its Default is (for the account
+    /// it was read for), kept when its files are read again without
+    /// listing: its settings may name another, which then wins.
+    #[serde(default)]
+    pub listed_default: Option<String>,
     /// The agent's own default reasoning effort.
     #[serde(default)]
     pub default_effort: Option<String>,
@@ -296,11 +301,36 @@ pub fn has_cli_listing(agent: &AgentKind) -> bool {
     matches!(agent, AgentKind::ClaudeCode | AgentKind::Cursor | AgentKind::OpenCode | AgentKind::Droid)
 }
 
-/// Read what `agent` offers. `program` is its executable (for the CLI
-/// listing, when `deep`); otherwise the listing from `prev` is kept.
-pub async fn read(agent: &AgentKind, program: Option<&Path>, deep: bool, prev: Option<&AgentModels>) -> AgentModels {
-    let listing = match (deep, program) {
-        (true, Some(p)) if has_cli_listing(agent) => cli_listing(agent, p).await,
+/// Where an agent's models are read for one account: the program and the
+/// environment a chat on that account runs with (its folder, its token or
+/// key, the API it's pointed at), and the folder its settings are in
+/// (`None`: the agent's own, as for the user's own sign-in). What the agent
+/// offers and what its Default is depend on the account (a subscription's
+/// plan picks the default), so they're read the way the chat runs.
+#[derive(Clone, Debug, Default)]
+pub struct ReadFor {
+    pub launch: Option<crate::request::Launch>,
+    pub home: Option<PathBuf>,
+}
+
+/// [`ReadFor`] the account a chat would run as (`None`: the default one).
+pub fn read_for(cfg: &lary_core::Config, agent: &AgentKind, account: Option<&str>) -> ReadFor {
+    let mut launch = crate::request::resolve_launch(cfg, agent, account).ok().filter(|l| !l.is_empty());
+    if let Some(l) = launch.as_mut() {
+        if let Ok(ml) = crate::request::model_launch(cfg, agent, account, None, None) {
+            l.env.extend(ml.env);
+        }
+    }
+    let home = agent.spec().home_env.and_then(|var| launch.as_ref()?.env.iter().find(|(k, _)| k == var).map(|(_, v)| PathBuf::from(v)));
+    ReadFor { launch, home }
+}
+
+/// Read what `agent` offers, for the account `at` describes. With `deep`,
+/// its CLI listing runs (the slow part); otherwise the listing from `prev`
+/// is kept.
+pub async fn read(agent: &AgentKind, at: &ReadFor, deep: bool, prev: Option<&AgentModels>) -> AgentModels {
+    let listing = match (deep, at.launch.as_ref()) {
+        (true, Some(l)) if has_cli_listing(agent) => cli_listing(agent, l).await,
         _ => None,
     };
     let kept = || Menu {
@@ -313,8 +343,16 @@ pub async fn read(agent: &AgentKind, program: Option<&Path>, deep: bool, prev: O
         Some(Err(e)) => (prev.map(|p| keep_listed(p)).unwrap_or_default(), kept(), prev.and_then(|p| p.listed_at), Some(e)),
         None => (prev.map(|p| keep_listed(p)).unwrap_or_default(), kept(), prev.and_then(|p| p.listed_at), None),
     };
-    let agent2 = agent.clone();
-    let mut m = tokio::task::spawn_blocking(move || read_files(&agent2, listed)).await.unwrap_or_default();
+    let (agent2, home) = (agent.clone(), at.home.clone());
+    let mut m = tokio::task::spawn_blocking(move || read_files(&agent2, listed, home.as_deref())).await.unwrap_or_default();
+    // Read again without listing: the Default the last listing named stands
+    // (unless the agent's settings name one).
+    if m.listed_default.is_none() && listed_at.is_some() {
+        m.listed_default = prev.and_then(|p| p.listed_default.clone());
+        if m.default_model.is_none() {
+            m.default_model = m.listed_default.clone();
+        }
+    }
     m.fetched_at = Some(Utc::now());
     m.listed_at = listed_at;
     m.commands = menu.commands;
@@ -330,12 +368,15 @@ fn keep_listed(p: &AgentModels) -> Vec<AgentModel> {
     p.models.iter().filter(|m| m.listed).cloned().collect()
 }
 
-/// The agent's files, on top of its CLI model list.
-pub fn read_files(agent: &AgentKind, listed: Vec<AgentModel>) -> AgentModels {
+/// The agent's files, on top of its CLI model list. `home`: the folder an
+/// account runs it in (Lary's own for the official harnesses), whose
+/// settings are the ones that apply; `None` reads the agent's own.
+pub fn read_files(agent: &AgentKind, listed: Vec<AgentModel>, home: Option<&Path>) -> AgentModels {
+    let own = |default: PathBuf| home.map(Path::to_path_buf).unwrap_or(default);
     let mut m = match agent {
-        AgentKind::ClaudeCode => claude(&lary_formats::claude::root(None), listed),
-        AgentKind::Codex => codex(&lary_formats::codex::root(None)),
-        AgentKind::Cursor => cursor(&lary_formats::cursor::config_dir(), lary_formats::cursor::ide_db().as_deref(), listed),
+        AgentKind::ClaudeCode => claude(&own(lary_formats::claude::root(None)), listed),
+        AgentKind::Codex => codex(&own(lary_formats::codex::root(None))),
+        AgentKind::Cursor => cursor(&own(lary_formats::cursor::config_dir()), lary_formats::cursor::ide_db().as_deref().filter(|_| home.is_none()), listed),
         AgentKind::OpenCode => opencode(&opencode_config_dir(), &opencode_state_dir(), listed),
         AgentKind::Droid => droid(&factory_home(), listed),
         AgentKind::Hermes => hermes(&lary_formats::hermes::home_dir()),
@@ -421,34 +462,13 @@ fn note_source(m: &mut AgentModels, path: &Path) {
     }
 }
 
-/// Run a CLI quietly and return its output (stdout, then stderr).
-/// Lary's own copy of a harness reads its models in Lary's folder for the
-/// agent, never in the user's own setup.
-fn in_lary_folder(cmd: &mut tokio::process::Command, program: &Path) {
-    let root = lary_core::store::data_root();
-    if !program.starts_with(root.join("runtimes")) {
-        return;
-    }
-    for kind in [AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Cursor, AgentKind::Grok] {
-        if program.starts_with(root.join("runtimes").join(kind.id())) {
-            if let (Some(var), Some(home)) = (kind.spec().home_env, crate::request::lary_home(&kind, None)) {
-                let _ = std::fs::create_dir_all(&home);
-                cmd.env(var, home);
-            }
-        }
-    }
-}
-
-async fn run_cli(program: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
-    let (prog, prefix) = crate::request::unwrap_shim(program);
-    let mut cmd = tokio::process::Command::new(prog);
-    in_lary_folder(&mut cmd, program);
-    cmd.args(prefix).args(args).stdin(std::process::Stdio::null());
+/// Run a CLI quietly, as a chat on the account would (its program and
+/// environment), and return its output (stdout, then stderr).
+async fn run_cli(launch: &crate::request::Launch, args: &[&str], timeout: Duration) -> Result<String, String> {
+    let mut cmd = launch.command();
+    cmd.args(args).stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    cmd.kill_on_drop(true);
     cmd.env("NO_COLOR", "1");
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000);
     match tokio::time::timeout(timeout, cmd.output()).await {
         Err(_) => Err("timed out".into()),
         Ok(Err(e)) => Err(e.to_string()),
@@ -461,9 +481,9 @@ async fn run_cli(program: &Path, args: &[&str], timeout: Duration) -> Result<Str
     }
 }
 
-async fn cli_listing(agent: &AgentKind, program: &Path) -> Option<Result<(Vec<AgentModel>, Menu), String>> {
+async fn cli_listing(agent: &AgentKind, launch: &crate::request::Launch) -> Option<Result<(Vec<AgentModel>, Menu), String>> {
     if *agent == AgentKind::ClaudeCode {
-        return Some(claude_listing(program).await);
+        return Some(claude_listing(launch).await);
     }
     let (args, secs): (&[&str], u64) = match agent {
         AgentKind::Cursor => (&["--list-models"], 60),
@@ -471,7 +491,7 @@ async fn cli_listing(agent: &AgentKind, program: &Path) -> Option<Result<(Vec<Ag
         AgentKind::Droid => (&["exec", "--help"], 30),
         _ => return None,
     };
-    let text = match run_cli(program, args, Duration::from_secs(secs)).await {
+    let text = match run_cli(launch, args, Duration::from_secs(secs)).await {
         Ok(t) => t,
         Err(e) => return Some(Err(format!("Couldn't list models: {e}"))),
     };
@@ -497,18 +517,14 @@ fn clean(s: &str) -> String {
 // ------------------------------------------------------------------ Claude Code
 
 /// Claude Code's own model menu: what `initialize` answers over its control
-/// protocol (no prompt is sent, so nothing is spent).
-async fn claude_listing(program: &Path) -> Result<(Vec<AgentModel>, Menu), String> {
+/// protocol (no prompt is sent, so nothing is spent), in the account's own
+/// environment, so its Default is the one that account's chats get.
+async fn claude_listing(launch: &crate::request::Launch) -> Result<(Vec<AgentModel>, Menu), String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    let (prog, prefix) = crate::request::unwrap_shim(program);
-    let mut cmd = tokio::process::Command::new(prog);
-    in_lary_folder(&mut cmd, program);
-    cmd.args(prefix).args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
+    let mut cmd = launch.command();
+    cmd.args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
     cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
-    cmd.kill_on_drop(true);
     cmd.env_remove("CLAUDECODE");
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000);
     let mut child = cmd.spawn().map_err(|e| format!("Couldn't list models: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
     let line = "{\"type\":\"control_request\",\"request_id\":\"lary_models\",\"request\":{\"subtype\":\"initialize\"}}\n";
@@ -647,6 +663,31 @@ const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultr
 mod param_tests {
     use super::*;
 
+    /// Claude Code in an account's own folder: its Default is what its
+    /// `initialize` says for that account, not the user's own settings; a
+    /// model set in that folder's settings is the Default there.
+    #[test]
+    fn claudes_default_is_the_accounts_own() {
+        let init = serde_json::json!({ "models": [
+            { "value": "default", "displayName": "Default", "resolvedModel": "claude-sonnet-5-5" },
+            { "value": "opus", "displayName": "Opus 5.5", "resolvedModel": "claude-opus-5-5" },
+            { "value": "sonnet", "displayName": "Sonnet 5.5", "resolvedModel": "claude-sonnet-5-5" },
+        ]});
+        let home = std::env::temp_dir().join(format!("lary-acct-{}", lary_core::lsf::new_id()));
+        std::fs::create_dir_all(&home).unwrap();
+        let m = read_files(&AgentKind::ClaudeCode, parse_claude_models(&init), Some(&home));
+        assert_eq!(m.default_model.as_deref(), Some("sonnet"), "the plan's default, as Claude Code said");
+        assert_eq!(m.listed_default.as_deref(), Some("sonnet"), "kept for reads without listing");
+        // Read again without listing (the listed models only): the Default
+        // isn't in them any more; `read` carries `listed_default` over.
+        let again = read_files(&AgentKind::ClaudeCode, m.models.iter().filter(|x| x.listed).cloned().collect(), Some(&home));
+        assert_eq!(again.default_model, None);
+        std::fs::write(home.join("settings.json"), r#"{"model": "opus"}"#).unwrap();
+        let m = read_files(&AgentKind::ClaudeCode, parse_claude_models(&init), Some(&home));
+        assert_eq!(m.default_model.as_deref(), Some("opus"), "the account folder's own setting");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
     #[test]
     fn a_model_with_parameters_reads_and_writes_them() {
         let p = ModelParams {
@@ -698,14 +739,17 @@ fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
         // Claude Code's own menu, with the effort its settings keep per model.
         let default_target = listed.iter().find(|x| x.default).and_then(|x| x.aliases.first().cloned());
         for mut am in listed.into_iter().filter(|x| !x.default) {
-            if m.default_model.is_none() && default_target.as_ref().is_some_and(|t| am.aliases.contains(t) || &am.id == t) {
-                m.default_model = Some(am.id.clone());
+            if m.listed_default.is_none() && default_target.as_ref().is_some_and(|t| am.aliases.contains(t) || &am.id == t) {
+                m.listed_default = Some(am.id.clone());
             }
             am.default_effort = effort_for(&am.id).filter(|e| am.efforts.contains(e));
             if !allowed.is_empty() {
                 am.featured = allowed.iter().any(|a| *a == am.id || am.aliases.contains(a));
             }
             m.models.push(am);
+        }
+        if m.default_model.is_none() {
+            m.default_model = m.listed_default.clone();
         }
         if m.default_effort.is_none() {
             m.default_effort = effort_for(m.default_model.as_deref().unwrap_or("opus"));
@@ -1494,9 +1538,9 @@ mod real {
     #[tokio::test]
     #[ignore]
     async fn real_agent_models() {
+        let cfg = lary_core::Config::default();
         for agent in [AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Cursor, AgentKind::OpenCode, AgentKind::Droid, AgentKind::Hermes] {
-            let program = crate::detect::find_binary(&agent, None);
-            let m = read(&agent, program.as_deref(), true, None).await;
+            let m = read(&agent, &read_for(&cfg, &agent, None), true, None).await;
             let featured: Vec<String> = m.models.iter().filter(|x| x.featured).take(12).map(|x| format!("{} [{}]", x.id, x.efforts.join(","))).collect();
             println!(
                 "\n== {:?}: default {:?} effort {:?} | {} models ({} featured) | error {:?}\n   featured: {}\n   providers: {:?}\n   notes: {:?}",

@@ -24,6 +24,32 @@ pub struct TurnRecorder {
     text_break: bool,
     /// A new reasoning block started: its first delta opens a new part.
     reasoning_break: bool,
+    /// The model Lary asked the agent for (see [`TurnRecorder::asking`]).
+    asked: Option<String>,
+    /// The model id the agent reported running (not a display name).
+    ran: Option<String>,
+}
+
+/// Whether the model an agent reported is the one asked for: the same id,
+/// an alias it stands for (`opus` for `claude-opus-5-5`), or a dated or
+/// suffixed id of it (`claude-opus-5-5-20261101`, `…[1m]`).
+pub fn same_model(asked: &str, ran: &str) -> bool {
+    // Without a provider in front (`anthropic/…`) or parameters after (`[1m]`).
+    let norm = |s: &str| {
+        let s = s.trim().to_ascii_lowercase();
+        let s = s.split('[').next().unwrap_or_default().trim().to_string();
+        s.rsplit('/').next().unwrap_or_default().to_string()
+    };
+    let (a, r) = (norm(asked), norm(ran));
+    if a.is_empty() || r.is_empty() || a == r || r.starts_with(&format!("{a}-")) || a.starts_with(&format!("{r}-")) {
+        return true;
+    }
+    // An alias: the family it names (or what the catalog says it stands for).
+    if !a.contains('-') && !a.contains('/') && r.contains(a.as_str()) {
+        return true;
+    }
+    lary_core::models::alias(&a).is_some_and(|(target, _)| r == target || r.starts_with(&format!("{target}-")))
+        || lary_core::models::normalize(&a) == lary_core::models::normalize(&r)
 }
 
 impl TurnRecorder {
@@ -46,7 +72,15 @@ impl TurnRecorder {
             ok: false,
             text_break: false,
             reasoning_break: false,
+            asked: None,
+            ran: None,
         }
+    }
+
+    /// The model the request asks the agent for (the chat's pick, or Lary's
+    /// default for the agent): a reply that ran another says so.
+    pub fn asking(&mut self, model: Option<String>) {
+        self.asked = model.filter(|m| !m.trim().is_empty() && m != "default");
     }
 
     fn msg<'a>(&mut self, session: &'a mut Session) -> &'a mut Message {
@@ -99,6 +133,7 @@ impl TurnRecorder {
                 // keeps the user's pick (Claude Code reports `opus` as
                 // `claude-opus-5-5`, which would unpick the alias).
                 self.model = Some(model.clone());
+                self.ran = Some(model.clone());
                 if let Some(i) = self.msg_index {
                     if let Some(m) = session.messages.get_mut(i) {
                         m.model = Some(model.clone());
@@ -303,6 +338,14 @@ impl TurnRecorder {
                 self.msg_index = None;
             }
         }
+        // The agent ran another model than the one asked for (a plan
+        // without it, a limit reached, a fallback): the reply says so.
+        if let (Some(asked), Some(ran), Some(i)) = (self.asked.clone(), self.ran.clone().filter(|ran| !same_model(&self.asked.clone().unwrap_or_default(), ran)), self.msg_index) {
+            if let Some(m) = session.messages.get_mut(i) {
+                let name = |id: &str| lary_core::models::display_name(id);
+                m.parts.push(Part::Notice { text: format!("Ran on {}, not {} as picked", name(&ran), name(&asked)) });
+            }
+        }
         let changed = session.messages.iter().skip(base).any(|m| m.tool_calls().any(|t| t.kind.is_mutation() && !t.is_error));
         session.status = if !ok {
             SessionStatus::Error
@@ -503,6 +546,42 @@ mod tests {
     use super::*;
     use lary_core::lsf::active_tasks;
 
+    #[test]
+    fn models_match_as_agents_report_them() {
+        assert!(same_model("opus", "claude-opus-5-5"));
+        assert!(same_model("claude-opus-5-5", "claude-opus-5-5-20261101"));
+        assert!(same_model("claude-sonnet-5-5[1m]", "claude-sonnet-5-5"));
+        assert!(same_model("claude-sonnet-5-5", "anthropic/claude-sonnet-5-5"));
+        assert!(same_model("gpt-6.1-sol", "gpt-6.1-sol"));
+        assert!(!same_model("opus", "claude-sonnet-5-5"));
+        assert!(!same_model("claude-opus-5-5", "claude-sonnet-5-5"));
+        assert!(!same_model("haiku", "claude-sonnet-5-5"));
+    }
+
+    /// Asked for Opus, Claude Code answered with Sonnet: the reply says so.
+    /// Asked for `opus` and ran `claude-opus-5-5`: nothing to say. Nothing
+    /// asked (the agent's Default): nothing to say either.
+    #[test]
+    fn a_reply_that_ran_another_model_says_so() {
+        let run = |asked: Option<&str>, ran: &str| {
+            let mut s = Session::new(AgentKind::ClaudeCode, None);
+            s.push(Message::user_text("hi"));
+            let mut rec = TurnRecorder::begin(&mut s, AgentKind::ClaudeCode, asked.map(String::from), None);
+            rec.asking(asked.map(String::from));
+            rec.apply(&mut s, &AgentEvent::Model { model: ran.into() });
+            rec.apply(&mut s, &AgentEvent::TextDelta { text: "ok".into() });
+            rec.apply(&mut s, &AgentEvent::Done { ok: true, stop_reason: None });
+            rec.finish(&mut s, true);
+            let reply = s.messages.last().unwrap().clone();
+            (reply.model.clone(), reply.parts.iter().find_map(|p| if let Part::Notice { text } = p { Some(text.clone()) } else { None }))
+        };
+        let (ran, note) = run(Some("opus"), "claude-sonnet-5-5");
+        assert_eq!(ran.as_deref(), Some("claude-sonnet-5-5"), "the reply records what ran");
+        assert!(note.is_some_and(|n| n.contains("Sonnet") && n.contains("Opus")));
+        assert_eq!(run(Some("opus"), "claude-opus-5-5").1, None);
+        assert_eq!(run(None, "claude-sonnet-5-5").1, None);
+    }
+
     fn sub(parent: &str, e: AgentEvent) -> AgentEvent {
         AgentEvent::Subagent { parent_tool_id: parent.into(), inner: Box::new(e) }
     }
@@ -511,6 +590,7 @@ mod tests {
     fn records_subagents_and_background_tasks() {
         let mut s = Session::new(AgentKind::ClaudeCode, None);
         s.push(Message::user_text("audit the repo"));
+        // (see `a_reply_that_ran_another_model_says_so` for the model check)
         let mut rec = TurnRecorder::begin(&mut s, AgentKind::ClaudeCode, None, None);
         let task = ToolCall::new("task1", "Agent", serde_json::json!({"description": "Audit", "subagent_type": "Explore", "prompt": "look around"}));
         rec.apply(&mut s, &AgentEvent::ToolStart { tool: task });

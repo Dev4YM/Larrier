@@ -688,6 +688,9 @@ fn always_label(suggestions: &Value) -> String {
 pub struct ClaudeStream {
     pub done: bool,
     failed: bool,
+    /// The model last reported for the chat itself: an answer from another
+    /// (a fallback mid-turn) is reported again.
+    model: Option<String>,
     /// Message ids whose text/thinking already arrived as partial deltas.
     streamed: HashSet<String>,
     current_msg: Option<String>,
@@ -784,6 +787,7 @@ impl ClaudeStream {
                     sink.send(AgentEvent::NativeSession { id: id.to_string(), path: None });
                 }
                 if let Some(m) = s(v, "model") {
+                    self.model = Some(m.to_string());
                     sink.send(AgentEvent::Model { model: m.to_string() });
                 }
             }
@@ -961,6 +965,12 @@ impl ClaudeStream {
             return;
         }
         let mid = s(msg, "id").unwrap_or("").to_string();
+        // The model that actually answered: Claude Code may fall back to
+        // another during a turn.
+        if let Some(m) = s(msg, "model").filter(|m| !m.starts_with('<') && self.model.as_deref() != Some(*m)) {
+            self.model = Some(m.to_string());
+            sink.send(AgentEvent::Model { model: m.to_string() });
+        }
         // Each API call's usage tells how full the context is now (token
         // totals come with the result).
         if let Some(us) = msg.get("usage").filter(|u| u.is_object()) {

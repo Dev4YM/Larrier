@@ -100,9 +100,9 @@ fn plan_option(agent: &AgentKind) -> Option<&'static str> {
 }
 
 /// Model and effort for the composer button ("Opus 5.5", "Extra high"):
-/// the session's picks, else the defaults — the agent's own when Lary
-/// has none, so it reads what will really run.
-fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &Option<String>, fast: bool) -> (String, String) {
+/// the session's picks, else the defaults — the agent's own for the
+/// chat's account when Lary has none, so it reads what will really run.
+fn model_display(app: &App, agent: &AgentKind, account: Option<&str>, model: &Option<String>, effort: &Option<String>, fast: bool) -> (String, String) {
     use crate::agent_models as am;
     if agent.spec().protocol == Protocol::HttpChat {
         let name = match model {
@@ -111,7 +111,7 @@ fn model_display(app: &App, agent: &AgentKind, model: &Option<String>, effort: &
         };
         return (name, String::new());
     }
-    let r = am::resolve(app, agent, model.as_deref(), effort.as_deref());
+    let r = am::resolve_for(app, agent, account, model.as_deref(), effort.as_deref());
     let name = match (&r.family, &r.model) {
         (Some(f), Some(m)) if f != m => am::short_name(app, agent, f),
         (_, Some(m)) => am::short_name(app, agent, m),
@@ -581,7 +581,12 @@ pub fn Composer(
     });
     // The harness's logo: "Cursor Agent · Opus 5.5" is Cursor, whoever made the model.
     let model_logo_svg = agent_logo(&agent);
-    let (model_text, effort_text) = model_display(&app, &agent, &model, &effort, fast);
+    // The account the chat runs as: what its Default is depends on it.
+    let account_now: Option<String> = match &session_id {
+        Some(_) => sess.read().as_ref().and_then(|s| s.account.clone()),
+        None => app.draft.read().account_id.clone(),
+    };
+    let (model_text, effort_text) = model_display(&app, &agent, account_now.as_deref(), &model, &effort, fast);
 
     // "@" mentions and "/" commands: one menu for the token typed just
     // before the caret, keyboard navigable, its pages opened in place.
@@ -1676,7 +1681,7 @@ struct PickRow {
 
 /// The picker's rows for an agent: its default, then the models shown in
 /// Lary's picker, or every model it offers when `all` (search).
-fn pick_rows(app: &App, kind: &AgentKind, all: bool) -> Vec<PickRow> {
+fn pick_rows(app: &App, kind: &AgentKind, account: Option<&str>, all: bool) -> Vec<PickRow> {
     use crate::agent_models as am;
     let mut rows = Vec::new();
     if let Some(list) = listed_models(app, kind) {
@@ -1688,10 +1693,10 @@ fn pick_rows(app: &App, kind: &AgentKind, all: bool) -> Vec<PickRow> {
         return rows;
     }
     // The default row says what it is: Lary's default, or the agent's own.
-    let r = am::resolve(app, kind, None, None);
+    let r = am::resolve_for(app, kind, account, None, None);
     let mut def_note: Vec<String> = r.model.as_deref().map(|m| am::short_name(app, kind, r.family.as_deref().unwrap_or(m))).into_iter().collect();
     def_note.extend(r.effort.as_deref().map(lary_agents::models::effort_label));
-    let whose = if r.model_from_agent { format!("{}'s own default (from its settings)", kind.display_name()) } else { "Your default for this agent in Lary".to_string() };
+    let whose = if r.model_from_agent { format!("What {} runs for this account when no model is picked, as it says itself", kind.display_name()) } else { "Your default for this agent in Lary".to_string() };
     rows.push(PickRow { id: None, label: "Default".into(), note: def_note.join(" · "), meta: String::new(), tip: whose, logo_id: r.model.clone() });
     let choices = if all { am::choices(app, kind) } else { am::picker_choices(app, kind) };
     for c in choices {
@@ -1772,8 +1777,19 @@ fn ModelPicker(
     let tab = browse();
     let cur = tab.clone().unwrap_or_else(|| agent.clone());
     let cur_meta = agents.iter().find(|(k, _, _)| *k == cur).cloned();
+    // Opened on a harness whose list is a few minutes old: read it again
+    // (for the chat's account), as its settings page does.
+    let browsed = browse().unwrap_or_else(|| agent.clone());
+    let (acct, in_chat) = (account.clone(), agent.clone());
+    use_effect(use_reactive!(|is_open, browsed| {
+        if is_open {
+            // The chat's own account for its harness; another harness's default.
+            let a = if browsed == in_chat { acct.clone() } else { None };
+            app.refresh_models_for(&browsed, a.as_deref());
+        }
+    }));
     // The family in use (Cursor stores a variant of it).
-    let now = crate::agent_models::resolve(&app, &agent, model.as_deref(), effort.as_deref());
+    let now = crate::agent_models::resolve_for(&app, &agent, account.as_deref(), model.as_deref(), effort.as_deref());
     let in_use = |row: &Option<String>| -> bool {
         match (row, &model) {
             (None, None) => true,
@@ -1787,7 +1803,7 @@ fn ModelPicker(
         let mut v = Vec::new();
         for (k, name, _) in agents.iter() {
             let agent_hit = name.to_lowercase().contains(&q);
-            for row in pick_rows(&app, k, true) {
+            for row in pick_rows(&app, k, if *k == agent { account.as_deref() } else { None }, true) {
                 let raw = row.id.clone().unwrap_or_default().to_lowercase();
                 if agent_hit || row.label.to_lowercase().contains(&q) || raw.contains(&q) {
                     v.push((k.clone(), name.clone(), row));
@@ -1822,7 +1838,7 @@ fn ModelPicker(
             if mine.is_empty() {
                 continue;
             }
-            let all = pick_rows(&app, k, true);
+            let all = pick_rows(&app, k, if *k == agent { account.as_deref() } else { None }, true);
             let rows: Vec<PickRow> = mine
                 .iter()
                 .map(|f| {
@@ -2004,7 +2020,7 @@ fn ModelPicker(
                                 }
                             }
                         }
-                        for row in pick_rows(&app, &cur, false) {
+                        for row in pick_rows(&app, &cur, if cur == agent { account.as_deref() } else { None }, false) {
                             {
                                 let checked = cur == agent && in_use(&row.id);
                                 let can_edit = editable(&row.id);

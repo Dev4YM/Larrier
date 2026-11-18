@@ -46,22 +46,33 @@ fn default_root(linux: &str, other: &str) -> PathBuf {
 /// wallpapers and project pictures, the per-account folders) are pointed at
 /// the new place, and git worktrees moved with it are repaired. Nothing
 /// happens with a folder set by `LARY_HOME` / `LARRIER_HOME`, or once
-/// Lary's own folder exists. Returns what happened, for the log.
-pub fn migrate_from_larrier() -> Option<String> {
+/// Lary's own folder exists. Returns what moved, for the log, or why the
+/// folder couldn't move (on Windows, something still has a file in it open:
+/// Larrier, or a terminal in one of its worktrees). Nothing may create
+/// Lary's folder before this has moved Larrier's, or Larrier's is left
+/// behind.
+pub fn migrate_from_larrier() -> Result<Option<String>> {
     if ["LARY_HOME", "LARRIER_HOME"].iter().any(|v| std::env::var(v).is_ok_and(|p| !p.is_empty())) {
-        return None;
+        return Ok(None);
     }
     migrate_dir(&default_root("larrier", "Larrier"), &data_root())
 }
 
 /// Move `old` to `new` and point the paths saved inside at the new place
 /// (see [`migrate_from_larrier`]).
-fn migrate_dir(old: &Path, new: &Path) -> Option<String> {
+fn migrate_dir(old: &Path, new: &Path) -> Result<Option<String>> {
     if new.exists() || !old.is_dir() {
-        return None;
+        return Ok(None);
     }
-    if let Err(e) = std::fs::rename(old, new) {
-        return Some(format!("couldn't move {} to {}: {e}", old.display(), new.display()));
+    // A program that just closed (Larrier after an update, its web view's
+    // helpers) lets go of its files within moments.
+    let mut tries = 0;
+    while let Err(e) = std::fs::rename(old, new) {
+        tries += 1;
+        if tries == 10 {
+            return Err(e).with_context(|| format!("moving {} to {}", old.display(), new.display()));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
     let (from, to) = (old.display().to_string(), new.display().to_string());
     // As saved in JSON (backslashes doubled on Windows) and with forward
@@ -102,7 +113,7 @@ fn migrate_dir(old: &Path, new: &Path) -> Option<String> {
             }
         }
     }
-    Some(format!("moved {from} to {to}; {repaired} worktrees repaired"))
+    Ok(Some(format!("moved {from} to {to}; {repaired} worktrees repaired")))
 }
 
 /// Fingerprint of an imported native session so re-imports update in place.
@@ -395,7 +406,7 @@ mod tests {
         let msg = format!(r#"{{"kind":"message","text":"{}"}}"#, esc(&o));
         std::fs::write(old.join("sessions/s.lsf.jsonl"), format!("{head}\n{msg}\n")).unwrap();
 
-        assert!(migrate_dir(&old, &new).is_some());
+        assert!(migrate_dir(&old, &new).unwrap().is_some());
         assert!(!old.exists() && new.join("config.json").exists());
         let n = new.display().to_string();
         let config = std::fs::read_to_string(new.join("config.json")).unwrap();
@@ -406,7 +417,25 @@ mod tests {
         assert!(rest.contains(&esc(&o)), "messages stay as they were");
         // Once Lary's folder is there, nothing moves again.
         std::fs::create_dir_all(&old).unwrap();
-        assert!(migrate_dir(&old, &new).is_none());
+        assert!(migrate_dir(&old, &new).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_larrier_folder_in_use_stays_until_it_is_free() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let base = std::env::temp_dir().join(format!("lary-migrate-{}", crate::lsf::new_id()));
+        let (old, new) = (base.join("Larrier"), base.join("Lary"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("config.json"), "{}").unwrap();
+        // Larrier still running, holding a file of its folder open.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(old.join("config.json")).unwrap();
+        assert!(migrate_dir(&old, &new).is_err());
+        assert!(old.join("config.json").exists() && !new.exists(), "nothing half moved, and no empty folder for Lary");
+        drop(held);
+        assert!(migrate_dir(&old, &new).unwrap().is_some());
+        assert!(!old.exists() && new.join("config.json").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 

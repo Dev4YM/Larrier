@@ -102,6 +102,32 @@ fn headless(args: &[String]) -> Option<i32> {
     })
 }
 
+/// Move Larrier's data folder over (see `store::migrate_from_larrier`). One
+/// that's still in use can't move on Windows: rather than start on an empty
+/// folder and leave the chats behind, ask to close what holds it.
+fn move_larriers_data() {
+    loop {
+        match lary_core::store::migrate_from_larrier() {
+            Ok(Some(what)) => return tracing::info!("data from Larrier: {what}"),
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!("data from Larrier: {e:#}");
+                let answer = rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_title("Lary")
+                    .set_description(format!(
+                        "Larrier is Lary now, and your chats and settings move over when Lary first opens. Larrier's folder is still in use, so they can't move yet.\n\nClose Larrier, and any terminal or editor open in one of its worktrees, then choose OK to try again. Cancel closes Lary.\n\n{e:#}"
+                    ))
+                    .set_buttons(rfd::MessageButtons::OkCancel)
+                    .show();
+                if answer != rfd::MessageDialogResult::Ok {
+                    std::process::exit(0);
+                }
+            }
+        }
+    }
+}
+
 /// Which window to open.
 #[derive(Clone, Copy, PartialEq)]
 enum Start {
@@ -127,11 +153,8 @@ fn main() {
     }
     let filter = std::env::var("LARY_LOG").unwrap_or_else(|_| "info,lary=debug".into());
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
-    // Larrier is Lary now: its data folder moves over once, and an
-    // installed program updated in Larrier's place installs itself as Lary.
-    if let Some(what) = lary_core::store::migrate_from_larrier() {
-        tracing::info!("data from Larrier: {what}");
-    }
+    // Larrier is Lary now: an installed program updated in Larrier's place
+    // installs itself as Lary.
     if let Some(code) = install::migrate_from_larrier(&args) {
         std::process::exit(code);
     }
@@ -139,6 +162,10 @@ fn main() {
     if let Some(code) = headless(&args) {
         std::process::exit(code);
     }
+    // Larrier's data folder becomes Lary's when a window first opens (not in
+    // the steps above, which can run while Larrier is still closing), and
+    // before anything makes Lary's own folder.
+    move_larriers_data();
     // macOS / Linux: the agents and their tools as a terminal finds them.
     platform::adopt_login_path();
     install::tidy();

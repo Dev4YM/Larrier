@@ -211,6 +211,21 @@ pub fn Root() -> Element {
         if cfg!(target_os = "macos") {
             document::eval(r#"window.__laryKeys = (s) => s.replace(/Ctrl\+/g, '⌘').replace(/Shift\+/g, '⇧').replace(/Alt\+/g, '⌥');"#);
         }
+        // A row of tabs wider than its room scrolls sideways with the mouse
+        // wheel too (a plain wheel only goes up and down).
+        document::eval(
+            r#"
+            if (!window.__laryTabWheel) {
+              window.__laryTabWheel = true;
+              document.addEventListener('wheel', (e) => {
+                const row = e.target.closest && e.target.closest('.rp-tabs, .browser-tabs');
+                if (!row || row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+                row.scrollLeft += e.deltaY;
+                e.preventDefault();
+              }, { passive: false });
+            }
+            "#,
+        );
         let mut ev = document::eval(
             r#"
             const mq = window.matchMedia('(prefers-color-scheme: dark)');

@@ -175,6 +175,8 @@ icons! {
     PanelBottom => "panel-bottom",
     Maximize2 => "maximize-2",
     Minimize2 => "minimize-2",
+    Combine => "combine",
+    Columns2 => "columns-2",
     Orbit => "orbit",
     Prompt => "terminal",
     Minus => "minus",

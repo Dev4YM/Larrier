@@ -313,6 +313,10 @@ pub struct Settings {
     pub chat_width: u32,
     #[serde(default = "yes")]
     pub right_panel_open: bool,
+    /// The chat and the side panel as one: one row of tabs (the chat first,
+    /// then the panel's), one shown at a time across the whole width.
+    #[serde(default)]
+    pub panel_merged: bool,
     /// The session rail (shown while the side panel is closed) is folded
     /// down to its icons.
     #[serde(default)]
@@ -748,6 +752,7 @@ impl Default for Settings {
             sidebar_width: default_sidebar_width(),
             chat_width: default_chat_width(),
             right_panel_open: true,
+            panel_merged: false,
             session_rail_collapsed: false,
             run_mode: RunMode::default(),
             session_mode: SessionMode::default(),

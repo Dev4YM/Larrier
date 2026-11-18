@@ -21,15 +21,56 @@ fn tab_meta(t: RightTab) -> (I, &'static str, &'static str) {
     }
 }
 
+/// The chat and the side panel as one (one row of tabs, the chat's first),
+/// or apart again. Either way the chat is what shows.
+pub fn set_merged(mut app: crate::state::App, on: bool) {
+    {
+        let mut ui = app.ui.write();
+        ui.merged = on;
+        ui.on_chat = true;
+    }
+    app.update_config(|c| c.settings.panel_merged = on);
+}
+
+/// The side panel beside the chat: its tabs and the tool shown.
 #[component]
 pub fn RightPane(id: String) -> Element {
+    let app = use_app();
+    rsx! {
+        div { class: "right-pane",
+            div { class: "rp-head",
+                PanelTabs { id: id.clone() }
+                DragRegion {}
+                button { class: "icon-btn", title: "Merge with the chat: one row of tabs, the chat first",
+                    onclick: move |_| set_merged(app, true),
+                    Icon { i: I::Combine, size: 15, stroke: 1.5 }
+                }
+            }
+            div { class: "rp-body",
+                PanelBody { id: id.clone() }
+            }
+        }
+    }
+}
+
+/// The side panel's tabs and its "+" (beside the chat, or in the merged
+/// row after the chat's own tabs).
+#[component]
+pub fn PanelTabs(id: String, #[props(default)] merged: bool) -> Element {
     let mut app = use_app();
     let mut plus = use_signal(|| false);
     let mut q = use_signal(String::new);
     let tab = crate::state::use_ui(|u| u.right_tab)();
     let tabs = crate::state::use_ui(|u| u.right_tabs.clone())();
-    let id_c = id.clone();
-    let cwd = use_memo(move || app.with_session(&id_c, |s| s.cwd()).flatten())();
+    // Merged with the chat showing: none of these is the one shown.
+    let on_chat = merged && crate::state::use_ui(|u| u.on_chat)();
+    // The tab shown is in view in its row, however many there are.
+    let n_tabs = tabs.len();
+    use_effect(use_reactive!(|tab, n_tabs, on_chat| {
+        let _ = (tab, n_tabs, on_chat);
+        document::eval("requestAnimationFrame(() => document.querySelector('.rp-tabs .rp-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }))");
+    }));
+    let _ = &id;
     let mut open_q = move |_: ()| {
         let v = q.read().trim().to_string();
         plus.set(false);
@@ -44,14 +85,12 @@ pub fn RightPane(id: String) -> Element {
         }
     };
     rsx! {
-        div { class: "right-pane",
-            div { class: "rp-head",
                 div { class: "rp-tabs", role: "tablist",
                     for t in tabs {
                         {
                             let (ticon, ttitle, _) = tab_meta(t.tab);
                             let mut cls = String::from("rp-tab");
-                            if t.tab == tab {
+                            if t.tab == tab && !on_chat {
                                 cls.push_str(" active");
                             }
                             if t.preview {
@@ -77,7 +116,11 @@ pub fn RightPane(id: String) -> Element {
                                     "data-drag-session": "{drag}",
                                     "data-drag-title": "{drag_title}",
                                     title: if t.preview { "{ttitle} · Preview — double-click to keep open" } else { "{ttitle}" },
-                                    onclick: move |_| app.ui.write().right_tab = kind,
+                                    onclick: move |_| {
+                                        let mut ui = app.ui.write();
+                                        ui.right_tab = kind;
+                                        ui.on_chat = false;
+                                    },
                                     ondoubleclick: move |_| app.ui.write().keep_panel(kind),
                                     onmousedown: move |e| {
                                         if e.trigger_button() == Some(dioxus::html::input_data::MouseButton::Auxiliary) {
@@ -124,16 +167,17 @@ pub fn RightPane(id: String) -> Element {
                         }
                     }
                 }
-                DragRegion {}
-                button { class: "icon-btn", title: "Expand panel",
-                    onclick: move |_| {
-                        let w = app.config.read().settings.chat_width;
-                        app.config.write().settings.chat_width = if w > 460 { 420 } else { 760 };
-                    },
-                    Icon { i: I::Maximize2, size: 15, stroke: 1.5 }
-                }
-            }
-            div { class: "rp-body",
+    }
+}
+
+/// The side panel's tool shown (its tab).
+#[component]
+pub fn PanelBody(id: String) -> Element {
+    let mut app = use_app();
+    let tab = crate::state::use_ui(|u| u.right_tab)();
+    let id_c = id.clone();
+    let cwd = use_memo(move || app.with_session(&id_c, |s| s.cwd()).flatten())();
+    rsx! {
                 match tab {
                     RightTab::Home => rsx! {
                         div { class: "rp-empty",
@@ -160,8 +204,6 @@ pub fn RightPane(id: String) -> Element {
                     RightTab::Files => rsx! { super::files::FilesPanel { key: "f-{id}", session_id: id.clone(), cwd: cwd.clone() } },
                     RightTab::Tasks => rsx! { super::tasks::TasksPanel { key: "k-{id}", session_id: id.clone() } },
                 }
-            }
-        }
     }
 }
 

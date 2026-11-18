@@ -73,6 +73,7 @@ pub fn commit_message(title: &str, summary: &str) -> String {
 pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
     let mut app = use_app();
     let right_open = use_ui(|u| u.right_open)();
+    let (merged_on, on_chat) = use_ui(|u| (u.merged, u.on_chat))();
     let loaded = app.open.read().contains_key(&id);
     let split = app.split.read().clone().filter(|s| *s != id && app.open.read().contains_key(s));
     let mut dragging = use_signal(|| false);
@@ -84,11 +85,15 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
     // sits under it; beside a panel or a second chat, each column keeps its
     // own header.
     let rail = split.is_none() && !right_open;
+    // The chat and the side panel as one: one row of tabs, one shown.
+    let merged = merged_on && right_open && split.is_none();
     let col_class = format!(
-        "chat-col primary{}{}{}",
-        if right_open && split.is_none() { " fixed" } else { "" },
+        "chat-col primary{}{}{}{}{}",
+        if right_open && split.is_none() && !merged { " fixed" } else { "" },
         if rail { " bare" } else { "" },
         if sub.is_some() { " showing-sub" } else { "" },
+        if merged { " merged" } else { "" },
+        if merged && !on_chat { " panel-on" } else { "" },
     );
     rsx! {
         div { class: if split.is_none() { "agent-frame with-toggle" } else { "agent-frame" },
@@ -103,17 +108,25 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
                 class: "{col_class}",
                 "data-session": "{id}",
                 if !rail {
-                    ChatHeader { id: id.clone() }
+                    ChatHeader { id: id.clone(), merged }
                 }
-                // The chat stays laid out under a subagent's transcript, so
-                // going back finds it as it was.
+                // The chat stays laid out under a subagent's transcript (or,
+                // merged, under the panel's tab shown), so going back finds
+                // it as it was.
                 ChatColumn { id: id.clone(), input_id: "composer-input" }
                 if let Some(tool) = sub.clone() {
                     div { key: "{tool}", class: "sub-layer",
                         super::tasks::SubagentTranscript { session_id: id.clone(), tool_id: tool }
                     }
                 }
-                if right_open && split.is_none() {
+                if merged && !on_chat {
+                    div { class: "right-pane merged-pane",
+                        div { class: "rp-body",
+                            super::right::PanelBody { id: id.clone() }
+                        }
+                    }
+                }
+                if right_open && split.is_none() && !merged {
                     div {
                         class: if dragging() { "resizer dragging" } else { "resizer" },
                         title: "Drag to resize · double-click to fit the window",
@@ -135,6 +148,8 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
                     SplitHeader { id: other.clone() }
                     ChatColumn { id: other.clone(), input_id: "composer-input-2" }
                 }
+            } else if merged {
+                // In the chat's column, above.
             } else if right_open {
                 RightPane { id: id.clone() }
             } else {
@@ -555,8 +570,10 @@ fn head_info(s: &Session) -> HeadInfo {
     }
 }
 
+/// The chat's header; merged with the side panel (`merged`), its one row of
+/// tabs: the chat's, then the panel's.
 #[component]
-fn ChatHeader(id: String) -> Element {
+fn ChatHeader(id: String, #[props(default)] merged: bool) -> Element {
     let mut app = use_app();
     let id_m = id.clone();
     let info = use_memo(move || app.with_session(&id_m, head_info));
@@ -575,6 +592,9 @@ fn ChatHeader(id: String) -> Element {
                 }
             }
             TabStrip {}
+            if merged {
+                super::right::PanelTabs { id: id.clone(), merged: true }
+            }
             DragRegion {}
             if let Some((number, url, repo)) = h.pr.clone() {
                 button { class: "head-link", title: "{repo} · {url}", onclick: move |_| { let _ = open::that(&url); },
@@ -612,6 +632,12 @@ fn ChatHeader(id: String) -> Element {
                     MenuItem { label: if h.archived { "Unarchive".to_string() } else { "Archive".to_string() }, icon: Some(I::Archive), onclick: move |_| { menu.set(false); app.toggle_archive(&id_i); } }
                     div { class: "menu-sep" }
                     MenuItem { label: "Delete".to_string(), icon: Some(I::Trash), danger: true, onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::ConfirmDelete(id_h.clone())); } }
+                }
+            }
+            if merged {
+                button { class: "icon-btn", title: "Split: the side panel beside the chat again",
+                    onclick: move |_| super::right::set_merged(app, false),
+                    Icon { i: I::Columns2, size: 15, stroke: 1.5 }
                 }
             }
         }
@@ -693,6 +719,8 @@ pub fn TabStrip() -> Element {
     let app = use_app();
     let tabs = app.window_tabs();
     let view = app.view.read().clone();
+    // Merged with the side panel, one of its tabs shown instead.
+    let panel_shown = use_ui(|u| u.merged && u.right_open && !u.on_chat)();
     let active = tabs.iter().position(|t| t.view == view);
     use_effect(use_reactive!(|active| {
         if active.is_some() {
@@ -709,7 +737,7 @@ pub fn TabStrip() -> Element {
                 }
             },
             for t in tabs {
-                ChatTabChip { key: "{tab_key(&t.view)}", active: t.view == view, tab: t }
+                ChatTabChip { key: "{tab_key(&t.view)}", active: t.view == view && !panel_shown, tab: t }
             }
         }
     }
@@ -763,7 +791,11 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
             "data-ctx": "tab",
             "data-drag-session": if sub.is_none() { "{sid}" } else { "" },
             "data-drag-title": "{label}",
-            onclick: move |_| app.navigate(v1.clone()),
+            onclick: move |_| {
+                // Merged with the side panel: the chat shows again.
+                app.ui.write().on_chat = true;
+                app.navigate(v1.clone());
+            },
             ondoubleclick: move |_| {
                 if preview {
                     app.keep_tab(&v2);

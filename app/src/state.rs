@@ -237,6 +237,10 @@ pub enum Modal {
 pub struct Ui {
     pub sidebar_open: bool,
     pub right_open: bool,
+    /// The chat and the side panel are one, with one row of tabs.
+    pub merged: bool,
+    /// Merged: the chat shown (else the panel's tab).
+    pub on_chat: bool,
     /// The side panel's active tab (`Home` when none is open).
     pub right_tab: RightTab,
     pub right_tabs: Vec<PanelTab>,
@@ -318,6 +322,8 @@ impl Ui {
             show_tab(&mut self.right_tabs, tab, keep);
         }
         self.right_tab = tab;
+        // Merged: the tab opened is the one shown.
+        self.on_chat = false;
     }
 
     /// Turn a preview tab into a regular one.
@@ -332,6 +338,10 @@ impl Ui {
         self.right_tabs.remove(i);
         if self.right_tab == tab {
             self.right_tab = self.right_tabs.get(i).or_else(|| i.checked_sub(1).and_then(|j| self.right_tabs.get(j))).map(|t| t.tab).unwrap_or(RightTab::Home);
+        }
+        // Merged, with no panel tab left: back to the chat.
+        if self.right_tabs.is_empty() {
+            self.on_chat = true;
         }
     }
 }
@@ -580,6 +590,8 @@ impl App {
         let ui = Ui {
             sidebar_open: true,
             right_open: cfg.settings.right_panel_open,
+            merged: cfg.settings.panel_merged,
+            on_chat: true,
             right_tab: RightTab::Changes,
             right_tabs: vec![PanelTab { tab: RightTab::Changes, preview: false }],
             palette_open: false,

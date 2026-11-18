@@ -5,6 +5,22 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.49 — 2026-11-18
+
+### New
+
+- Rename any account and change a setup token or key from its menu, which shows a line only between groups
+- Archived and Deleted chats in Settings, deleted ones kept 10 days to restore, archived ones kept unless set to go
+- Lary starts on a loading screen, opens chats in the background, and never reopens one it can't open
+
+### Look and feel
+
+- Cursor shows as its own glass cube
+
+### Fixed
+
+- Reopening a chat whose browser was open no longer closes Lary, and a new install gets its browser engine again
+- Default says what really runs for the chat's account, the model lists stay current, and a reply that ran another model says so
 ## 0.1.48 — 2026-11-18
 
 ### New

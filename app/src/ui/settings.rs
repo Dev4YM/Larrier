@@ -534,9 +534,9 @@ fn HarnessPage(kind: AgentKind) -> Element {
     let tabs: Vec<(HarnessTab, &str)> = if chat {
         vec![]
     } else if custom {
-        vec![(HarnessTab::Running, "How it runs")]
+        vec![(HarnessTab::Running, "Connection")]
     } else {
-        vec![(HarnessTab::Accounts, "Accounts"), (HarnessTab::Models, "Models"), (HarnessTab::Running, "How it runs"), (HarnessTab::Version, "Version")]
+        vec![(HarnessTab::Accounts, "Accounts"), (HarnessTab::Models, "Models"), (HarnessTab::Running, "Connection"), (HarnessTab::Version, "Version")]
     };
     let cur = if custom { HarnessTab::Running } else { tab() };
     let (k1, k2, k3) = (kind.clone(), kind.clone(), kind.clone());

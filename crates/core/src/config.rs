@@ -63,13 +63,26 @@ fn config_version() -> u32 {
 }
 
 /// The config format this build writes (see `Config::migrate`).
-pub const CONFIG_VERSION: u32 = 5;
+pub const CONFIG_VERSION: u32 = 6;
 
-/// Agents whose own headless runners refuse whatever needs asking, while
-/// over the Agent Client Protocol the asks reach the user: they connect
-/// over ACP unless the user picks Native.
+/// Claude Code, Codex, Cursor and Grok connect only the way their makers
+/// support for apps like Lary: Claude Code's and Codex's own protocols
+/// (what the Claude Agent SDK and Codex's app server speak), Cursor's and
+/// Grok's own ACP modes. Whether that way is ACP; `None` for the other
+/// agents, which offer a choice.
+pub fn official_acp(kind: &AgentKind) -> Option<bool> {
+    match kind {
+        AgentKind::ClaudeCode | AgentKind::Codex => Some(false),
+        AgentKind::Cursor | AgentKind::Grok => Some(true),
+        _ => None,
+    }
+}
+
+/// Agents that connect over ACP unless the user picks Native: the official
+/// ones whose way it is, and those whose own headless runners refuse
+/// whatever needs asking, while over ACP the asks reach the user.
 pub fn acp_by_default(kind: &AgentKind) -> bool {
-    matches!(kind, AgentKind::OpenCode | AgentKind::Hermes | AgentKind::Cursor)
+    official_acp(kind).unwrap_or(matches!(kind, AgentKind::OpenCode | AgentKind::Hermes))
 }
 
 impl Default for Config {
@@ -112,6 +125,15 @@ impl Config {
             // 5: Cursor connects its official way, over ACP.
             for a in self.agents.iter_mut().filter(|a| a.kind == AgentKind::Cursor) {
                 a.prefer_acp = true;
+            }
+        }
+        if self.version < 6 {
+            // 6: Claude Code, Codex, Cursor and Grok connect only their
+            // official way (an ACP adapter picked before is dropped).
+            for a in self.agents.iter_mut() {
+                if let Some(acp) = official_acp(&a.kind) {
+                    a.prefer_acp = acp;
+                }
             }
         }
         self.version = self.version.max(CONFIG_VERSION);
@@ -862,6 +884,12 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    /// Whether the agent connects over ACP: its official way, else the
+    /// user's pick.
+    pub fn acp(&self) -> bool {
+        official_acp(&self.kind).unwrap_or(self.prefer_acp)
+    }
+
     pub fn new(kind: AgentKind) -> Self {
         let acp = acp_by_default(&kind);
         AgentConfig {
@@ -1367,6 +1395,21 @@ mod tests {
         again.migrate();
         assert!(!again.agent(&AgentKind::OpenCode).prefer_acp, "the user's Native is kept");
         assert!(Config::default().agent(&AgentKind::Hermes).prefer_acp, "new configs start on ACP");
+    }
+
+    /// Claude Code on the ACP adapter and Cursor on print mode move to
+    /// their official ways, and stay there whatever the config says.
+    #[test]
+    fn official_harnesses_connect_their_official_way() {
+        let mut old: Config = serde_json::from_str(r#"{"version": 5, "agents": [{"kind": "claude-code", "prefer_acp": true}, {"kind": "cursor", "prefer_acp": false}, {"kind": "gemini", "prefer_acp": true}]}"#).unwrap();
+        old.migrate();
+        let acp = |k: AgentKind| (old.agent(&k).prefer_acp, old.agent(&k).acp());
+        assert_eq!(acp(AgentKind::ClaudeCode), (false, false));
+        assert_eq!(acp(AgentKind::Cursor), (true, true));
+        assert_eq!(acp(AgentKind::Gemini), (true, true), "the others keep the user's pick");
+        old.agent_mut(&AgentKind::Codex).prefer_acp = true;
+        assert!(!old.agent(&AgentKind::Codex).acp());
+        assert!(Config::default().agent(&AgentKind::Grok).acp() && !Config::default().agent(&AgentKind::Codex).acp());
     }
 
     #[test]

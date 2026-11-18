@@ -538,7 +538,7 @@ pub fn build_request(cfg: &Config, session: &Session, agent: &AgentKind) -> Resu
         _ => None,
     };
     let protocol = custom_protocol.unwrap_or_else(|| {
-        if ac.prefer_acp && spec.acp_command.is_some() {
+        if ac.acp() && spec.acp_command.is_some() {
             Protocol::Acp
         } else {
             spec.protocol
@@ -713,7 +713,7 @@ pub struct ModelLaunch {
 /// over its control protocol, Codex over its app server); others get it
 /// after the turn.
 pub fn can_steer(agent: &AgentKind, cfg: &Config) -> bool {
-    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex) && !cfg.agent(agent).prefer_acp
+    matches!(agent, AgentKind::ClaudeCode | AgentKind::Codex) && !cfg.agent(agent).acp()
 }
 
 /// Whether an agent takes a reasoning effort on its command line (Cursor

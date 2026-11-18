@@ -1,6 +1,7 @@
-//! How a harness runs (Settings → Harnesses → one agent → How it runs):
-//! the ways Lary can drive it, each with the command it runs and what
-//! it can do there, and the settings of its program.
+//! How Lary connects to a harness (Settings → Harnesses → one agent →
+//! Connection): the ways Lary can drive it, each with the command it runs
+//! and what it can do there, and the settings of its program. Claude Code,
+//! Codex, Cursor and Grok have one way, their makers' own.
 
 use dioxus::prelude::*;
 use lary_core::{AgentKind, Config};
@@ -20,6 +21,8 @@ pub struct Way {
     pub detail: String,
     /// What its maker documents for an app like Lary.
     pub recommended: bool,
+    /// The only way, its maker's own (see `config::official_acp`).
+    pub official: bool,
 }
 
 const NO_ASKS: &str = "It can't ask while it runs: what would need asking is refused, and Lary says so.";
@@ -28,16 +31,16 @@ const NO_ASKS: &str = "It can't ask while it runs: what would need asking is ref
 fn native(kind: &AgentKind) -> Option<(&'static str, &'static str, &'static str, String)> {
     Some(match kind {
         AgentKind::ClaudeCode => (
-            "Claude Code CLI, streaming JSON",
-            "CLI",
+            "Claude Agent SDK protocol",
+            "SDK",
             "claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio",
-            "What Anthropic documents for apps outside JavaScript and Python, over the channel the Claude Agent SDK uses for approvals: live approvals, questions, plans and steering.".into(),
+            "How the Claude Agent SDK runs Claude Code. Live approvals, questions, plans and steering.".into(),
         ),
         AgentKind::Codex => (
             "Codex app server",
             "app server",
             "codex app-server",
-            "JSON-RPC over stdio, what OpenAI recommends for rich clients: live approvals, questions, plans and steering.".into(),
+            "OpenAI's protocol for apps, as Codex's own use it. Live approvals, questions, plans and steering.".into(),
         ),
         AgentKind::Cursor => ("Print mode", "print mode", "cursor-agent -p --output-format stream-json", NO_ASKS.into()),
         AgentKind::Gemini => ("Headless mode", "headless", "gemini -p … -o stream-json", NO_ASKS.into()),
@@ -52,14 +55,25 @@ fn native(kind: &AgentKind) -> Option<(&'static str, &'static str, &'static str,
     })
 }
 
-/// Every way Lary can run `kind`, its own protocol first.
+/// Every way Lary can run `kind`, its own protocol first; for Claude Code,
+/// Codex, Cursor and Grok only their official one.
 pub fn ways(kind: &AgentKind) -> Vec<Way> {
+    let official = lary_core::config::official_acp(kind);
+    let mut all = every_way(kind);
+    if let Some(acp) = official {
+        all.retain(|w| w.acp == acp);
+        all.iter_mut().for_each(|w| w.official = true);
+    }
+    all
+}
+
+fn every_way(kind: &AgentKind) -> Vec<Way> {
     let spec = kind.spec();
     let mut out = Vec::new();
     if let Some((label, short, command, detail)) = native(kind) {
         // Their makers point apps at these; the rest at ACP, where they can ask.
         let recommended = matches!(kind, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Amp | AgentKind::Aider);
-        out.push(Way { acp: false, label, short, command: command.to_string(), detail, recommended });
+        out.push(Way { acp: false, label, short, command: command.to_string(), detail, recommended, official: false });
     }
     if let Some(cmd) = spec.acp_command {
         let command = cmd.join(" ");
@@ -82,7 +96,7 @@ pub fn ways(kind: &AgentKind) -> Vec<Way> {
             _ => ("Agent Client Protocol", "Its own ACP mode: live approvals, questions and plans.".to_string()),
         };
         let recommended = !matches!(kind, AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Amp | AgentKind::Aider);
-        out.push(Way { acp: true, label, short: "ACP", command, detail, recommended });
+        out.push(Way { acp: true, label, short: "ACP", command, detail, recommended, official: false });
     }
     out
 }
@@ -93,7 +107,7 @@ pub fn current_label(cfg: &Config, kind: &AgentKind) -> String {
     if all.len() < 2 {
         return String::new();
     }
-    let acp = cfg.agent(kind).prefer_acp;
+    let acp = cfg.agent(kind).acp();
     all.iter().find(|w| w.acp == acp).map(|w| w.short.to_string()).unwrap_or_default()
 }
 
@@ -126,19 +140,22 @@ pub fn RunPanel(kind: AgentKind) -> Element {
     }
     rsx! {
         if !all.is_empty() {
-            div { class: "hn-line", if all.len() > 1 { "How Lary talks to {spec.name}. Pick one; new chats use it." } else { "How Lary talks to {spec.name}." } }
+            div { class: "hn-line", if all.len() > 1 { "How Lary connects to {spec.name}. Pick one; new chats use it." } else { "How Lary connects to {spec.name}." } }
             div { class: "set-card hn-ways",
                 for w in all.clone() {
                     {
-                        let on = all.len() == 1 || w.acp == ac.prefer_acp;
+                        let on = all.len() == 1 || w.acp == ac.acp();
                         let k = kind.clone();
                         let acp = w.acp;
                         rsx! {
                             button { key: "{w.label}", class: if on { "hn-way on" } else { "hn-way" }, disabled: all.len() == 1,
                                 onclick: move |_| { let k = k.clone(); app.update_config(move |c| c.agent_mut(&k).prefer_acp = acp); },
-                                span { class: "hn-radio" }
+                                // One way is no choice: no radio.
+                                if all.len() > 1 { span { class: "hn-radio" } }
                                 div { class: "lbl",
-                                    div { class: "t", "{w.label}" if w.recommended && all.len() > 1 { span { class: "hn-tag", "Recommended" } } }
+                                    div { class: "t", "{w.label}"
+                                        if w.official { span { class: "hn-tag", "Official" } } else if w.recommended && all.len() > 1 { span { class: "hn-tag", "Recommended" } }
+                                    }
                                     div { class: "d", "{w.detail}" }
                                     div { class: "cmd mono", "{w.command}" }
                                 }

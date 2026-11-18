@@ -1731,7 +1731,9 @@ impl App {
                             }
                             AgentEvent::Log { line } => tracing::debug!("[{}] {line}", rec.agent.id()),
                             AgentEvent::RateLimit { window, used_pct, resets_at } => {
-                                crate::ui::usage::observe_limit(&rec.agent, s.account_id.as_deref(), window, *used_pct, *resets_at);
+                                // A chat with no account of its own runs on the default one.
+                                let account = s.account_id.clone().or_else(|| app.config.peek().default_account(&rec.agent).map(|a| a.id.clone()));
+                                crate::ui::usage::observe_limit(&rec.agent, account.as_deref(), window, *used_pct, *resets_at);
                             }
                             AgentEvent::Done { .. } => done = true,
                             _ => {}

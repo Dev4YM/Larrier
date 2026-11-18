@@ -113,6 +113,13 @@ fn PlanPanel(agent: AgentKind, quota: Option<Quota>, usage: Option<Usage>, cost:
         }
         if windows.is_empty() || quota.as_ref().is_some_and(|q| q.note.is_some()) {
             div { class: "note", "{note}" }
+        } else if let Some(when) = quota.as_ref().and_then(|q| q.as_of).filter(|t| (chrono::Utc::now() - *t).num_minutes() > 10).map(|t| {
+            // rel_time: "5m" / "3h" / "2d", a date after a week.
+            let r = crate::state::rel_time(t);
+            if r.ends_with(['m', 'h', 'd']) && r.len() <= 4 { format!("{r} ago") } else { r }
+        }) {
+            // Reported by the agent in an earlier run, not asked for now.
+            div { class: "note", "As of {when}, from its last chat." }
         }
         for w in windows {
             {

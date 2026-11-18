@@ -55,6 +55,7 @@ async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedRecei
     cmd.env("CLAUDE_CODE_FORWARD_SUBAGENT_TEXT", "1");
     cmd.args(&req.launch.extra_args);
     let mut live = ClaudeLive::default();
+    live.inner.state_file = state_file(&req);
     let id = uuid::Uuid::new_v4().to_string();
     let first = live.user_line(&req.full_prompt(), &req.attachments, false, Some(&id));
     live.prompt = Some(id);
@@ -113,7 +114,7 @@ async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedRece
     }
     cmd.args(&req.launch.extra_args);
     let prompt = with_file_mentions(&req, req.full_prompt());
-    let mut parser = ClaudeStream::default();
+    let mut parser = ClaudeStream { state_file: state_file(&req), ..Default::default() };
     run_stream("Claude Code", cmd, Some(prompt), &sink, &mut control, &mut parser).await;
 }
 
@@ -732,6 +733,11 @@ pub struct ClaudeStream {
     /// Streamed thinking blocks already turned into text as narration, by
     /// the start of their signature.
     narrated: HashSet<String>,
+    /// Claude Code's own state file for this run (`.claude.json`): the
+    /// plan's per-model weekly window is named from its list there.
+    pub(crate) state_file: Option<std::path::PathBuf>,
+    /// That window's name ("Fable"), once read.
+    bucket: Option<String>,
 }
 
 /// A tool call whose input is still streaming in.
@@ -762,7 +768,11 @@ impl LineParser for ClaudeStream {
             "assistant" => self.assistant(&v, sink),
             "user" => self.user(&v, sink),
             "result" => self.result(&v, sink),
-            "rate_limit_event" => rate_limit(&v["rate_limit_info"], sink),
+            "rate_limit_event" => {
+                let info = &v["rate_limit_info"];
+                let bucket = info["unifiedWindows"]["seven_day_overage_included"].is_object().then(|| self.bucket_name());
+                rate_limit(info, bucket.as_deref(), sink)
+            }
             // Heartbeats, tool-use summaries, prompt suggestions, auth
             // progress and /clear resets carry nothing a transcript keeps.
             "tool_progress" | "tool_use_summary" | "prompt_suggestion" | "auth_status" | "conversation_reset" => {}
@@ -780,6 +790,15 @@ impl LineParser for ClaudeStream {
 }
 
 impl ClaudeStream {
+    /// The plan's per-model window's name, read from Claude Code's state
+    /// file the first time it's needed.
+    fn bucket_name(&mut self) -> String {
+        if self.bucket.is_none() {
+            self.bucket = Some(bucket_name_in(self.state_file.as_deref()));
+        }
+        self.bucket.clone().unwrap_or_default()
+    }
+
     fn system(&mut self, v: &Value, sink: &EventSink) {
         match s(v, "subtype").unwrap_or("") {
             "init" => {
@@ -1458,25 +1477,49 @@ pub fn complete_json(partial: &str) -> Option<Value> {
     close(&partial[..last_comma?])
 }
 
-/// `rate_limit_event`: the window's usage for the plan-limit chip, and a
-/// notice when the limit stops the turn.
-fn rate_limit(info: &Value, sink: &EventSink) {
+/// A plan window by the name the plan limits read from the account use.
+fn window_name(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "five_hour" => "5-hour",
+        "seven_day" => "Weekly",
+        "seven_day_opus" => "Weekly · Opus",
+        "seven_day_sonnet" => "Weekly · Sonnet",
+        _ => return None,
+    })
+}
+
+/// `rate_limit_event`: the plan's windows for its meters (every one Claude
+/// Code tracks, from the response headers, setup tokens' included; the
+/// per-model week by `bucket`'s name), and a notice when the limit stops
+/// the turn.
+fn rate_limit(info: &Value, bucket: Option<&str>, sink: &EventSink) {
     let window = match s(info, "rateLimitType") {
         Some("five_hour") => " (5-hour limit)",
-        Some("seven_day") | Some("seven_day_opus") | Some("seven_day_sonnet") => " (weekly limit)",
+        Some("seven_day" | "seven_day_opus" | "seven_day_sonnet" | "seven_day_overage_included") => " (weekly limit)",
         _ => "",
     };
-    // Same names as the plan limits read from the account.
-    let name = match s(info, "rateLimitType") {
-        Some("five_hour") => Some("5-hour"),
-        Some("seven_day") => Some("Weekly"),
-        Some("seven_day_opus") => Some("Weekly · Opus"),
-        Some("seven_day_sonnet") => Some("Weekly · Sonnet"),
-        _ => None,
-    };
-    let used = info["utilization"].as_f64().map(|u| u * 100.0).or_else(|| (s(info, "status") == Some("rejected")).then_some(100.0));
-    if let (Some(name), Some(used_pct)) = (name, used) {
-        sink.send(AgentEvent::RateLimit { window: name.to_string(), used_pct, resets_at: info["resetsAt"].as_i64() });
+    match info["unifiedWindows"].as_object() {
+        // Every window, on every change.
+        Some(windows) => {
+            for (kind, w) in windows {
+                let name = match (kind.as_str(), bucket) {
+                    ("seven_day_overage_included", Some(b)) => format!("Weekly · {b}"),
+                    (k, _) => match window_name(k) {
+                        Some(n) => n.to_string(),
+                        None => continue,
+                    },
+                };
+                let Some(u) = w["utilization"].as_f64() else { continue };
+                sink.send(AgentEvent::RateLimit { window: name, used_pct: u * 100.0, resets_at: w["resetsAt"].as_i64() });
+            }
+        }
+        // Older Claude Codes: the window that limits now.
+        None => {
+            let used = info["utilization"].as_f64().map(|u| u * 100.0).or_else(|| (s(info, "status") == Some("rejected")).then_some(100.0));
+            if let (Some(name), Some(used_pct)) = (s(info, "rateLimitType").and_then(window_name), used) {
+                sink.send(AgentEvent::RateLimit { window: name.to_string(), used_pct, resets_at: info["resetsAt"].as_i64() });
+            }
+        }
     }
     match s(info, "status") {
         Some("rejected") => {
@@ -1491,6 +1534,28 @@ fn rate_limit(info: &Value, sink: &EventSink) {
         Some(st) => sink.log(format!("rate limit {st}{window}: {:.0}% used", info["utilization"].as_f64().unwrap_or(0.0) * 100.0)),
         None => {}
     }
+}
+
+/// Claude Code's state file for a run (`.claude.json`): in its config
+/// folder when it has one of Lary's, else in the home folder.
+fn state_file(req: &TurnRequest) -> Option<std::path::PathBuf> {
+    let dir = req.launch.env.iter().find(|(k, _)| k == "CLAUDE_CONFIG_DIR").map(|(_, v)| std::path::PathBuf::from(v));
+    match dir.or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").map(std::path::PathBuf::from)) {
+        Some(d) => Some(d.join(".claude.json")),
+        None => dirs::home_dir().map(|h| h.join(".claude.json")),
+    }
+}
+
+/// The name Claude Code gives the plan's per-model weekly window: the first
+/// of the models its server lists for it (the list it keeps in its state
+/// file), else its own default, Fable.
+fn bucket_name_in(state: Option<&std::path::Path>) -> String {
+    state
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["cachedGrowthBookFeatures"]["tengu_usage_overage_included_models"][0].as_str().map(|s| s.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Fable".into())
 }
 
 /// "Command running in background with ID: b8b97ntfm." → `b8b97ntfm`.
@@ -1631,6 +1696,26 @@ mod tests {
         let mut q = ClaudeLive { prompt: Some("p1".into()), ..Default::default() };
         let ev = feed(&mut q, &[r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"session_id":"s1"}"#]);
         assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: false, .. })), "{ev:?}");
+    }
+
+    /// A real line (Claude Code 2.1.327, a setup token on a Fable turn):
+    /// every window of the plan, the per-model one named as Claude Code
+    /// names it, from the list in its state file.
+    #[test]
+    fn plan_windows_from_a_turn() {
+        let line = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1794999600,"rateLimitType":"seven_day","utilization":0.94,"overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"surpassedThreshold":0.75,"unifiedWindows":{"five_hour":{"utilization":0.02,"resetsAt":1795006200,"status":"allowed"},"seven_day":{"utilization":0.94,"resetsAt":1794999600,"status":"allowed_warning","surpassedThreshold":0.75},"seven_day_overage_included":{"utilization":0.84,"resetsAt":1794999600,"status":"allowed_warning","surpassedThreshold":0.75}}},"uuid":"u1","session_id":"s1"}"#;
+        let windows = |p: &mut ClaudeStream| {
+            collect(p, &[line]).into_iter().filter_map(|e| match e { AgentEvent::RateLimit { window, used_pct, resets_at } => Some((window, used_pct, resets_at)), _ => None }).collect::<Vec<_>>()
+        };
+        let state = std::env::temp_dir().join(format!("lary-claude-state-{}.json", std::process::id()));
+        std::fs::write(&state, r#"{"cachedGrowthBookFeatures":{"tengu_usage_overage_included_models":["Fable","Fable 5","Fable 5.1","Fable 5.2","Mythos 5.2"]}}"#).unwrap();
+        let w = windows(&mut ClaudeStream { state_file: Some(state.clone()), ..Default::default() });
+        let _ = std::fs::remove_file(&state);
+        let got: Vec<(&str, i64, Option<i64>)> = w.iter().map(|(n, u, r)| (n.as_str(), u.round() as i64, *r)).collect();
+        assert_eq!(got, vec![("5-hour", 2, Some(1795006200)), ("Weekly", 94, Some(1794999600)), ("Weekly · Fable", 84, Some(1794999600))]);
+        // Without its state file: Claude Code's own default name.
+        let w = windows(&mut ClaudeStream::default());
+        assert!(w.iter().any(|(n, _, _)| n == "Weekly · Fable"), "{w:?}");
     }
 
     /// Real sequence: a background command outlives the reply. Claude keeps

@@ -4,7 +4,9 @@
 //! - Codex: the newest `rate_limits` snapshot in its session logs.
 //! - Claude Code: Anthropic's OAuth usage endpoint, with the access token
 //!   the CLI keeps in `.credentials.json` (sent over stdin to `curl`, never
-//!   logged, shown or stored).
+//!   logged, shown or stored). A setup token can't ask it (it lacks the
+//!   profile scope): its windows are the ones Claude Code last reported
+//!   while a chat ran on it, kept in `cache/plan-limits.json`.
 //! - Cursor / Gemini: the signed-in account, when the CLI records it.
 //!
 //! Agent folders are only ever read.
@@ -74,41 +76,45 @@ pub fn fetch_all(cfg: &Config, agents: &[AgentKind], force: bool) -> Vec<Quota> 
             }
         }
     }
-    let mut jobs: Vec<(AgentKind, Option<String>, String, Option<PathBuf>, bool)> = Vec::new();
+    let mut jobs: Vec<(AgentKind, Option<String>, String, Source)> = Vec::new();
     for kind in agents {
         let accounts = cfg.accounts_for(kind);
         if accounts.is_empty() {
-            jobs.push((kind.clone(), None, "Current sign-in".into(), None, false));
+            jobs.push((kind.clone(), None, "Current sign-in".into(), Source::SignIn(None)));
         }
         for a in accounts {
-            let (dir, api) = match &a.auth {
-                AccountAuth::ConfigDir { path } => (Some(PathBuf::from(path)), false),
-                AccountAuth::Api(_) | AccountAuth::ApiKey { .. } | AccountAuth::Env { .. } => (None, true),
-                AccountAuth::SystemLogin => (None, false),
+            let source = match &a.auth {
+                AccountAuth::ConfigDir { path } => Source::SignIn(Some(PathBuf::from(path))),
+                AccountAuth::SystemLogin => Source::SignIn(None),
+                // A subscription's token, not a key: its plan has limits.
+                auth if auth.is_setup_token() => Source::Token,
+                AccountAuth::Api(_) | AccountAuth::ApiKey { .. } | AccountAuth::Env { .. } => Source::Api,
             };
             let label = if a.label.trim().is_empty() { a.auth.label().to_string() } else { a.label.clone() };
-            jobs.push((kind.clone(), Some(a.id.clone()), label, dir, api));
+            jobs.push((kind.clone(), Some(a.id.clone()), label, source));
         }
     }
     let out: Vec<Quota> = std::thread::scope(|s| {
         let handles: Vec<_> = jobs
             .into_iter()
-            .map(|(kind, id, label, dir, api)| {
+            .map(|(kind, id, label, source)| {
                 let acc_plan = id.as_deref().and_then(|i| cfg.account(i)).and_then(|a| a.plan.clone());
                 let acc_email = id.as_deref().and_then(|i| cfg.account(i)).and_then(|a| a.email.clone());
                 s.spawn(move || {
                     let mut q = Quota::new(kind.clone(), id, label);
-                    if api {
-                        q.plan = Some("API key".into());
-                        q.note = Some("Pay as you go — no plan limits. Spend is tracked below.".into());
-                    } else {
-                        match kind {
+                    match source {
+                        Source::Api => {
+                            q.plan = Some("API key".into());
+                            q.note = Some("Pay as you go — no plan limits. Spend is tracked below.".into());
+                        }
+                        Source::Token => token(&mut q),
+                        Source::SignIn(dir) => match kind {
                             AgentKind::Codex => codex(&mut q, dir.as_deref()),
                             AgentKind::ClaudeCode => claude(&mut q, dir.as_deref()),
                             AgentKind::Cursor => cursor(&mut q),
                             AgentKind::Gemini => gemini(&mut q, dir.as_deref()),
                             _ => q.note = Some("Plan limits are not available for this agent.".into()),
-                        }
+                        },
                     }
                     if q.plan.is_none() {
                         q.plan = acc_plan;
@@ -126,6 +132,128 @@ pub fn fetch_all(cfg: &Config, agents: &[AgentKind], force: bool) -> Vec<Quota> 
         *g = Some((Instant::now(), out.clone()));
     }
     out
+}
+
+/// Where an account's plan limits come from.
+enum Source {
+    /// The agent's own sign-in (its folder, or this computer's).
+    SignIn(Option<PathBuf>),
+    /// Claude Code's setup token: a subscription, read from its runs.
+    Token,
+    /// A key: pay as you go, no plan.
+    Api,
+}
+
+/// Windows in a steady order: 5-hour, weekly, each model's week, the rest,
+/// extra usage last.
+pub fn sort_windows(w: &mut [Window]) {
+    let rank = |n: &str| match n {
+        "5-hour" => 0,
+        "Weekly" => 1,
+        "Extra usage" => 9,
+        n if n.starts_with("Weekly · ") => 2,
+        _ => 5,
+    };
+    w.sort_by_key(|w| rank(&w.name));
+}
+
+// ------------------------------------------------------------------ seen in runs
+
+/// A window as an agent last reported it while running on an account.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct SeenWindow {
+    name: String,
+    used_pct: f64,
+    /// Unix seconds.
+    #[serde(default)]
+    resets_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct Seen {
+    /// Unix seconds of the last report.
+    at: i64,
+    windows: Vec<SeenWindow>,
+}
+
+fn seen_path() -> PathBuf {
+    crate::state::store().root().join("cache").join("plan-limits.json")
+}
+
+fn seen_key(agent: &AgentKind, account_id: Option<&str>) -> String {
+    format!("{}@{}", agent.id(), account_id.unwrap_or("default"))
+}
+
+fn seen_map() -> &'static Mutex<Option<std::collections::BTreeMap<String, Seen>>> {
+    static M: OnceLock<Mutex<Option<std::collections::BTreeMap<String, Seen>>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(None))
+}
+
+/// A window an agent reported while running on an account (Claude Code's
+/// `rate_limit_event`): kept, so the account's plan shows it
+/// where it can't be asked for (a setup token), restarts included.
+pub fn remember(agent: &AgentKind, account_id: Option<&str>, window: &str, used_pct: f64, resets_at: Option<DateTime<Utc>>) {
+    let Ok(mut g) = seen_map().lock() else { return };
+    let map = g.get_or_insert_with(|| std::fs::read_to_string(seen_path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+    let now = Utc::now().timestamp();
+    let e = map.entry(seen_key(agent, account_id)).or_insert_with(|| Seen { at: now, windows: Vec::new() });
+    e.at = now;
+    let resets_at = resets_at.map(|t| t.timestamp());
+    match e.windows.iter_mut().find(|w| w.name == window) {
+        Some(w) => {
+            w.used_pct = used_pct;
+            w.resets_at = resets_at.or(w.resets_at);
+        }
+        None => e.windows.push(SeenWindow { name: window.to_string(), used_pct, resets_at }),
+    }
+    let Ok(text) = serde_json::to_string_pretty(&*map) else { return };
+    drop(g);
+    let p = seen_path();
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(p, text);
+}
+
+/// The windows last reported for an account, and when. A window whose reset
+/// has passed since starts again at nothing used.
+fn seen(agent: &AgentKind, account_id: Option<&str>) -> Option<(DateTime<Utc>, Vec<Window>)> {
+    let mut g = seen_map().lock().ok()?;
+    let map = g.get_or_insert_with(|| std::fs::read_to_string(seen_path()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+    let s = map.get(&seen_key(agent, account_id))?;
+    Some((Utc.timestamp_opt(s.at, 0).single()?, seen_windows(s, Utc::now())))
+}
+
+fn seen_windows(s: &Seen, now: DateTime<Utc>) -> Vec<Window> {
+    let mut windows: Vec<Window> = s
+        .windows
+        .iter()
+        .map(|w| {
+            let resets = w.resets_at.and_then(|t| Utc.timestamp_opt(t, 0).single());
+            match resets {
+                Some(r) if r <= now => Window { name: w.name.clone(), used_pct: 0.0, resets_at: None, detail: None },
+                _ => Window { name: w.name.clone(), used_pct: w.used_pct, resets_at: resets, detail: None },
+            }
+        })
+        .collect();
+    sort_windows(&mut windows);
+    windows
+}
+
+/// Claude Code on a setup token (`claude setup-token`): a subscription
+/// whose limits can't be asked for with the token (the usage endpoint wants
+/// a sign-in's profile scope), so they're the ones Claude Code reported in
+/// this account's latest chat.
+fn token(q: &mut Quota) {
+    q.plan = Some("Setup token".into());
+    q.link = Some("https://claude.ai/settings/usage");
+    match seen(&q.agent, q.account_id.as_deref()) {
+        Some((at, windows)) if !windows.is_empty() => {
+            q.windows = windows;
+            q.as_of = Some(at);
+        }
+        _ => q.note = Some("Its limits show here once a chat runs on this account.".into()),
+    }
 }
 
 fn title_case(s: &str) -> String {
@@ -297,44 +425,55 @@ fn claude(q: &mut Quota, dir: Option<&Path>) {
         return;
     }
     match http_get_json("https://api.anthropic.com/api/oauth/usage", token, &[("anthropic-beta", "oauth-2025-04-20")]) {
-        Ok(v) => {
-            let names = [
-                ("five_hour", "5-hour"),
-                ("seven_day", "Weekly"),
-                ("seven_day_opus", "Weekly · Opus"),
-                ("seven_day_sonnet", "Weekly · Sonnet"),
-                ("seven_day_oauth_apps", "Weekly · Apps"),
-            ];
-            if let Some(obj) = v.as_object() {
-                for (key, w) in obj {
-                    let Some(util) = w.get("utilization").and_then(|u| u.as_f64()) else { continue };
-                    let name = names.iter().find(|(k, _)| k == key).map(|(_, n)| n.to_string()).unwrap_or_else(|| title_case(&key.replace('_', " ")));
-                    let resets = w.get("resets_at").and_then(|r| r.as_str()).and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Utc));
-                    q.windows.push(Window { name, used_pct: util, resets_at: resets, detail: None });
-                }
-                if let Some(extra) = obj.get("extra_usage").filter(|e| e["is_enabled"].as_bool() == Some(true)) {
-                    let used = extra["used_credits"].as_f64().unwrap_or(0.0);
-                    let limit = extra["monthly_limit"].as_f64().unwrap_or(0.0);
-                    let pct = extra["utilization"].as_f64().unwrap_or(if limit > 0.0 { used / limit * 100.0 } else { 0.0 });
-                    let detail = if limit > 0.0 { Some(format!("${:.2} of ${:.0}", used / 100.0, limit / 100.0)) } else { None };
-                    q.windows.push(Window { name: "Extra usage".into(), used_pct: pct, resets_at: None, detail });
-                }
-            }
-            // Keep a stable order: 5-hour, weekly, then the rest.
-            let rank = |n: &str| match n {
-                "5-hour" => 0,
-                "Weekly" => 1,
-                "Extra usage" => 9,
-                _ => 5,
-            };
-            q.windows.sort_by_key(|w| rank(&w.name));
-            q.as_of = Some(Utc::now());
-            if q.windows.is_empty() {
-                q.note = Some("No plan limits reported for this account.".into());
-            }
-        }
+        Ok(v) => claude_usage(q, &v),
         Err(HttpError::Auth) => q.note = Some("Sign in with Claude Code to see limits.".into()),
         Err(HttpError::Other(e)) => q.note = Some(format!("Couldn't load limits ({e}).")),
+    }
+}
+
+/// The usage endpoint's answer: each window by name, each model's own week
+/// from its `limits` list, and extra usage when it's on.
+fn claude_usage(q: &mut Quota, v: &serde_json::Value) {
+    let names = [
+        ("five_hour", "5-hour"),
+        ("seven_day", "Weekly"),
+        ("seven_day_opus", "Weekly · Opus"),
+        ("seven_day_sonnet", "Weekly · Sonnet"),
+        ("seven_day_oauth_apps", "Weekly · Apps"),
+    ];
+    if let Some(obj) = v.as_object() {
+        for (key, w) in obj {
+            let Some(util) = w.get("utilization").and_then(|u| u.as_f64()) else { continue };
+            let name = names.iter().find(|(k, _)| k == key).map(|(_, n)| n.to_string()).unwrap_or_else(|| title_case(&key.replace('_', " ")));
+            let resets = w.get("resets_at").and_then(|r| r.as_str()).and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Utc));
+            q.windows.push(Window { name, used_pct: util, resets_at: resets, detail: None });
+        }
+        // Each model's own week ("weekly_scoped": Fable's), named by
+        // the server.
+        for l in obj.get("limits").and_then(|l| l.as_array()).into_iter().flatten() {
+            if l["kind"].as_str() != Some("weekly_scoped") {
+                continue;
+            }
+            let (Some(model), Some(pct)) = (l["scope"]["model"]["display_name"].as_str().filter(|m| !m.trim().is_empty()), l["percent"].as_f64()) else { continue };
+            let name = format!("Weekly · {}", model.trim());
+            if q.windows.iter().any(|w| w.name == name) {
+                continue;
+            }
+            let resets = l["resets_at"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Utc));
+            q.windows.push(Window { name, used_pct: pct, resets_at: resets, detail: None });
+        }
+        if let Some(extra) = obj.get("extra_usage").filter(|e| e["is_enabled"].as_bool() == Some(true)) {
+            let used = extra["used_credits"].as_f64().unwrap_or(0.0);
+            let limit = extra["monthly_limit"].as_f64().unwrap_or(0.0);
+            let pct = extra["utilization"].as_f64().unwrap_or(if limit > 0.0 { used / limit * 100.0 } else { 0.0 });
+            let detail = if limit > 0.0 { Some(format!("${:.2} of ${:.0}", used / 100.0, limit / 100.0)) } else { None };
+            q.windows.push(Window { name: "Extra usage".into(), used_pct: pct, resets_at: None, detail });
+        }
+    }
+    sort_windows(&mut q.windows);
+    q.as_of = Some(Utc::now());
+    if q.windows.is_empty() {
+        q.note = Some("No plan limits reported for this account.".into());
     }
 }
 
@@ -420,6 +559,48 @@ mod tests {
             let w: Vec<String> = q.windows.iter().map(|w| format!("{} {:.0}% resets {:?}", w.name, w.used_pct, w.resets_at.map(|r| r.to_rfc3339()))).collect();
             eprintln!("{}: plan={:?} email={} windows={w:?} note={:?}", q.agent.display_name(), q.plan, q.email.is_some(), q.note);
         }
+    }
+
+    /// The usage endpoint's answer as it is now (trimmed; a real one):
+    /// windows by key, Fable's week from `limits`, extra usage off.
+    #[test]
+    fn reads_claude_usage() {
+        let v: serde_json::Value = serde_json::from_str(r#"{
+            "five_hour":{"utilization":2.0,"resets_at":"2026-11-18T15:50:00.974279+03:00","limit_dollars":null},
+            "seven_day":{"utilization":94.0,"resets_at":"2026-11-18T13:59:59.974298+03:00"},
+            "seven_day_opus":null,"seven_day_sonnet":null,"tangelo":null,
+            "extra_usage":{"is_enabled":false,"monthly_limit":null,"used_credits":null,"utilization":null},
+            "limits":[
+                {"kind":"session","group":"session","percent":2,"resets_at":"2026-11-18T15:50:00.974279+03:00","scope":null},
+                {"kind":"weekly_all","group":"weekly","percent":94,"resets_at":"2026-11-18T13:59:59.974298+03:00","scope":null},
+                {"kind":"weekly_scoped","group":"weekly","percent":84,"resets_at":"2026-11-18T14:00:00.974477+03:00","scope":{"model":{"id":null,"display_name":"Fable"},"surface":null}}
+            ],
+            "spend":{"percent":0},"weekly_scoped_shares":{"used_percent_of_weekly":42}
+        }"#).unwrap();
+        let mut q = Quota::new(AgentKind::ClaudeCode, None, "Default".into());
+        claude_usage(&mut q, &v);
+        let got: Vec<(&str, f64)> = q.windows.iter().map(|w| (w.name.as_str(), w.used_pct)).collect();
+        assert_eq!(got, vec![("5-hour", 2.0), ("Weekly", 94.0), ("Weekly · Fable", 84.0)]);
+        assert_eq!(q.windows[2].resets_at.map(|t| t.timestamp()), Some(1794999600));
+        assert!(q.note.is_none());
+    }
+
+    /// A setup token's windows are the ones its runs reported; one whose
+    /// reset has passed starts again at nothing used.
+    #[test]
+    fn seen_windows_roll_over() {
+        let now = Utc.timestamp_opt(1795000000, 0).unwrap();
+        let s = Seen {
+            at: 1794990000,
+            windows: vec![
+                SeenWindow { name: "Weekly · Fable".into(), used_pct: 84.0, resets_at: Some(1795003200) },
+                SeenWindow { name: "Weekly".into(), used_pct: 94.0, resets_at: Some(1794999600) },
+                SeenWindow { name: "5-hour".into(), used_pct: 2.0, resets_at: Some(1795006200) },
+            ],
+        };
+        let w = seen_windows(&s, now);
+        let got: Vec<(&str, f64, bool)> = w.iter().map(|w| (w.name.as_str(), w.used_pct, w.resets_at.is_some())).collect();
+        assert_eq!(got, vec![("5-hour", 2.0, true), ("Weekly", 0.0, false), ("Weekly · Fable", 84.0, true)]);
     }
 
     #[test]

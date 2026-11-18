@@ -647,6 +647,8 @@ pub fn use_panel_watch() {
 /// A window's usage reported by a running agent: update the cached plan
 /// limits right away, without asking the account again.
 pub fn observe_limit(agent: &AgentKind, account_id: Option<&str>, window: &str, used_pct: f64, resets_at: Option<i64>) {
+    // Kept for accounts whose limits can't be asked for (a setup token).
+    crate::quota::remember(agent, account_id, window, used_pct, resets_at.and_then(|t| DateTime::from_timestamp(t, 0)));
     let mut state = QUOTAS.write();
     let Some(state) = state.as_mut() else { return };
     let q = match state.list.iter().position(|q| &q.agent == agent && q.account_id.as_deref() == account_id) {
@@ -660,9 +662,14 @@ pub fn observe_limit(agent: &AgentKind, account_id: Option<&str>, window: &str, 
             w.used_pct = used_pct;
             w.resets_at = resets_at.or(w.resets_at);
         }
-        None => q.windows.push(Window { name: window.to_string(), used_pct, resets_at, detail: None }),
+        None => {
+            q.windows.push(Window { name: window.to_string(), used_pct, resets_at, detail: None });
+            crate::quota::sort_windows(&mut q.windows);
+        }
     }
     q.as_of = Some(Utc::now());
+    // What it said before (none seen yet, couldn't load) is behind it now.
+    q.note = None;
 }
 
 pub fn severity(pct: f64) -> &'static str {
@@ -1046,7 +1053,7 @@ fn PlanCard(q: Quota, used: Option<(u64, f64, usize)>, period: &'static str) -> 
             }
             div { class: "foot",
                 span { class: "grow", title: "{foot}", "{foot}" }
-                if let Some(a) = as_of { span { title: "Codex reports limits with each run", "{a}" } }
+                if let Some(a) = as_of { span { title: "{q.agent.display_name()} reports these as it runs", "{a}" } }
                 if let Some(l) = link {
                     button { class: "us-link", title: "Open the usage page", onclick: move |_| { let _ = open::that(l); },
                         Icon { i: I::ArrowUpRight, size: 12 }

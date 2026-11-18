@@ -51,7 +51,9 @@ from your own setup:
   maker's release source into Lary's folder (Claude Code from
   downloads.claude.ai and Codex from OpenAI's GitHub releases, both checked
   against their published SHA-256; Cursor from downloads.cursor.com; Grok
-  from x.ai/cli). It downloads the first time a chat needs it, or from
+  from x.ai/cli). On Windows Codex comes as its whole package, with the
+  helpers it runs commands through (a copy without them is fetched again).
+  It downloads the first time a chat needs it, or from
   **Settings → Harnesses → ‹agent› → Version**, where you can switch to the
   copy installed on your computer instead. Lary never installs, updates or
   configures your own copy.
@@ -104,7 +106,11 @@ press it. A chat on an account whose key is missing says so instead of
 starting.
 
 **Plan & Usage** shows each account's plan limits and reset times where the
-agent records them (Claude Code, Codex, Cursor, Gemini CLI).
+agent records them (Claude Code, Codex, Cursor, Gemini CLI): Claude Code's
+5-hour window, its week and each model's own week (Fable's). A Claude Code
+account on a **setup token** is a subscription too, but its token can't ask
+for the limits, so Lary shows the ones Claude Code reported in that
+account's latest chat, with how long ago.
 
 ## Models
 
@@ -114,8 +120,10 @@ providers, …), so the picker shows exactly what the agent offers. It reads
 them per account, the way that account's chats run (its folder, token or
 key): what an agent offers and what its **Default** runs depend on the
 account (a subscription's plan picks Claude Code's default), so the
-Default row says what that account really gets. The picker reads a
-harness's list again when it opens and the list is a few minutes old.
+Default row says what that account really gets. Every place that shows a
+harness's models (the picker, the `/` menu's Model page, an automation, its
+Settings page) reads the list again when it's a few minutes old or was
+read by another Lary version, and Lary reads them all when it starts.
 
 Claude Code's menu names its models by family (Opus, Sonnet, …), each
 always running the newest of it. Lary's picker shows the real models

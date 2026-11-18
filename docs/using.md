@@ -70,11 +70,15 @@ onto the chat area:
   you changed stays open.
 - Reading, searching and thinking steps fold into "Explored …"; commands,
   edits (with inline diffs), plans and to-dos get their own cards.
-- A turn's steps show as they come; when it ends they slide shut under
-  "Worked for 16s", with the answer (and any error) below and 👍 👎, copy,
-  fork and the time. Click it to open the steps again. Opening or folding
-  one is remembered, and so are the cards you opened (commands, steps,
-  explored files).
+- A turn's steps show as they come; when the agent finishes, with its
+  answer after its last step, they slide shut under "Worked for 16s", with
+  the answer (and any error) below and 👍 👎, copy, fork and the time.
+  Click it to open the steps again. A turn you stopped (or that failed)
+  stays open under "Worked for …", its steps and words in the order they
+  came; one whose reply is done while work it started still runs shows
+  "Working". "Worked for" counts to when the turn ended. Opening or
+  folding one is remembered, and so are the cards you opened (commands,
+  steps, explored files).
 - A prompt timeline runs down the left edge: hover it to preview a prompt,
   click to jump there. It shows when there's room beside the text, and
   steps away when the text comes close.
@@ -150,6 +154,12 @@ onto the chat area:
 "On ‹project›" lists **Changes · Browser · Terminal · Files**. Each chat
 keeps its own panel. A chat that has none yet starts with it closed, on
 the tabs you had; nothing opens it but you, or an agent using the browser.
+Beside the chat it's never narrower than its tools need (wider on a wide
+window: the chat gives way first), and its tabs scroll sideways when they
+don't fit, with the mouse wheel too. The button at its top right merges it
+with the chat: one row of tabs, the chat's first and then the panel's,
+one shown at a time across the whole width (the button at the row's end
+splits them again; it's remembered).
 
 - **Changes:** Local Changes (git) or Agent Edits, picked from the menu at
   its top (each with its file count), file by file, with discard, commit,
@@ -172,14 +182,17 @@ the tabs you had; nothing opens it but you, or an agent using the browser.
   yourself; the agent is told, and it's the agent's alone again once you
   leave it (another tab, panel or chat), or with Lock again. Your own tabs
   the agent can read; to act in one it reserves it first, and a tab's
-  menu can Give to Agent or Take Back from Agent. Annotate mode lets you point at
+  menu can Give to Agent or Take Back from Agent. A browser tool call that
+  gets no answer from the page (frozen or busy) fails within two minutes
+  and says so, rather than holding the agent up. Annotate mode lets you point at
   elements and send them to the agent. Drag a page into a chat as context.
   A page that can't be reached gets Lary's own message with Try again,
   pop-ups and new windows open as tabs. Developer tools (F12 or
   Ctrl+Shift+I in the page, or Inspect in its right-click menu) opens
-  Chromium's DevTools docked on the page's right, below it, or in a window
-  of its own (the arrow beside the button picks; drag the line between
-  page and DevTools to size it; both are remembered). A tab's right-click
+  Chromium's DevTools. Where they dock is picked in DevTools' own menu, as
+  in Chrome (⋮ → Dock side: right, left, bottom, or a window of its own);
+  drag the line between page and DevTools to size it; both are
+  remembered. A tab's right-click
   menu offers New Tab to the Right, Reload, Duplicate, Copy Address, Open
   in Your Browser, Add to Chat, Developer Tools and the Close actions; the
   middle button closes a tab. A new tab puts the cursor in the address

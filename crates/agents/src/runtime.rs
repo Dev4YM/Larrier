@@ -35,11 +35,22 @@ fn current(agent: &AgentKind) -> Option<Current> {
     serde_json::from_str(&std::fs::read_to_string(dir(agent).join("current.json")).ok()?).ok()
 }
 
-/// The program of Lary's copy, when it has been downloaded.
+/// The program of Lary's copy, when it has been downloaded (whole).
 pub fn program(agent: &AgentKind) -> Option<PathBuf> {
     let c = current(agent)?;
     let p = dir(agent).join(c.program);
-    p.exists().then_some(p)
+    (p.exists() && whole(agent, &p)).then_some(p)
+}
+
+/// Codex on Windows runs every tool through helpers its package keeps beside
+/// its program (`codex-resources/codex-command-runner.exe`): a copy without
+/// them (Lary fetched the program alone before) can't run a command, so it
+/// counts as not downloaded and is fetched again.
+fn whole(agent: &AgentKind, program: &Path) -> bool {
+    if !(cfg!(windows) && *agent == AgentKind::Codex) {
+        return true;
+    }
+    program.parent().and_then(Path::parent).is_some_and(|root| root.join("codex-resources").join("codex-command-runner.exe").is_file())
 }
 
 /// The version of Lary's copy.
@@ -112,7 +123,9 @@ async fn latest(agent: &AgentKind) -> Result<Release> {
             let version = tag.trim_start_matches("rust-v").trim_start_matches('v').to_string();
             let arch = if arm() { "aarch64" } else { "x86_64" };
             let name = match std::env::consts::OS {
-                "windows" => format!("codex-{arch}-pc-windows-msvc.exe"),
+                // The whole package: the program with the helpers it runs
+                // tools through (command runner, sandbox setup) and rg.
+                "windows" => format!("codex-package-{arch}-pc-windows-msvc.tar.gz"),
                 "macos" => format!("codex-{arch}-apple-darwin.tar.gz"),
                 "linux" => format!("codex-{arch}-unknown-linux-musl.tar.gz"),
                 _ => bail!("Codex has no build for this system"),
@@ -208,10 +221,24 @@ fn place(agent: &AgentKind, root: &Path, rel: &Release, bytes: &[u8]) -> Result<
             write_program(&program, bytes)?;
             Ok(program)
         }
-        // Codex for macOS / Linux: one program in a tar.gz.
+        // Codex: its package (Windows), laid out as it ships, its program
+        // where its manifest says; else one program in a tar.gz.
         AgentKind::Codex => {
             let folder = root.join(&rel.version);
+            let _ = std::fs::remove_dir_all(&folder);
             unpack(bytes, "tar.gz", &folder)?;
+            if let Some(entry) = std::fs::read_to_string(folder.join("codex-package.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .and_then(|v| v["entrypoint"].as_str().map(str::to_string))
+            {
+                let program = folder.join(entry);
+                if !program.is_file() {
+                    bail!("the Codex package had no program");
+                }
+                make_executable(&program)?;
+                return Ok(program);
+            }
             let found = std::fs::read_dir(&folder)?.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("codex-"))).ok_or_else(|| anyhow!("the Codex download had no program"))?;
             let program = folder.join("codex");
             std::fs::rename(&found, &program)?;
@@ -310,6 +337,23 @@ fn tidy(root: &Path, keep: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Codex copy on Windows needs the command runner its package keeps
+    /// beside its program; other agents and systems need nothing more.
+    #[test]
+    fn codex_is_whole_with_its_helpers() {
+        let root = std::env::temp_dir().join(format!("lary-codex-whole-{}", std::process::id()));
+        let bin = root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let program = bin.join("codex.exe");
+        std::fs::write(&program, b"").unwrap();
+        assert_eq!(whole(&AgentKind::Codex, &program), !cfg!(windows), "the program alone");
+        assert!(whole(&AgentKind::ClaudeCode, &program));
+        std::fs::create_dir_all(root.join("codex-resources")).unwrap();
+        std::fs::write(root.join("codex-resources").join("codex-command-runner.exe"), b"").unwrap();
+        assert!(whole(&AgentKind::Codex, &program), "with its runner");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn only_the_official_harnesses() {

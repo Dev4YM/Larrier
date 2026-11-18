@@ -32,7 +32,14 @@ pub struct Cdp {
 impl Cdp {
     /// Connect to the browser's websocket (`ws://127.0.0.1:<port>/devtools/browser/<id>`).
     pub fn connect(url: &str) -> Result<Cdp, String> {
-        let (mut ws, _) = tungstenite::connect(url).map_err(|e| format!("couldn't reach the browser: {e}"))?;
+        // A browser that takes the connection but never answers (its engine
+        // busy or stuck) fails in seconds rather than holding the tool up.
+        let host = url.strip_prefix("ws://").and_then(|r| r.split('/').next()).ok_or("the browser's address is unreadable")?;
+        let addr: std::net::SocketAddr = host.parse().map_err(|_| "the browser's address is unreadable".to_string())?;
+        let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(3)).map_err(|e| format!("couldn't reach the browser: {e}"))?;
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+        let (mut ws, _) = tungstenite::client(url, MaybeTlsStream::Plain(stream)).map_err(|e| format!("couldn't reach the browser: {e}"))?;
         if let MaybeTlsStream::Plain(s) = ws.get_mut() {
             let _ = s.set_read_timeout(Some(Duration::from_millis(15)));
             let _ = s.set_nodelay(true);

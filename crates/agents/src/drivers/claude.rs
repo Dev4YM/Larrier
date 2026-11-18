@@ -1130,6 +1130,12 @@ impl ClaudeStream {
                 sink.send(AgentEvent::ToolUpdate { id: target, status: Some(state), output: Some(output.clone()), diffs: Vec::new(), is_error: false, title: None });
             }
         }
+        // A call stopped while it ran: Claude Code words it as a refusal,
+        // then corrects that. Neither the user nor a permission refused it.
+        if is_error && output.contains("stopped while running, not refused") {
+            sink.send(AgentEvent::ToolUpdate { id, status: Some(ToolStatus::Cancelled), output: Some("Stopped while it was running.".into()), diffs, is_error: false, title: None });
+            return;
+        }
         sink.send(AgentEvent::ToolUpdate {
             id,
             status: Some(if is_error { ToolStatus::Failed } else { ToolStatus::Completed }),

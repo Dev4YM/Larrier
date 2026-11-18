@@ -84,7 +84,7 @@ pub fn serve() -> i32 {
             "tools/call" => {
                 let name = params["name"].as_str().unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
-                json!({"result": call(&mut browser, name, &args)})
+                json!({"result": call_within(&mut browser, name, &args)})
             }
             "ping" => json!({"result": {}}),
             m => json!({"error": {"code": -32601, "message": format!("unknown method {m}")}}),
@@ -117,6 +117,40 @@ fn connect() -> Result<Cdp, String> {
         }
     }
     Cdp::connect(&view_running().ok_or("Lary's browser didn't start.")?)
+}
+
+/// The longest a tool call runs before the agent hears it failed: a browser
+/// that stopped answering never holds an agent up for long.
+/// `LARY_BROWSER_CALL_LIMIT` (seconds) sets another, for tests.
+fn call_limit() -> Duration {
+    let secs = std::env::var("LARY_BROWSER_CALL_LIMIT").ok().and_then(|v| v.parse::<u64>().ok()).filter(|s| *s >= 5).unwrap_or(120);
+    Duration::from_secs(secs)
+}
+
+/// [`call`] on a thread of its own, given up after [`call_limit`]: the call
+/// is left to end on its own and the next one connects afresh.
+fn call_within(browser: &mut Option<Browser>, name: &str, args: &Value) -> Value {
+    let limit = call_limit();
+    let mut b = browser.take();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (n, a) = (name.to_string(), args.clone());
+    let started = std::thread::Builder::new().name("browser-tool".into()).spawn(move || {
+        let v = call(&mut b, &n, &a);
+        let _ = tx.send((v, b));
+    });
+    if started.is_err() {
+        return failed("Lary couldn't run the browser tool.");
+    }
+    match rx.recv_timeout(limit) {
+        Ok((v, b)) => {
+            *browser = b;
+            v
+        }
+        Err(_) => failed(format!(
+            "Lary's browser didn't answer within {} seconds, so this call was given up. Its page may be busy or stuck: try again (it connects afresh), and if it keeps happening, ask the user to look at Lary's Browser tab.",
+            limit.as_secs()
+        )),
+    }
 }
 
 /// Run a tool, reconnecting once if the browser went away.

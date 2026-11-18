@@ -120,12 +120,19 @@ pub fn view_running() -> Option<String> {
 /// The page target showing Lary tab `tab` (each view tells its pages
 /// their tab as `window.__laryTab`).
 pub fn view_target(cdp: &Cdp, tab: u64) -> Option<String> {
+    // Each page answers at once or not at all (frozen, hung): a few seconds
+    // each, and ten for them all, never minutes.
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    let step = Duration::from_secs(3);
     for t in pages(cdp).ok()? {
+        if std::time::Instant::now() > until {
+            return None;
+        }
         let Some(id) = t["targetId"].as_str() else { continue };
-        let Ok(r) = cdp.call("Target.attachToTarget", json!({"targetId": id, "flatten": true}), None) else { continue };
+        let Ok(r) = cdp.call_for("Target.attachToTarget", json!({"targetId": id, "flatten": true}), None, step) else { continue };
         let Some(session) = r["sessionId"].as_str() else { continue };
-        let v = cdp.call("Runtime.evaluate", json!({"expression": "window.__laryTab", "returnByValue": true}), Some(session));
-        let _ = cdp.call("Target.detachFromTarget", json!({"sessionId": session}), None);
+        let v = cdp.call_for("Runtime.evaluate", json!({"expression": "window.__laryTab", "returnByValue": true}), Some(session), step);
+        cdp.send("Target.detachFromTarget", json!({"sessionId": session}), None);
         if v.ok().and_then(|v| v["result"]["value"].as_u64()) == Some(tab) {
             return Some(id.to_string());
         }

@@ -1810,6 +1810,17 @@ impl App {
                 if !rec.finished {
                     rec.finish(s, false);
                 }
+                // Stopped (or failed) before the agent finished: the turn
+                // stays open in the transcript, its steps in order, rather
+                // than folded under "Worked for" as a finished one is.
+                if let Some(m) = s.messages.iter().rev().take_while(|m| m.role != Role::User).find(|m| m.role == Role::Assistant) {
+                    let mid = m.id.clone();
+                    if !rec.ok {
+                        s.extra.insert(format!("stopped:{mid}"), serde_json::Value::Bool(true));
+                    }
+                    // "Worked for" counts to here, not to the next prompt.
+                    s.extra.entry(format!("ended:{mid}")).or_insert_with(|| serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+                }
                 if is_current {
                     s.unread = false;
                 }

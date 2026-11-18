@@ -460,6 +460,7 @@ pub fn Transcript(id: String) -> Element {
                         ended: r.ended,
                         live: writing && i + 1 == n_rows,
                         waiting: waiting && i + 1 == n_rows,
+                        resting: running && !writing && i + 1 == n_rows,
                         show_reasoning,
                         fold_steps,
                     }
@@ -559,6 +560,9 @@ fn TurnView(
     /// The prompt is sent and the agent hasn't answered yet.
     #[props(default)]
     waiting: bool,
+    /// The agent finished its reply but work it started still runs.
+    #[props(default)]
+    resting: bool,
     show_reasoning: bool,
     /// Finished turns start folded (Settings → Agents).
     #[props(default = true)]
@@ -571,7 +575,7 @@ fn TurnView(
     let mut chosen = use_signal(|| None::<bool>);
     let mut steps = use_signal(|| STEP_WINDOW);
     let _ = fp;
-    let Some((turn, feedback)) = app.peek_session(&session_id, |s| {
+    let Some((turn, feedback, stopped)) = app.peek_session(&session_id, |s| {
         let end = end.min(s.messages.len());
         let start = start.min(end);
         let t = build_turn(&s.messages[start..end]);
@@ -582,11 +586,14 @@ fn TurnView(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        (t, fb)
+        // Stopped by the user, or failed, before the agent finished.
+        let stopped = t.replies.last().is_some_and(|m| s.extra.contains_key(&format!("stopped:{}", m.id)));
+        (t, fb, stopped)
     }) else {
         return rsx! {};
     };
-    // Final answer = the last text part of the last reply that has one.
+    // The answer: the last text, when nothing the agent did came after it
+    // (words before a step are narration, not the answer).
     let mut final_at: Option<(usize, usize)> = None;
     for (mi, m) in turn.replies.iter().enumerate().rev() {
         if let Some(pi) = m.parts.iter().rposition(|p| matches!(p, Part::Text { text } if !text.trim().is_empty())) {
@@ -594,16 +601,23 @@ fn TurnView(
             break;
         }
     }
+    let work_after = |(fmi, fpi): (usize, usize)| turn.replies.iter().enumerate().any(|(mi, m)| m.parts.iter().enumerate().any(|(pi, p)| (mi, pi) > (fmi, fpi) && matches!(p, Part::Tool(_) | Part::Plan { .. })));
+    // Folded, with its answer drawn out below, only once the agent truly
+    // finished: not stopped, not resting on work still running, its last
+    // words after its last step. Otherwise its steps stay open, in order.
+    let finished = !live && !resting && !stopped && final_at.is_some_and(|f| !work_after(f));
+    let final_at = final_at.filter(|_| finished);
     let has_work = turn.replies.iter().enumerate().any(|(mi, m)| m.parts.iter().enumerate().any(|(pi, p)| Some((mi, pi)) != final_at && !matches!(p, Part::Error { .. })));
     let secs = (ended - started).num_seconds();
     let label = match worked_for(secs) {
+        _ if resting => "Working".to_string(),
         s if s.is_empty() || secs > 6 * 3600 => "Worked".to_string(),
         s => format!("Worked for {s}"),
     };
     let last_reply = turn.replies.last().cloned();
     let hidden = turn.replies.len().saturating_sub(steps());
     let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
-    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or(!fold_steps);
+    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or(!(finished && fold_steps));
     let final_mi = final_at.map(|(mi, _)| mi);
     // "Planning next moves": from sending until the agent answers, and
     // between its steps. One row in one place inside the turn, so it never
@@ -652,7 +666,7 @@ fn TurnView(
                         set_turn_open(&sid, &key, !open);
                     }
                 },
-                span { class: "verb", "{label}" }
+                span { class: if resting { "verb shimmer" } else { "verb" }, "{label}" }
                 span { class: "chev", if open { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
             }
         }
@@ -665,13 +679,13 @@ fn TurnView(
             }
             for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
                 AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == turn.replies.len(), show_reasoning, planning: false,
-                    skip_final: !live && Some(mi) == final_mi, drop_errors: !live }
+                    skip_final: finished && Some(mi) == final_mi, drop_errors: finished }
             }
         }
         if planning {
             div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
         }
-        if !live {
+        if finished {
             // The answer and any errors, in the order they happened (a limit
             // hit after the answer shows after it).
             for (k, mi, pi) in folded {

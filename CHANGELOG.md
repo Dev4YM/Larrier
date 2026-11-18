@@ -5,6 +5,16 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.53 — 2026-11-18
+
+### Look and feel
+
+- Nothing peeks out around the pinned prompt card as the chat scrolls under it
+
+### Fixed
+
+- A Claude Code chat continues where its session was last written, so "No conversation found" no longer stops it after an import, an account switch or a new default account; one that's nowhere goes along as context
+- The chat follows the thinking as it's written, and stops following the moment you scroll up (until you're back at the bottom or send)
 ## 0.1.52 — 2026-11-18
 
 ### Look and feel

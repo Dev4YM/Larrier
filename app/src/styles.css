@@ -706,6 +706,10 @@ select.input { cursor: pointer; padding-right: 4px; }
 .user-card { background: var(--card-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 14px; font-size: 14px; line-height: 22px; max-height: 132px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.04);
   -webkit-mask-image: linear-gradient(#000 72%, transparent); mask-image: linear-gradient(#000 72%, transparent); }
 .user-card.expanded, .user-card.short { -webkit-mask-image: none; mask-image: none; }
+/* What scrolls under the pinned card stays hidden at its rounded corners,
+   its fading bottom and just beside it (a list's numbers hang a little left
+   of the column): behind the card, the chat's own colour, so no band shows. */
+.user-msg::before { content: ""; position: absolute; inset: 0 -12px; background: var(--pane); z-index: -1; pointer-events: none; }
 .user-card .q { color: var(--blue); }
 .user-card .q svg { display: inline-block; vertical-align: -2px; margin-right: 4px; }
 .a-text { font-size: 14px; line-height: 24px; padding: 4px 0 8px; }

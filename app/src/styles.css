@@ -1926,6 +1926,10 @@ html.dragging-project, html.dragging-project * { cursor: grabbing !important; us
 .ctx-legend.has-hot .row.hot { opacity: 1; background: var(--hover); }
 
 /* Add account: an existing folder, picked or found at home. */
+/* A command to run, in a field like the inputs, with run and copy at its end. */
+.cmd-field { height: var(--h-ctl); display: flex; align-items: center; gap: 0; min-width: 0; padding: 0 1px 0 var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--input); }
+.cmd-field .mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ui-sm); color: var(--fg); user-select: text; }
+.cmd-field .icon-btn { width: 24px; height: 24px; }
 .folder-pick { display: flex; gap: 8px; align-items: center; min-width: 0; }
 .folder-pick .input { flex: 1; min-width: 0; }
 .found-folders { display: flex; flex-wrap: wrap; gap: 6px; }

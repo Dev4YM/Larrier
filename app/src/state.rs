@@ -2288,16 +2288,35 @@ impl App {
             }
             // The agent's own sign-in, by its full path, in the account's folder.
             let cmd = match program {
-                Some(p) => {
-                    let rest = login.split_once(' ').map(|(_, r)| r).unwrap_or("");
-                    format!("\"{}\" {rest}", p.display())
-                }
+                Some(p) => program_line(&p, login.split_once(' ').map(|(_, r)| r).unwrap_or("")),
                 None => login.to_string(),
             };
             let cmd = as_account(&agent, Some(&account), &cmd);
             let cwd = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
             match open_terminal(&cwd, &cmd) {
                 Ok(()) => app.toast(format!("Sign in to “{}” in the terminal. In the browser, use the account you want for it, switching there if it shows another.", account.label)),
+                Err(e) => app.toast_err(format!("Could not open a terminal: {e}")),
+            }
+        });
+    }
+
+    /// Run `claude setup-token` in a terminal with the Claude Code Lary
+    /// runs (its own copy, fetched first when it's needed), for the token
+    /// a Setup token account takes.
+    pub fn setup_token(self) {
+        let app = self;
+        spawn_forever(async move {
+            let agent = AgentKind::ClaudeCode;
+            if lary_agents::request::uses_lary_copy(&app.config.peek(), &agent) && lary_agents::runtime::program(&agent).is_none() && crate::agent_versions::fetch_lary_copy(app, agent.clone()).await.is_err() {
+                return;
+            }
+            let cmd = match lary_agents::request::program_for(&app.config.peek(), &agent) {
+                Some(p) => program_line(&p, "setup-token"),
+                None => "claude setup-token".to_string(),
+            };
+            let cwd = dirs::home_dir().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|| ".".into());
+            match open_terminal(&cwd, &cmd) {
+                Ok(()) => app.toast("Sign in in the terminal, then paste the token it prints"),
                 Err(e) => app.toast_err(format!("Could not open a terminal: {e}")),
             }
         });
@@ -2929,6 +2948,16 @@ pub fn account_home(cfg: &Config, agent: &AgentKind, account_id: Option<&str>) -
     match &acc.auth {
         AccountAuth::ConfigDir { path } => Some(PathBuf::from(path)),
         _ => None,
+    }
+}
+
+/// A program by its full path, then its arguments, as `open_terminal`'s
+/// shell takes them.
+fn program_line(program: &std::path::Path, args: &str) -> String {
+    if cfg!(windows) {
+        format!("\"{}\" {args}", program.display())
+    } else {
+        format!("'{}' {args}", program.display())
     }
 }
 

@@ -689,8 +689,14 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                     }
                 }
                 if auth() == AuthKind::Token {
+                    span { class: "k", "Terminal" }
+                    div { class: "cmd-field",
+                        span { class: "mono", "claude setup-token" }
+                        button { class: "icon-btn", title: "Run it in a terminal", onclick: move |_| app.setup_token(), Icon { i: I::Terminal, size: 14, stroke: 1.5 } }
+                        super::CopyButton { text: "claude setup-token".to_string() }
+                    }
                     span { class: "k", "Setup token" }
-                    input { class: "input full", r#type: "password", placeholder: "Paste the token `claude setup-token` printed", value: "{key}", spellcheck: "false", oninput: move |e| key.set(e.value()) }
+                    input { class: "input full", r#type: "password", placeholder: "sk-ant-oat01-…", value: "{key}", spellcheck: "false", oninput: move |e| key.set(e.value()) }
                 }
                 if !chat && !official {
                     span { class: "k", "Runs as" }
@@ -790,18 +796,18 @@ fn AddAccountModal(kind: AgentKind) -> Element {
                 }
             }
             match auth() {
-                AuthKind::Token => rsx! { div { "In a terminal, run " code { "claude setup-token" } " and sign in with your Claude account, then paste the token it prints. It stays in your OS keychain, and Claude Code runs with it in a folder of Lary's for this account, apart from your own setup." } },
+                AuthKind::Token => rsx! { div { "Sign in when it asks, then paste the token it prints." } },
                 AuthKind::Dir if official => rsx! { div {
                     {match &kind {
-                        AgentKind::Codex => "Signs in with ChatGPT the way Codex's own apps do: OpenAI's page opens in your browser once the account is added. The sign-in stays in a folder of Lary's for this account.",
-                        AgentKind::ClaudeCode => "Claude Code's own sign-in with your Claude subscription, in a terminal once the account is added. It stays in a folder of Lary's for this account, apart from your own Claude Code.",
-                        AgentKind::Cursor => "Cursor's own sign-in, in a terminal once the account is added. It stays in a folder of Lary's for this account, apart from your own Cursor.",
-                        _ => "xAI's own sign-in (grok login), in a terminal once the account is added. It stays in a folder of Lary's for this account, apart from your own Grok.",
+                        AgentKind::Codex => "OpenAI's sign-in opens in your browser once the account is added.",
+                        AgentKind::ClaudeCode => "Claude Code's sign-in opens in a terminal once the account is added.",
+                        AgentKind::Cursor => "Cursor's sign-in opens in a terminal once the account is added.",
+                        _ => "xAI's sign-in opens in a terminal once the account is added.",
                     }}
                 } },
-                AuthKind::Key if official => rsx! { div { "The key stays in your OS keychain. {spec.name} gets it only when this account runs, in a folder of Lary's of its own." } },
-                AuthKind::Api if official => rsx! { div { "{spec.name} runs on this API with this key, in a folder of Lary's for this account. The key stays in your OS keychain." } },
-                AuthKind::System if official => rsx! { div { "Your own {spec.name} sign-in on this computer, with your own settings, hooks and plugins: Lary runs it as you do." } },
+                AuthKind::Key if official => rsx! { div { "The key stays in your OS keychain." } },
+                AuthKind::Api if official => rsx! { div { "{spec.name} runs on this API. The key stays in your OS keychain." } },
+                AuthKind::System if official => rsx! { div { "Your own {spec.name} on this computer, with its sign-in and settings." } },
                 AuthKind::Dir => rsx! { div { "Lary creates an isolated config folder for this account and opens {spec.name}'s login in a terminal. Each account keeps its own credentials and history." } },
                 AuthKind::Existing => rsx! {
                     div {

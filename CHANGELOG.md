@@ -5,6 +5,16 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.47 — 2026-11-18
+
+### New
+
+- Larrier is now Lary, and an installed Larrier moves over on its own
+- Claude Code, Codex, Cursor and Grok run the official way, on Lary's own copies, apart from your own setup
+
+### Fixed
+
+- Larrier's chats and settings wait for Larrier to close before moving to Lary, so none are left behind
 ## 0.1.46 — 2026-11-16
 
 ### New

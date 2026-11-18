@@ -219,11 +219,18 @@ fn announce(port: u16, profile: PathBuf) {
 // ------------------------------------------------------------- fetching it
 
 /// The engine's runtime for this version, published as a release of its
-/// own (it changes far less often than Lary).
-fn source() -> (String, String) {
+/// own (it changes far less often than Lary): the archive and its
+/// checksum, under each name it may be published as. Engines published
+/// before the rename are named `Larrier-engine-…`; later ones `Lary-engine-…`.
+fn sources() -> Vec<(String, String)> {
     let v = version();
-    let base = format!("https://github.com/{}/releases/download/engine-{v}/Lary-engine-{v}-windows-x64.zip", crate::update::repo());
-    (base.clone(), format!("{base}.sha256"))
+    ["Lary", "Larrier"]
+        .into_iter()
+        .map(|name| {
+            let base = format!("https://github.com/{}/releases/download/engine-{v}/{name}-engine-{v}-windows-x64.zip", crate::update::repo());
+            (base.clone(), format!("{base}.sha256"))
+        })
+        .collect()
 }
 
 static FETCHING: AtomicBool = AtomicBool::new(false);
@@ -246,9 +253,20 @@ pub fn ensure() {
 
 async fn fetch(progress: impl Fn(u64, u64)) -> Result<(), String> {
     use sha2::Digest;
-    let (url, sha_url) = source();
     let client = reqwest::Client::builder().user_agent(concat!("Lary/", env!("CARGO_PKG_VERSION"))).build().map_err(|e| e.to_string())?;
-    let want = client.get(&sha_url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?;
+    // The first name the release has a checksum under.
+    let mut found = None;
+    let mut last_err = String::new();
+    for (url, sha_url) in sources() {
+        match client.get(&sha_url).send().await.and_then(|r| r.error_for_status()) {
+            Ok(r) => {
+                found = Some((url, r.text().await.map_err(|e| e.to_string())?));
+                break;
+            }
+            Err(e) => last_err = e.to_string(),
+        }
+    }
+    let (url, want) = found.ok_or(last_err)?;
     let want = want.split_whitespace().next().unwrap_or("").to_lowercase();
     let mut resp = client.get(&url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?;
     let total = resp.content_length().unwrap_or(0);
@@ -430,7 +448,14 @@ wrap_task! {
 }
 
 /// Run `f` on the engine's UI thread (where browsers are made and driven).
+/// Nothing is posted before the engine has started: a task it gets then
+/// ends the whole program (CEF aborts on a task it can't read). What was
+/// asked of a page before applies when the page is made (its input state
+/// is kept in `LOCKED`, its commands wait in `QUEUED`).
 fn on_ui(f: impl FnOnce() + Send + 'static) {
+    if STARTED.get() != Some(&true) {
+        return;
+    }
     let mut t = RunJob::new(Arc::new(Mutex::new(Some(Box::new(f) as Job))));
     post_task(ThreadId::UI, Some(&mut t));
 }

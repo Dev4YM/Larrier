@@ -14,6 +14,7 @@ pub mod request;
 pub mod runtime;
 pub mod codex_login;
 pub mod updates;
+pub mod user_items;
 
 pub use detect::{detect_all, Detected};
 pub use engine::TurnRecorder;

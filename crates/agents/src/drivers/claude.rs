@@ -28,6 +28,8 @@ pub async fn run(req: TurnRequest, sink: EventSink, control: UnboundedReceiver<T
 /// messages can be added to the running turn, and a stop is a clean
 /// interrupt.
 async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
+    // The user's agents, skills and commands, in a folder of Lary's too.
+    crate::user_items::bring_for(&req.launch.env);
     let mut cmd = req.launch.command();
     cmd.current_dir(&req.cwd);
     cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]);
@@ -79,6 +81,9 @@ async fn run_live(req: TurnRequest, sink: EventSink, mut control: UnboundedRecei
 }
 
 async fn run_print(req: TurnRequest, sink: EventSink, mut control: UnboundedReceiver<TurnCommand>) {
+    if req.agent == AgentKind::ClaudeCode {
+        crate::user_items::bring_for(&req.launch.env);
+    }
     let mut cmd = req.launch.command();
     cmd.current_dir(&req.cwd);
     cmd.args(["-p", "--output-format", "stream-json", "--verbose"]);
@@ -161,6 +166,7 @@ pub async fn context_usage(req: TurnRequest) -> Result<Value, String> {
     let Some(target) = req.resume_path.as_ref().or(req.resume_id.as_ref()) else {
         return Err("This chat hasn't run in Claude Code yet.".into());
     };
+    crate::user_items::bring_for(&req.launch.env);
     let mut cmd = req.launch.command();
     cmd.current_dir(&req.cwd);
     cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--input-format", "stream-json", "--resume", target]);

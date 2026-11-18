@@ -529,6 +529,8 @@ fn clean(s: &str) -> String {
 /// environment, so its Default is the one that account's chats get.
 async fn claude_listing(launch: &crate::request::Launch) -> Result<(Vec<AgentModel>, Menu), String> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    // Its agents and commands as a chat on this account has them.
+    crate::user_items::bring_for(&launch.env);
     let mut cmd = launch.command();
     cmd.args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
     cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());

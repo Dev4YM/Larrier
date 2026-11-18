@@ -21,6 +21,14 @@ use lary_formats::ExportFormat;
 
 static STORE: OnceLock<Store> = OnceLock::new();
 
+/// Bumped when what an account's row reads outside the config changes (a
+/// token or key in the keychain, a finished sign-in): the rows read again.
+pub static ACCOUNTS_SEEN: GlobalSignal<u32> = Signal::global(|| 0);
+
+pub fn recheck_accounts() {
+    *ACCOUNTS_SEEN.write() += 1;
+}
+
 /// The sessions the sidebar and the rest show: Lary's own, and in
 /// Companion mode every harness's too.
 pub fn listed(cfg: &Config) -> Vec<lary_core::SessionSummary> {
@@ -156,6 +164,10 @@ pub enum Modal {
     AddAccount(AgentKind),
     /// Edit an API account (its id).
     EditAccount(String),
+    /// An account's name (its id).
+    RenameAccount(String),
+    /// A setup token's or an API key account's token or key (its id).
+    AccountSecret(String),
     AddCustomAgent,
     AddWorkspace,
     /// A project: a new one (its folder, when known), or one to edit (its id).
@@ -2333,7 +2345,7 @@ impl App {
                     Ok(()) => {
                         app.toast(format!("“{}” is signed in", account.label));
                         // Its row reads the sign-in again.
-                        app.update_config(|_| {});
+                        recheck_accounts();
                     }
                     Err(e) => app.toast_err(format!("Codex sign-in: {e:#}")),
                 }

@@ -400,6 +400,9 @@ svg { flex-shrink: 0; display: block; }
 .menu-item.disabled { opacity: .45; cursor: default; }
 .menu-item .check { margin-left: auto; color: var(--fg-2); padding-left: 8px; }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+/* A line only between two groups: never first, last or doubled when the
+   items around it are left out. */
+.menu > .menu-sep:first-child, .menu > .menu-sep:last-child, .menu > .menu-sep + .menu-sep { display: none; }
 /* A row that opens a submenu beside its menu (SubMenu). It stays lit while
    its submenu is open. */
 .menu-item.has-sub.open { background: var(--hover); }

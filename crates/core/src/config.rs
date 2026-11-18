@@ -1085,13 +1085,19 @@ impl AccountAuth {
         matches!(self, AccountAuth::SystemLogin | AccountAuth::ConfigDir { .. })
     }
 
-    /// The keychain entry it owns, if any.
+    /// The keychain entry it owns, if any (a setup token's included).
     pub fn secret_ref(&self) -> Option<&str> {
         match self {
             AccountAuth::Api(a) => a.secret_ref.as_deref(),
             AccountAuth::ApiKey { secret_ref, .. } => Some(secret_ref),
+            AccountAuth::Env { vars } => vars.iter().find_map(|(_, v)| v.strip_prefix("secret:")),
             _ => None,
         }
+    }
+
+    /// A Claude subscription token made with `claude setup-token`.
+    pub fn is_setup_token(&self) -> bool {
+        matches!(self, AccountAuth::Env { vars } if vars.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"))
     }
 }
 

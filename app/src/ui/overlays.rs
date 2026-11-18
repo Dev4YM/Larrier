@@ -392,6 +392,8 @@ pub fn ModalHost() -> Element {
                     Modal::Export(id) => rsx! { DeleteModal { id } },
                     Modal::AddAccount(kind) => rsx! { AddAccountModal { kind } },
                     Modal::EditAccount(id) => rsx! { EditAccountModal { id } },
+                    Modal::RenameAccount(id) => rsx! { RenameAccountModal { id } },
+                    Modal::AccountSecret(id) => rsx! { AccountSecretModal { id } },
                     Modal::AddCustomAgent => rsx! {
                         div { class: "modal-head", "Add a custom agent" }
                         div { class: "modal-body",
@@ -862,6 +864,87 @@ fn EditAccountModal(id: String) -> Element {
         }
         div { class: "modal-foot",
             button { class: "primary-btn", onclick: move |_| app.ui.write().modal = None, "Done" }
+        }
+    }
+}
+
+/// An account's name.
+#[component]
+fn RenameAccountModal(id: String) -> Element {
+    let mut app = use_app();
+    let current = app.config.read().account(&id).map(|a| a.label.clone()).unwrap_or_default();
+    let mut value = use_signal(|| current);
+    let mut save = move |id: String| {
+        let name = value().trim().to_string();
+        if !name.is_empty() {
+            app.update_config(move |c| {
+                if let Some(a) = c.accounts.iter_mut().find(|a| a.id == id) {
+                    a.label = name;
+                }
+            });
+        }
+        app.ui.write().modal = None;
+    };
+    let id2 = id.clone();
+    rsx! {
+        div { class: "modal-head", "Rename account" }
+        div { class: "modal-body",
+            input { class: "input full", autofocus: true, value: "{value}", placeholder: "Work, Personal, Team…",
+                oninput: move |e| value.set(e.value()),
+                onkeydown: move |e| if e.key() == Key::Enter { save(id.clone()) },
+            }
+        }
+        div { class: "modal-foot",
+            button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
+            button { class: "primary-btn", disabled: value().trim().is_empty(), onclick: move |_| save(id2.clone()), "Rename" }
+        }
+    }
+}
+
+/// A new token for a setup token account, or a new key for an API key
+/// account; it replaces the one in the OS keychain.
+#[component]
+fn AccountSecretModal(id: String) -> Element {
+    let mut app = use_app();
+    let acc = app.config.read().account(&id).cloned();
+    let mut value = use_signal(String::new);
+    let Some(a) = acc else {
+        return rsx! { div { class: "modal-body", "That account is gone." } };
+    };
+    let Some(r) = a.auth.secret_ref().map(String::from) else {
+        return rsx! { div { class: "modal-body", "This account has no token or key." } };
+    };
+    let token = a.auth.is_setup_token();
+    let save = move |_: Event<MouseData>| {
+        if let Err(e) = lary_core::secrets::set(&r, value().trim()) {
+            app.toast_err(format!("Could not store it: {e}"));
+            return;
+        }
+        app.ui.write().modal = None;
+        app.toast(if token { "Token changed" } else { "Key changed" });
+        // Its row reads the keychain again.
+        crate::state::recheck_accounts();
+    };
+    rsx! {
+        div { class: "modal-head", AgentGlyph { kind: a.agent.clone(), class: "md" } span { if token { "Change token · {a.label}" } else { "Change key · {a.label}" } } }
+        div { class: "modal-body",
+            div { class: "kv",
+                if token {
+                    span { class: "k", "Terminal" }
+                    div { class: "cmd-field",
+                        span { class: "mono", "claude setup-token" }
+                        button { class: "icon-btn", title: "Run it in a terminal", onclick: move |_| app.setup_token(), Icon { i: I::Terminal, size: 14, stroke: 1.5 } }
+                        super::CopyButton { text: "claude setup-token".to_string() }
+                    }
+                }
+                span { class: "k", if token { "Setup token" } else { "API key" } }
+                input { class: "input full", r#type: "password", autofocus: true, spellcheck: "false", placeholder: if token { "sk-ant-oat01-…" } else { "sk-…" }, value: "{value}", oninput: move |e| value.set(e.value()) }
+            }
+            if token { div { "Sign in when it asks, then paste the token it prints." } }
+        }
+        div { class: "modal-foot",
+            button { class: "ghost-btn", onclick: move |_| app.ui.write().modal = None, "Cancel" }
+            button { class: "primary-btn", disabled: value().trim().is_empty(), onclick: save, "Save" }
         }
     }
 }

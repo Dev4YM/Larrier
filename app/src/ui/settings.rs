@@ -819,6 +819,8 @@ pub fn edit_account(app: crate::state::App, id: String, f: impl FnOnce(&mut Acco
 #[component]
 fn AccountRow(a: Account, only: bool) -> Element {
     let mut app = use_app();
+    // Read again when a token, key or sign-in changes.
+    let _ = crate::state::ACCOUNTS_SEEN();
     let spec = a.agent.spec();
     let mut menu = use_signal(|| false);
     let mut checked = use_signal(|| None::<Result<String, String>>);
@@ -880,6 +882,10 @@ fn AccountRow(a: Account, only: bool) -> Element {
                 Some(k) => (format!("Key {}", secrets::mask(k)), true),
                 None => ("No key".to_string(), false),
             },
+            AccountAuth::Env { .. } if a.auth.is_setup_token() => match &key {
+                Some(k) => (format!("Token {}", secrets::mask(k)), true),
+                None => ("No token".to_string(), false),
+            },
             _ => (String::new(), true),
         }
     };
@@ -893,7 +899,12 @@ fn AccountRow(a: Account, only: bool) -> Element {
     };
     let x_check = api.clone();
     let key_check = key.clone();
+    // The menu in groups: using it, changing it, removing it. A line only
+    // between two groups that both have something.
+    let (token, has_key) = (a.auth.is_setup_token(), matches!(a.auth, AccountAuth::ApiKey { .. }));
+    let uses = !is_default || can_check || can_sign_in;
     let (id1, id2, id3, id4) = (a.id.clone(), a.id.clone(), a.id.clone(), a.id.clone());
+    let (id5, id6) = (a.id.clone(), a.id.clone());
     let (a_sign, a_sign2, a_del) = (a.clone(), a.clone(), a.clone());
     let k_def = a.agent.clone();
     rsx! {
@@ -943,15 +954,21 @@ fn AccountRow(a: Account, only: bool) -> Element {
                                 });
                             } }
                     }
-                    if api.is_some() && !only {
-                        super::MenuItem { label: "Edit…".to_string(), icon: Some(I::Pencil),
-                            onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::EditAccount(id3.clone())); } }
-                    }
                     if can_sign_in {
                         super::MenuItem { label: if knows_sign_in && signed { "Sign in again".to_string() } else { "Sign in".to_string() }, icon: Some(I::User),
                             onclick: move |_| { menu.set(false); app.sign_in(&a_sign2); } }
                     }
                     if !only {
+                        if uses { div { class: "menu-sep" } }
+                        super::MenuItem { label: "Rename…".to_string(), icon: Some(I::Pencil),
+                            onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::RenameAccount(id5.clone())); } }
+                        if api.is_some() {
+                            super::MenuItem { label: "Edit…".to_string(), sub: Some("API, address, key".to_string()), icon: Some(I::Settings),
+                                onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::EditAccount(id3.clone())); } }
+                        } else if token || has_key {
+                            super::MenuItem { label: if token { "Change token…".to_string() } else { "Change key…".to_string() }, icon: Some(I::Key),
+                                onclick: move |_| { menu.set(false); app.ui.write().modal = Some(Modal::AccountSecret(id6.clone())); } }
+                        }
                         div { class: "menu-sep" }
                         super::MenuItem { label: "Remove".to_string(), icon: Some(I::Trash), danger: true,
                             onclick: move |_| {
@@ -1024,6 +1041,7 @@ pub fn ApiEditor(a: Account, api: lary_core::ApiAccount) -> Element {
                             match secrets::set(&r, key().trim()) {
                                 Ok(()) => {
                                     edit_account(app, i4.clone(), move |x| if let AccountAuth::Api(p) = &mut x.auth { p.secret_ref = Some(r); });
+                                    crate::state::recheck_accounts();
                                     key.set(String::new());
                                     app.toast("Key saved to your keychain");
                                 }

@@ -126,78 +126,108 @@ pub fn run(app: App, kind: AgentKind, install: bool) {
         }
     };
     spawn_forever(async move {
+        let name = kind.display_name();
         let before = app.detected.peek().iter().find(|d| d.kind == kind).and_then(|d| d.version.clone());
-        let mut cmd = tokio::process::Command::new(&step.program);
-        cmd.args(&step.args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-        if let Some(home) = dirs::home_dir() {
-            cmd.current_dir(home);
+        let path = app.detected.peek().iter().find(|d| d.kind == kind).and_then(|d| d.path.clone());
+        let mut ok = run_step(&step, &push).await;
+        let mut now = found_again(app, &kind).await;
+        // Its own updater left it as it was though a newer one is out (it
+        // may not know how it was installed): the way it was installed,
+        // again. Judged by the version it has, not by how the command ended.
+        let behind = |v: &Option<String>| LATEST.peek().get(&kind.id()).is_some_and(|l| v.as_deref().is_some_and(|v| updates::is_newer(l, v)));
+        if !install && now == before && behind(&now) {
+            if let Some(fb) = path.as_deref().and_then(|p| updates::fallback_step(&kind, p)).filter(|fb| fb.shown != step.shown) {
+                push(format!("Still v{}: {name}'s own updater didn't update it. Its installer instead: {}", now.as_deref().unwrap_or("?"), fb.shown));
+                if let Some(j) = JOBS.write().get_mut(&id) {
+                    j.shown = fb.shown.clone();
+                }
+                ok = run_step(&fb, &push).await;
+                now = found_again(app, &kind).await;
+            }
         }
-        // A Git Bash variable some agents' installers misread.
-        cmd.env_remove("MSYSTEM");
-        #[cfg(windows)]
-        cmd.creation_flags(0x0800_0000);
-        let ok = match cmd.spawn() {
-            Err(e) => {
-                push(format!("Couldn't start it: {e}"));
-                false
-            }
-            Ok(mut child) => {
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                for out in [child.stdout.take().map(|o| Box::new(o) as Box<dyn tokio::io::AsyncRead + Unpin + Send>), child.stderr.take().map(|o| Box::new(o) as _)].into_iter().flatten() {
-                    let tx = tx.clone();
-                    tokio::spawn(async move {
-                        let mut lines = BufReader::new(out).lines();
-                        while let Ok(Some(l)) = lines.next_line().await {
-                            let _ = tx.send(l);
-                        }
-                    });
-                }
-                drop(tx);
-                let waited = tokio::time::timeout(Duration::from_secs(15 * 60), async {
-                    while let Some(l) = rx.recv().await {
-                        let l = plain(&l);
-                        if !l.trim().is_empty() {
-                            push(l);
-                        }
-                    }
-                    child.wait().await
-                })
-                .await;
-                match waited {
-                    Ok(Ok(status)) => {
-                        if !status.success() {
-                            push(format!("Exited with code {}", status.code().unwrap_or(-1)));
-                        }
-                        status.success()
-                    }
-                    Ok(Err(e)) => {
-                        push(e.to_string());
-                        false
-                    }
-                    Err(_) => {
-                        push("Stopped: it ran for 15 minutes".into());
-                        false
-                    }
-                }
-            }
-        };
+        // An update that left it behind didn't go through, however it ended.
+        if !install && ok && now == before && behind(&now) {
+            push(format!("Still v{}: it didn't update.", now.as_deref().unwrap_or("?")));
+            ok = false;
+        }
         if let Some(j) = JOBS.write().get_mut(&id) {
             j.ok = Some(ok);
         }
-        // Found again, with the version it has now.
-        let cfg = app.config.peek().clone();
-        let found = lary_agents::detect_all(&cfg).await;
-        let mut detected = app.detected;
-        detected.set(found);
-        let now = app.detected.peek().iter().find(|d| d.kind == kind && d.installed()).and_then(|d| d.version.clone());
-        let name = kind.display_name();
         match (ok, now) {
             (true, Some(v)) if before.as_deref() != Some(v.as_str()) => app.toast(format!("{name} is now v{v}")),
             (true, Some(v)) => app.toast(format!("{name} v{v} is the version it has")),
             (true, None) => app.toast(format!("{name}: done, but Lary doesn't find it yet (a new terminal or sign-in may be needed)")),
-            (false, _) => app.toast_err(format!("{name}: the {} didn't go through — its output is in Settings → Agents", if install { "install" } else { "update" })),
+            (false, _) => app.toast_err(format!("{name}: the {} didn't go through — what it printed is on its Version tab", if install { "install" } else { "update" })),
         }
     });
+}
+
+/// The agents found again; `kind`'s version now.
+async fn found_again(app: App, kind: &AgentKind) -> Option<String> {
+    let cfg = app.config.peek().clone();
+    let found = lary_agents::detect_all(&cfg).await;
+    let mut detected = app.detected;
+    detected.set(found);
+    let v = app.detected.peek().iter().find(|d| &d.kind == kind && d.installed()).and_then(|d| d.version.clone());
+    v
+}
+
+/// Run an install or update command, its output told line by line: whether
+/// it ended well.
+async fn run_step(step: &updates::Step, push: &impl Fn(String)) -> bool {
+    let mut cmd = tokio::process::Command::new(&step.program);
+    cmd.args(&step.args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    if let Some(home) = dirs::home_dir() {
+        cmd.current_dir(home);
+    }
+    // A Git Bash variable some agents' installers misread.
+    cmd.env_remove("MSYSTEM");
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let mut child = match cmd.spawn() {
+        Err(e) => {
+            push(format!("Couldn't start it: {e}"));
+            return false;
+        }
+        Ok(c) => c,
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    for out in [child.stdout.take().map(|o| Box::new(o) as Box<dyn tokio::io::AsyncRead + Unpin + Send>), child.stderr.take().map(|o| Box::new(o) as _)].into_iter().flatten() {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(out).lines();
+            while let Ok(Some(l)) = lines.next_line().await {
+                let _ = tx.send(l);
+            }
+        });
+    }
+    drop(tx);
+    let waited = tokio::time::timeout(Duration::from_secs(15 * 60), async {
+        while let Some(l) = rx.recv().await {
+            let l = plain(&l);
+            if !l.trim().is_empty() {
+                push(l);
+            }
+        }
+        child.wait().await
+    })
+    .await;
+    match waited {
+        Ok(Ok(status)) => {
+            if !status.success() {
+                push(format!("Exited with code {}", status.code().unwrap_or(-1)));
+            }
+            status.success()
+        }
+        Ok(Err(e)) => {
+            push(e.to_string());
+            false
+        }
+        Err(_) => {
+            push("Stopped: it ran for 15 minutes".into());
+            false
+        }
+    }
 }
 
 /// Get the newest official release of an agent as Lary's own copy (shown

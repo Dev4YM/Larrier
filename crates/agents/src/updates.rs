@@ -198,6 +198,20 @@ pub fn update_step(kind: &AgentKind, path: &Path) -> Option<Step> {
     }
 }
 
+/// When its own updater leaves it as it was (Droid's says an install from
+/// its script is npm's and refuses): the way it was installed, again, which
+/// puts the newest in the same place. `None`: there's nothing else to try.
+pub fn fallback_step(kind: &AgentKind, path: &Path) -> Option<Step> {
+    let v = of(kind)?;
+    if !matches!(v.update?, Update::Itself(_)) {
+        return None;
+    }
+    match v.source {
+        Source::Npm(pkg) if from_npm(path, pkg) => Some(Step::shell(&format!("npm install -g {pkg}@latest"))),
+        _ => install_step(kind),
+    }
+}
+
 /// Whether npm installed the program at `path` (package `pkg`).
 fn from_npm(path: &Path, pkg: &str) -> bool {
     let dir = path.parent();

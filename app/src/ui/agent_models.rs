@@ -39,7 +39,9 @@ fn effort_span(e: &[String]) -> String {
 pub fn AgentModelsPanel(kind: AgentKind) -> Element {
     let app = use_app();
     let name = kind.display_name().to_string();
-    let native = app.native_models.read().get(&kind.id()).cloned();
+    // What it offers for its default account (the one new chats run as),
+    // the same the picker and the chats go by.
+    let native = app.agent_models(&kind);
     let refreshing = app.models_refreshing.read().contains(&kind.id());
     let ac = app.config.read().agent(&kind);
     let all = am::choices(&app, &kind);
@@ -244,11 +246,18 @@ fn ModelRow(kind: AgentKind, c: Choice) -> Element {
     } else if c.custom {
         badges.push(("Custom".into(), "mr-tag"));
     }
-    if !c.featured && !c.added {
-        badges.push(("Not in its picker".into(), "mr-tag old"));
+    match c.group.as_deref() {
+        // Claude Code's own names that always run the newest of a family.
+        Some("Always the newest") => badges.push(("Alias".into(), "mr-tag")),
+        _ if c.featured || c.added => {}
+        Some("Older models") => badges.push(("Older".into(), "mr-tag old")),
+        _ => badges.push(("Not in its picker".into(), "mr-tag old")),
     }
     let tip = {
         let mut t = c.id.clone();
+        if let Some(n) = &c.note {
+            t.push_str(&format!("\n{n}"));
+        }
         if let Some(g) = &c.group {
             t.push_str(&format!("\n{g}"));
         }
@@ -263,7 +272,8 @@ fn ModelRow(kind: AgentKind, c: Choice) -> Element {
         div { class: if c.shown { "am-row" } else { "am-row off" }, title: "{tip}",
             span { class: "lg", if let Some(svg) = logo { Logo { svg, size: 14 } } else { Icon { i: I::Sparkle, size: 13, stroke: 1.5 } } }
             span { class: "nm ellipsis", "{c.name}" }
-            for (b, cls) in badges { span { key: "{b}", class: "{cls}", "{b}" } }
+            // Always there, so every row keeps the same columns.
+            span { class: "mr-tags", for (b, cls) in badges { span { key: "{b}", class: "{cls}", "{b}" } } }
             span { class: "id ellipsis", "{c.id}" }
             span { class: "eff", "{efforts}" }
             span { class: "ctx", {c.context.map(lary_core::models::tokens_short).unwrap_or_default()} }

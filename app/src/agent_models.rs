@@ -165,6 +165,8 @@ pub struct Choice {
     pub default_effort: Option<String>,
     /// Has a fast variant (Cursor).
     pub fast: bool,
+    /// Claude Code's Ultracode can be turned on with it.
+    pub ultracode: bool,
     /// The agent's own custom model or provider.
     pub custom: bool,
     /// Added in Lary.
@@ -205,6 +207,7 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
             efforts: m.efforts.clone(),
             default_effort: m.default_effort.clone(),
             fast: m.has_fast(),
+            ultracode: m.ultracode,
             custom: m.custom,
             added: false,
             endpoint: None,
@@ -234,6 +237,7 @@ pub fn choices(app: &App, agent: &AgentKind) -> Vec<Choice> {
                 efforts: if lary_agents::request::takes_effort(agent) { native_efforts(native.as_ref()) } else { Vec::new() },
                 default_effort: None,
                 fast: false,
+                ultracode: false,
                 custom: true,
                 added: true,
                 endpoint,
@@ -330,8 +334,18 @@ pub fn resolve_for(app: &App, agent: &AgentKind, account: Option<&str>, model: O
 pub fn short_name(app: &App, agent: &AgentKind, id: &str) -> String {
     use lary_core::models as reg;
     let id = models::split_params(id).0;
-    // The agent's own name for it ("Opus 5.5" for Claude Code's `opus`).
-    if let Some(m) = app.agent_models(agent).as_ref().and_then(|n| n.model(id).filter(|m| m.listed).map(|m| m.name.clone())) {
+    let native = app.agent_models(agent);
+    // An alias by the model it stands for now ("Opus 5.5" for Claude
+    // Code's `opus`).
+    if let Some(real) = native.as_ref().and_then(|n| {
+        let m = n.model(id).filter(|m| m.id == id)?;
+        let target = m.aliases.first().filter(|t| t.as_str() != id)?;
+        n.model(target).filter(|r| &r.id == target).map(|r| r.name.clone())
+    }) {
+        return real.trim_start_matches("Claude ").to_string();
+    }
+    // The agent's own name for it.
+    if let Some(m) = native.as_ref().and_then(|n| n.model(id).filter(|m| m.listed).map(|m| m.name.clone())) {
         return m.trim_start_matches("Claude ").to_string();
     }
     if let Some((target, label)) = reg::alias(id) {

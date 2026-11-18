@@ -196,6 +196,10 @@ pub struct AgentModel {
     /// variant of its own).
     #[serde(default)]
     pub fast_mode: bool,
+    /// Claude Code's Ultracode is offered on it (a session switch beside
+    /// the effort, at any effort).
+    #[serde(default)]
+    pub ultracode: bool,
 }
 
 /// A model's parameters as its agent names them (Cursor's app lists them).
@@ -632,12 +636,11 @@ pub fn parse_claude_models(init: &Value) -> Vec<AgentModel> {
         let resolved = str_of(x, &["resolvedModel"]).unwrap_or(id).to_string();
         let mut m = AgentModel::new(id, str_of(x, &["displayName"]).unwrap_or(id));
         m.description = str_of(x, &["description"]).map(str::to_string);
-        m.efforts = x["supportedEffortLevels"].as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).collect()).unwrap_or_default();
-        // Ultracode (`--effort ultracode`) comes with Extra high.
-        if m.efforts.iter().any(|e| e == "xhigh") {
-            m.efforts.push("ultracode".into());
-        }
-        m.fast_mode = claude_has_fast(&resolved);
+        m.efforts = x["supportedEffortLevels"].as_array().map(|a| a.iter().filter_map(|e| e.as_str().map(str::to_string)).filter(|e| e != "ultracode").collect()).unwrap_or_default();
+        // Ultracode is a switch of its own (the `ultracode` setting), on the
+        // models that reach Extra high, at any effort.
+        m.ultracode = m.efforts.iter().any(|e| e == "xhigh");
+        m.fast_mode = x["supportsFastMode"].as_bool().unwrap_or_else(|| claude_has_fast(&resolved));
         m.listed = true;
         m.context = lary_core::models::lookup(&resolved).and_then(|i| i.context);
         if id == "default" {
@@ -657,7 +660,7 @@ pub fn parse_claude_models(init: &Value) -> Vec<AgentModel> {
     out
 }
 
-const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max", "ultracode"];
+const CLAUDE_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
 #[cfg(test)]
 mod param_tests {
@@ -676,11 +679,19 @@ mod param_tests {
         let home = std::env::temp_dir().join(format!("lary-acct-{}", lary_core::lsf::new_id()));
         std::fs::create_dir_all(&home).unwrap();
         let m = read_files(&AgentKind::ClaudeCode, parse_claude_models(&init), Some(&home));
-        assert_eq!(m.default_model.as_deref(), Some("sonnet"), "the plan's default, as Claude Code said");
-        assert_eq!(m.listed_default.as_deref(), Some("sonnet"), "kept for reads without listing");
-        // Read again without listing (the listed models only): the Default
-        // isn't in them any more; `read` carries `listed_default` over.
+        assert_eq!(m.default_model.as_deref(), Some("claude-sonnet-5-5"), "the plan's default, as the real model it is");
+        assert_eq!(m.listed_default.as_deref(), Some("claude-sonnet-5-5"), "kept for reads without listing");
+        // The picker: the real models by their versions; the aliases and
+        // older models under All.
+        let picker: Vec<(&str, &str)> = m.models.iter().filter(|x| x.featured).map(|x| (x.id.as_str(), x.name.as_str())).collect();
+        assert_eq!(picker, vec![("claude-opus-5-5", "Opus 5.5"), ("claude-sonnet-5-5", "Sonnet 5.5")]);
+        assert!(m.models.iter().any(|x| x.id == "opus" && !x.featured), "the alias, under All");
+        assert!(m.models.iter().any(|x| x.id.starts_with("claude-opus-4") && !x.featured), "older versions, under All");
+        // Read again without listing (the listed models only): the same
+        // list, without the Default (`read` carries `listed_default` over).
         let again = read_files(&AgentKind::ClaudeCode, m.models.iter().filter(|x| x.listed).cloned().collect(), Some(&home));
+        let ids = |m: &AgentModels| m.models.iter().map(|x| x.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&again), ids(&m), "no copies, nothing lost");
         assert_eq!(again.default_model, None);
         std::fs::write(home.join("settings.json"), r#"{"model": "opus"}"#).unwrap();
         let m = read_files(&AgentKind::ClaudeCode, parse_claude_models(&init), Some(&home));
@@ -736,18 +747,56 @@ fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
     m.default_effort = env("CLAUDE_CODE_EFFORT_LEVEL").or_else(|| effort_for(m.default_model.as_deref().unwrap_or("opus")));
     let allowed: Vec<String> = s.get("availableModels").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
     if !listed.is_empty() {
-        // Claude Code's own menu, with the effort its settings keep per model.
+        // Claude Code's own menu, with the effort its settings keep per
+        // model. Its aliases stand for the newest of each family: the picker
+        // gets those real models by their versioned names ("Opus 5.5"); the
+        // aliases (always the newest) and older models are offered under All.
         let default_target = listed.iter().find(|x| x.default).and_then(|x| x.aliases.first().cloned());
+        let (mut latest, mut aliases, mut older): (Vec<AgentModel>, Vec<AgentModel>, Vec<AgentModel>) = (Vec::new(), Vec::new(), Vec::new());
+        let picked = |ids: &[&str]| allowed.is_empty() || allowed.iter().any(|a| ids.iter().any(|id| a == id || models::normalize(a) == *id));
         for mut am in listed.into_iter().filter(|x| !x.default) {
-            if m.listed_default.is_none() && default_target.as_ref().is_some_and(|t| am.aliases.contains(t) || &am.id == t) {
-                m.listed_default = Some(am.id.clone());
+            // Listed before Ultracode was a switch of its own: not an effort.
+            if am.efforts.iter().any(|e| e == "ultracode") {
+                am.efforts.retain(|e| e != "ultracode");
+                am.ultracode = true;
             }
             am.default_effort = effort_for(&am.id).filter(|e| am.efforts.contains(e));
-            if !allowed.is_empty() {
-                am.featured = allowed.iter().any(|a| *a == am.id || am.aliases.contains(a));
+            let target = am.aliases.first().cloned().filter(|t| *t != am.id);
+            if am.id.starts_with("claude-") {
+                am.featured = !allowed.is_empty() && picked(&[am.id.as_str()]);
+                am.group = Some("Older models".into());
+                older.push(am);
+                continue;
             }
-            m.models.push(am);
+            if let Some(t) = target.filter(|t| !latest.iter().any(|x| &x.id == t)) {
+                let mut real = am.clone();
+                // Claude Code's own name when it gives the version ("Opus
+                // 5.5"), else the catalog's.
+                real.name = if am.name.chars().any(|c| c.is_ascii_digit()) { am.name.trim_start_matches("Claude ").to_string() } else { models::display_name(&t).trim_start_matches("Claude ").to_string() };
+                real.default_effort = effort_for(&t).filter(|e| real.efforts.contains(e));
+                real.featured = picked(&[t.as_str(), am.id.as_str()]);
+                real.id = t;
+                real.aliases = Vec::new();
+                real.description = None;
+                real.group = Some("Latest".into());
+                // Made from the alias, not listed itself: a read without
+                // listing makes it again from the alias it keeps.
+                real.listed = false;
+                latest.push(real);
+            }
+            am.featured = !allowed.is_empty() && allowed.iter().any(|a| *a == am.id);
+            // By its family ("Opus"): it stands for whichever is newest.
+            let family: String = am.id.chars().next().map(|c| c.to_uppercase().chain(am.id.chars().skip(1)).collect()).unwrap_or_default();
+            am.name = family.clone();
+            am.description = Some(format!("Always the newest {family}"));
+            am.group = Some("Always the newest".into());
+            aliases.push(am);
         }
+        // The Default as the real model it is now (else as the alias).
+        m.listed_default = default_target.as_ref().and_then(|t| latest.iter().chain(older.iter()).find(|x| &x.id == t).map(|x| x.id.clone())).or_else(|| default_target.as_ref().and_then(|t| aliases.iter().find(|a| a.aliases.contains(t)).map(|a| a.id.clone())));
+        m.models.extend(latest);
+        m.models.extend(aliases);
+        m.models.extend(older);
         if m.default_model.is_none() {
             m.default_model = m.listed_default.clone();
         }
@@ -761,18 +810,26 @@ fn claude(dir: &Path, listed: Vec<AgentModel>) -> AgentModels {
         let mut am = AgentModel::new(alias, label);
         am.description = Some(format!("Latest · {}", models::display_name(&target)));
         am.efforts = if alias == "haiku" { Vec::new() } else { efforts.clone() };
+        am.ultracode = alias != "haiku";
         am.default_effort = effort_for(alias).filter(|_| !am.efforts.is_empty());
         am.fast_mode = claude_has_fast(&target);
         am.featured = allowed.is_empty() || allowed.iter().any(|a| a == alias);
         am.group = Some("Aliases".into());
         m.models.push(am);
     }
-    for info in models::all().into_iter().filter(|i| catalog && i.vendor == Vendor::Anthropic && i.source == Source::Official && matches!(i.status, ModelStatus::Active | ModelStatus::Legacy)) {
-        let mut am = AgentModel::new(info.id.clone(), info.name.clone());
+    // Every Anthropic model Lary knows, under All (in the picker only when
+    // there's no listing, as Lary suggests them then): older versions the
+    // agent still takes by id, to turn on by hand.
+    for info in models::all().into_iter().filter(|i| i.vendor == Vendor::Anthropic && i.source == Source::Official && matches!(i.status, ModelStatus::Active | ModelStatus::Legacy)) {
+        if m.models.iter().any(|x| x.id == info.id) {
+            continue;
+        }
+        let mut am = AgentModel::new(info.id.clone(), info.name.trim_start_matches("Claude "));
         am.efforts = if info.id.contains("haiku") { Vec::new() } else { efforts.clone() };
+        am.ultracode = !info.id.contains("haiku");
         am.fast_mode = claude_has_fast(&info.id);
         am.default_effort = s.get("modelSettings").and_then(|ms| ms.get(&info.id)).and_then(|x| str_of(x, &["effortLevel"])).map(str::to_string);
-        am.featured = allowed.iter().any(|a| models::normalize(a) == info.id) || m.default_model.as_deref() == Some(info.id.as_str());
+        am.featured = catalog && (allowed.iter().any(|a| models::normalize(a) == info.id) || m.default_model.as_deref() == Some(info.id.as_str()));
         am.context = info.context;
         am.description = info.tag.clone();
         am.group = Some(if info.status == ModelStatus::Active { "Anthropic".into() } else { "Older models".into() });
@@ -1511,22 +1568,27 @@ mod tests {
         assert_eq!(latest, [("opus", "Opus 5.5"), ("fable", "Fable 5.1"), ("sonnet", "Sonnet 5.5"), ("haiku", "Haiku 5.5")]);
         let opus = listed.iter().find(|m| m.id == "opus").unwrap();
         assert_eq!(opus.aliases, ["claude-opus-5-5"]);
-        assert_eq!(opus.efforts, ["low", "medium", "high", "xhigh", "max", "ultracode"]);
+        assert_eq!(opus.efforts, ["low", "medium", "high", "xhigh", "max"], "Ultracode isn't an effort");
+        assert!(opus.ultracode, "it's a switch beside the effort");
         assert!(opus.has_fast(), "Opus 5.5 goes fast");
         assert!(!listed.iter().find(|m| m.id == "sonnet").unwrap().has_fast(), "Sonnet doesn't");
         let older: Vec<&str> = listed.iter().filter(|m| m.group.as_deref() == Some("Older models")).map(|m| m.name.as_str()).collect();
         assert!(older.contains(&"Opus 4.8") && older.contains(&"Haiku 4.5"), "{older:?}");
         assert!(listed.iter().any(|m| m.default && m.aliases == ["claude-opus-5-5"]));
 
-        // In the reader: the default is the alias, and the id Claude reports
-        // after a turn finds the same model.
+        // In the reader: the picker has the real models by their versions,
+        // the default is the real model it stands for, and the alias stays
+        // (under All) for whichever is newest.
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("settings.json"), r#"{"effortLevel":"xhigh"}"#).unwrap();
         let m = claude(dir.path(), listed);
-        assert_eq!(m.default_model.as_deref(), Some("opus"));
-        assert_eq!(m.model("claude-opus-5-5").map(|x| x.id.as_str()), Some("opus"));
+        assert_eq!(m.default_model.as_deref(), Some("claude-opus-5-5"));
+        let opus55 = m.model("claude-opus-5-5").unwrap();
+        assert_eq!((opus55.id.as_str(), opus55.name.as_str(), opus55.featured), ("claude-opus-5-5", "Opus 5.5", true));
+        let alias = m.models.iter().find(|x| x.id == "opus").unwrap();
+        assert_eq!((alias.name.as_str(), alias.featured), ("Opus", false));
         assert!(!m.models.iter().any(|x| x.default), "the default row isn't a model of its own");
-        assert_eq!(m.models.iter().find(|x| x.id == "opus").and_then(|x| x.default_effort.as_deref()), Some("xhigh"));
+        assert_eq!(opus55.default_effort.as_deref(), Some("xhigh"));
     }
 }
 

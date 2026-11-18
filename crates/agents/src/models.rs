@@ -84,6 +84,10 @@ pub struct AgentModels {
     /// When the agent's model list last came from its CLI.
     #[serde(default)]
     pub listed_at: Option<DateTime<Utc>>,
+    /// The Lary version that made that list from the listing: another
+    /// version reads listings its own way, so it lists again.
+    #[serde(default)]
+    pub listed_by: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
     /// The agent's own / commands (built-in, custom, skills, plugins, MCP

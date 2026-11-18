@@ -107,15 +107,17 @@ impl App {
         self.read_models(kinds.into_iter().map(|k| (k, None)).collect(), deep, LISTING_TTL_HOURS * 60);
     }
 
-    /// The picker opened on `kind` for a chat on `account`: read its models
-    /// again when they're more than a few minutes old (or never were).
+    /// A list of `kind`'s models is shown for a chat on `account` (the
+    /// picker, the `/` menu's Model page, an automation's model): read them
+    /// again when the list is a few minutes old, was made by another Lary
+    /// version, or never was. Every place that shows models calls this, so
+    /// none shows a list the others would have replaced.
     pub fn refresh_models_for(self, kind: &AgentKind, account: Option<&str>) {
         if self.models_refreshing.peek().contains(&kind.id()) {
             return;
         }
         let key = models_key(&self.config.peek(), kind, account);
-        let fresh = self.native_models.peek().get(&key).and_then(|m| m.listed_at.or(m.fetched_at)).is_some_and(|t| chrono::Utc::now() - t < chrono::Duration::minutes(PICKER_TTL_MINUTES));
-        if !fresh {
+        if needs_listing(kind, self.native_models.peek().get(&key), PICKER_TTL_MINUTES) {
             self.read_models(vec![(kind.clone(), account.map(str::to_string))], false, PICKER_TTL_MINUTES);
         }
     }
@@ -136,11 +138,12 @@ impl App {
                     (models_key(&cfg, &kind, account.as_deref()), models::read_for(&cfg, &kind, account.as_deref()))
                 };
                 let prev = self.native_models.peek().get(&key).cloned();
-                let stale = prev.as_ref().and_then(|p| p.listed_at).map(|t| chrono::Utc::now() - t > chrono::Duration::minutes(max_age)).unwrap_or(true)
-                    // Listed before Lary read Claude Code's commands, or
-                    // before it kept the Default its listing names.
-                    || (kind == AgentKind::ClaudeCode && prev.as_ref().is_some_and(|p| p.commands.is_empty() || p.listed_default.is_none()));
-                let m = models::read(&kind, &at, deep || stale, prev.as_ref()).await;
+                let list = deep || needs_listing(&kind, prev.as_ref(), max_age);
+                let mut m = models::read(&kind, &at, list, prev.as_ref()).await;
+                // A list read again without listing (or whose listing failed)
+                // is still the one listed before.
+                let listed = list && (!models::has_cli_listing(&kind) || m.listed_at != prev.as_ref().and_then(|p| p.listed_at));
+                m.listed_by = if listed { Some(env!("CARGO_PKG_VERSION").to_string()) } else { prev.as_ref().and_then(|p| p.listed_by.clone()) };
                 self.native_models.write().insert(key, m);
                 self.models_refreshing.write().remove(&kind.id());
             }
@@ -148,6 +151,21 @@ impl App {
             let _ = tokio::task::spawn_blocking(move || save(&all)).await;
         });
     }
+}
+
+/// Whether `kind`'s models need its CLI's listing again: never listed,
+/// listed more than `max_age` minutes ago, or listed by another Lary version
+/// (which reads listings its own way).
+fn needs_listing(kind: &AgentKind, prev: Option<&AgentModels>, max_age: i64) -> bool {
+    let Some(p) = prev else { return true };
+    // An agent with no CLI listing (Codex) is read from its files alone.
+    let read_at = if models::has_cli_listing(kind) { p.listed_at } else { p.fetched_at };
+    let old = read_at.is_none_or(|t| chrono::Utc::now() - t > chrono::Duration::minutes(max_age));
+    let other_version = p.listed_by.as_deref() != Some(env!("CARGO_PKG_VERSION"));
+    // Listed before Lary read Claude Code's commands, or before it kept the
+    // Default its listing names.
+    let incomplete = *kind == AgentKind::ClaudeCode && (p.commands.is_empty() || p.listed_default.is_none());
+    old || other_version || incomplete
 }
 
 // ------------------------------------------------------------------ choices

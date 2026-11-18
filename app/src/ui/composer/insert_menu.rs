@@ -474,6 +474,10 @@ fn slash_search(ctx: &Ctx, ql: &str) -> Vec<Sugg> {
 }
 
 fn models(ctx: &Ctx, ql: &str) -> Vec<Sugg> {
+    // Shown: read again if the list is old, as the picker does (after this
+    // render, not during it).
+    let (app, agent) = (*ctx.app, ctx.agent.clone());
+    spawn(async move { app.refresh_models_for(&agent, None) });
     let r = now(ctx);
     let current = r.family.clone().or(r.model.clone());
     pick_rows(ctx.app, ctx.agent, None, !ql.is_empty())

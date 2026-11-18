@@ -475,6 +475,9 @@ fn Editor(initial: Automation, is_new: bool, onclose: EventHandler<()>) -> Eleme
     let workspaces = app.config.read().workspaces.clone();
     let customs = app.config.read().custom_agents.clone();
     let cur = a.read().clone();
+    // Its models read again if the list is old, as the picker does.
+    let ag = cur.agent.clone();
+    use_effect(use_reactive!(|ag| app.refresh_models_for(&ag, None)));
     // The agent's models, its default first (and a model set by hand that
     // isn't in the list, so it still shows).
     let mut models: Vec<(String, String)> = vec![(String::new(), "Agent default".to_string())];

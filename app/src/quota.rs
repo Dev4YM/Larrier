@@ -66,7 +66,16 @@ fn cache() -> &'static Mutex<Option<(Instant, Vec<Quota>)>> {
 
 /// Fetch limits for every enabled plan agent's accounts (blocking). Reuses
 /// results younger than five minutes unless `force`.
+#[cfg(test)]
 pub fn fetch_all(cfg: &Config, agents: &[AgentKind], force: bool) -> Vec<Quota> {
+    fetch_all_asking(cfg, agents, force, false)
+}
+
+/// Fetch limits for every enabled plan agent's accounts (blocking), reusing
+/// results younger than five minutes unless `force`; `ask_tokens`: also ask the plan for its limits now on
+/// setup-token accounts (a call of its own each, see [`token_now`]), as when
+/// the user refreshes or opens a plan panel.
+pub fn fetch_all_asking(cfg: &Config, agents: &[AgentKind], force: bool, ask_tokens: bool) -> Vec<Quota> {
     if !force {
         if let Ok(g) = cache().lock() {
             if let Some((at, v)) = g.as_ref() {
@@ -87,7 +96,9 @@ pub fn fetch_all(cfg: &Config, agents: &[AgentKind], force: bool) -> Vec<Quota> 
                 AccountAuth::ConfigDir { path } => Source::SignIn(Some(PathBuf::from(path))),
                 AccountAuth::SystemLogin => Source::SignIn(None),
                 // A subscription's token, not a key: its plan has limits.
-                auth if auth.is_setup_token() => Source::Token,
+                AccountAuth::Env { vars } if a.auth.is_setup_token() => Source::Token(
+                    vars.iter().find(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN").map(|(_, v)| lary_core::secrets::resolve(v)).filter(|t| ask_tokens && !t.is_empty()),
+                ),
                 AccountAuth::Api(_) | AccountAuth::ApiKey { .. } | AccountAuth::Env { .. } => Source::Api,
             };
             let label = if a.label.trim().is_empty() { a.auth.label().to_string() } else { a.label.clone() };
@@ -107,7 +118,14 @@ pub fn fetch_all(cfg: &Config, agents: &[AgentKind], force: bool) -> Vec<Quota> 
                             q.plan = Some("API key".into());
                             q.note = Some("Pay as you go — no plan limits. Spend is tracked below.".into());
                         }
-                        Source::Token => token(&mut q),
+                        Source::Token(now) => {
+                            if let Some(t) = now {
+                                if let Err(e) = token_now(&q, &t) {
+                                    tracing::warn!("plan limits: setup token: {}", match e { HttpError::Auth => "not accepted".to_string(), HttpError::Other(e) => e });
+                                }
+                            }
+                            token(&mut q)
+                        }
                         Source::SignIn(dir) => match kind {
                             AgentKind::Codex => codex(&mut q, dir.as_deref()),
                             AgentKind::ClaudeCode => claude(&mut q, dir.as_deref()),
@@ -138,8 +156,9 @@ pub fn fetch_all(cfg: &Config, agents: &[AgentKind], force: bool) -> Vec<Quota> 
 enum Source {
     /// The agent's own sign-in (its folder, or this computer's).
     SignIn(Option<PathBuf>),
-    /// Claude Code's setup token: a subscription, read from its runs.
-    Token,
+    /// Claude Code's setup token: a subscription, read from its runs; with
+    /// the token when its plan is to be asked now.
+    Token(Option<String>),
     /// A key: pay as you go, no plan.
     Api,
 }
@@ -254,6 +273,90 @@ fn token(q: &mut Quota) {
         }
         _ => q.note = Some("Its limits show here once a chat runs on this account.".into()),
     }
+}
+
+/// A setup token's plan limits now. The usage endpoint won't take the token,
+/// but every answer to it carries the plan's windows (how much of each is
+/// used, when it resets), as Claude Code reads them on its own calls: so the
+/// smallest call there is (Haiku, one token of reply) is made, and its
+/// windows kept like those a run reports. The token goes to `curl` over stdin.
+fn token_now(q: &Quota, token: &str) -> Result<(), HttpError> {
+    let body = r#"{"model":"claude-haiku-5-5","max_tokens":1,"system":"You are Claude Code, Anthropic's official CLI for Claude.","messages":[{"role":"user","content":"hi"}]}"#;
+    let mut cmd = std::process::Command::new("curl");
+    cmd.args(["-sS", "--max-time", "20", "-K", "-"]);
+    cmd.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().map_err(|_| HttpError::Other("curl not found".into()))?;
+    {
+        let cfg = format!(
+            "url = \"https://api.anthropic.com/v1/messages\"\nheader = \"Authorization: Bearer {token}\"\nheader = \"anthropic-version: 2023-06-01\"\nheader = \"anthropic-beta: oauth-2025-04-20\"\nheader = \"content-type: application/json\"\nheader = \"User-Agent: lary\"\ninclude\ndata = \"{}\"\nwrite-out = \"\\n%{{http_code}}\"\n",
+            body.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        let Some(mut stdin) = child.stdin.take() else { return Err(HttpError::Other("no stdin".into())) };
+        let _ = stdin.write_all(cfg.as_bytes());
+    }
+    let mut out = String::new();
+    if let Some(mut so) = child.stdout.take() {
+        let _ = so.read_to_string(&mut out);
+    }
+    let _ = child.wait();
+    let code: u16 = out.rsplit_once('\n').map(|(_, c)| c).unwrap_or(&out).trim().parse().unwrap_or(0);
+    match code {
+        200..=299 => {}
+        401 | 403 => return Err(HttpError::Auth),
+        0 => return Err(HttpError::Other("offline".into())),
+        c => return Err(HttpError::Other(format!("HTTP {c}"))),
+    }
+    let windows = unified_windows(&out);
+    if windows.is_empty() {
+        return Err(HttpError::Other("no limits in the answer".into()));
+    }
+    for (name, pct, resets) in windows {
+        remember(&q.agent, q.account_id.as_deref(), &name, pct, resets);
+    }
+    Ok(())
+}
+
+/// The plan's windows in an answer's headers
+/// (`anthropic-ratelimit-unified-5h-utilization: 0.25`, `…-5h-reset: <unix>`):
+/// name, share used (percent) and reset.
+fn unified_windows(head: &str) -> Vec<(String, f64, Option<DateTime<Utc>>)> {
+    let mut seen: Vec<(String, Option<f64>, Option<DateTime<Utc>>)> = Vec::new();
+    for line in head.lines() {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        let k = k.trim().to_ascii_lowercase();
+        let Some(rest) = k.strip_prefix("anthropic-ratelimit-unified-") else { continue };
+        let (win, what) = match rest.rsplit_once('-') {
+            Some((w, what @ ("utilization" | "reset"))) => (w.to_string(), what),
+            _ => continue,
+        };
+        let name = match win.as_str() {
+            "5h" => "5-hour".to_string(),
+            "7d" => "Weekly".to_string(),
+            w => match w.strip_prefix("7d_") {
+                Some(model) => format!("Weekly · {}", title_case(model)),
+                None => continue,
+            },
+        };
+        let i = match seen.iter().position(|(n, ..)| *n == name) {
+            Some(i) => i,
+            None => {
+                seen.push((name, None, None));
+                seen.len() - 1
+            }
+        };
+        let v = v.trim();
+        if what == "utilization" {
+            seen[i].1 = v.parse::<f64>().ok().map(|f| f * 100.0);
+        } else {
+            seen[i].2 = v.parse::<i64>().ok().and_then(|t| Utc.timestamp_opt(t, 0).single());
+        }
+    }
+    seen.into_iter().filter_map(|(n, p, r)| Some((n, p?, r))).collect()
 }
 
 fn title_case(s: &str) -> String {
@@ -542,6 +645,21 @@ fn gemini(q: &mut Quota, dir: Option<&Path>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The windows in a real answer's headers (2026-11-20, a setup token).
+    #[test]
+    fn reads_the_plans_windows_from_an_answer() {
+        let head = "HTTP/2 200\r\nanthropic-ratelimit-unified-5h-reset: 1795189200\r\nanthropic-ratelimit-unified-5h-status: allowed\r\nanthropic-ratelimit-unified-5h-utilization: 0.25\r\nanthropic-ratelimit-unified-7d-reset: 1795604400\r\nanthropic-ratelimit-unified-7d-utilization: 0.16\r\nanthropic-ratelimit-unified-7d_opus-utilization: 0.5\r\nanthropic-ratelimit-unified-fallback-percentage: 0.5\r\nanthropic-ratelimit-unified-reset: 1795189200\r\n\r\n{\"id\":\"msg\"}\n200";
+        let w = unified_windows(head);
+        assert_eq!(w.len(), 3, "{w:?}");
+        assert_eq!(w[0].0, "5-hour");
+        assert!((w[0].1 - 25.0).abs() < 1e-9);
+        assert_eq!(w[0].2.map(|t| t.timestamp()), Some(1795189200));
+        assert_eq!(w[1].0, "Weekly");
+        assert!((w[1].1 - 16.0).abs() < 1e-9);
+        assert_eq!(w[2].0, "Weekly · Opus");
+        assert!(w[2].2.is_none());
+    }
 
     #[test]
     fn window_names() {

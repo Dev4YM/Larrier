@@ -285,7 +285,9 @@ pub fn ContextRing(session_id: String, agent: AgentKind, context: Option<(u64, O
             }
         }
     });
-    let busy = app.is_active(&session_id);
+    // Writing, that is: a chat resting on background work (its answer given)
+    // can be asked, or a long subagent would keep it from ever being.
+    let busy = app.is_active(&session_id) && !app.idle.read().contains(&session_id);
     use_effect(use_reactive!(|is_open, messages, busy| {
         if claude && is_open && !busy && messages > 0 {
             ask(app, sid.clone(), messages);

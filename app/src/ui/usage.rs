@@ -547,6 +547,10 @@ static FAILED_CHECKS: AtomicU64 = AtomicU64::new(0);
 static TURN_ENDED: AtomicBool = AtomicBool::new(false);
 /// Plan panels open right now.
 static PANELS_OPEN: AtomicU64 = AtomicU64::new(0);
+/// The next check also asks setup-token plans for their limits now (a call
+/// of its own each): when the user refreshes or opens a plan panel, not on
+/// the steady checks.
+static ASK_PLANS: AtomicBool = AtomicBool::new(false);
 
 fn since_check() -> Duration {
     LAST_CHECK.lock().ok().and_then(|l| l.map(|t| t.elapsed())).unwrap_or(Duration::MAX)
@@ -555,6 +559,9 @@ fn since_check() -> Duration {
 /// Refresh plan limits in the background — at most every three minutes
 /// unless `force`.
 pub fn refresh_quotas(app: App, force: bool) {
+    if force {
+        ASK_PLANS.store(true, Ordering::Relaxed);
+    }
     check(app, force, if force { Duration::ZERO } else { Duration::from_secs(180) });
 }
 
@@ -568,12 +575,13 @@ fn check(app: App, fresh: bool, gap: Duration) {
         }
         *last = Some(Instant::now());
     }
-    tracing::info!("plan limits: checking{}", if fresh { " afresh" } else { "" });
+    let ask = ASK_PLANS.swap(false, Ordering::Relaxed);
+    tracing::info!("plan limits: checking{}{}", if fresh { " afresh" } else { "" }, if ask { ", asking plans" } else { "" });
     let cfg = app.config.peek().clone();
     let agents = plan_agents(&cfg, &app.detected.peek());
     *QUOTA_BUSY.write() = true;
     dioxus::core::spawn_forever(async move {
-        let r = tokio::task::spawn_blocking(move || crate::quota::fetch_all(&cfg, &agents, fresh)).await;
+        let r = tokio::task::spawn_blocking(move || crate::quota::fetch_all_asking(&cfg, &agents, fresh, ask)).await;
         if let Ok(mut list) = r {
             let failed = list.iter().any(|q| q.windows.is_empty() && q.note.as_deref().is_some_and(|n| n.starts_with("Couldn't load")));
             if failed {
@@ -630,6 +638,7 @@ pub fn turn_ended() {
 /// A plan panel opened: up-to-date numbers now, and while it stays open.
 fn panel_opened(app: App) {
     PANELS_OPEN.fetch_add(1, Ordering::Relaxed);
+    ASK_PLANS.store(true, Ordering::Relaxed);
     check(app, true, Duration::from_secs(30));
 }
 

@@ -1134,6 +1134,10 @@ pub fn Composer(
                     choose(k, m, sid.clone());
                 }
             },
+            onchoose: {
+                let sid = session_id.clone();
+                move |(k, m): (AgentKind, Option<String>)| choose(k, m, sid.clone())
+            },
             oneffort: {
                 let sid = session_id.clone();
                 move |(e, fast): (Option<String>, bool)| set_effort(e, fast, sid.clone())
@@ -1775,6 +1779,8 @@ fn ModelPicker(
     /// The account the chat runs as (None: the agent's default).
     account: Option<String>,
     onpick: EventHandler<(AgentKind, Option<String>)>,
+    /// Switch to a model and keep the menu open (a switch turned in it).
+    onchoose: EventHandler<(AgentKind, Option<String>)>,
     oneffort: EventHandler<(Option<String>, bool)>,
     oncontext: EventHandler<String>,
     onaccount: EventHandler<String>,
@@ -2095,14 +2101,21 @@ fn ModelPicker(
                     // Claude Code's Ultracode: a switch beside the effort.
                     let has_ultra = ek == AgentKind::ClaudeCode && choice.as_ref().is_some_and(|c| c.ultracode);
                     let sel_ultra = using && ultracode;
+                    // A switch turns where it is: the menus stay open to see
+                    // it (and turn another).
                     let (ek3, eid3) = (ek.clone(), eid.clone());
                     let toggle_ultra = move |_| {
-                        let mut ed = edit;
-                        ed.set(None);
                         if !using {
-                            onpick.call((ek3.clone(), Some(eid3.clone())));
+                            onchoose.call((ek3.clone(), Some(eid3.clone())));
                         }
                         onultracode.call(!sel_ultra);
+                    };
+                    let (ek4, eid4, se4) = (ek.clone(), eid.clone(), sel_effort.clone());
+                    let toggle_fast = move |_| {
+                        if !using {
+                            onchoose.call((ek4.clone(), Some(eid4.clone())));
+                        }
+                        oneffort.call((se4.clone(), !sel_fast));
                     };
                     let context = choice.as_ref().and_then(|c| c.context);
                     // Context sizes to choose from (Cursor), the one in use checked.
@@ -2126,7 +2139,6 @@ fn ModelPicker(
                         }
                         oneffort.call((e, fast));
                     };
-                    let pick2 = pick.clone();
                     rsx! {
                         div { class: "mp-edit-backdrop", onclick: move |e| { e.stop_propagation(); edit.set(None); } }
                         div { id: "mp-edit", class: "menu mp-edit", role: "menu", onclick: move |e| e.stop_propagation(),
@@ -2175,15 +2187,10 @@ fn ModelPicker(
                                 if context.is_some() || params.is_some() || !efforts.is_empty() { div { class: "menu-sep" } }
                                 div { class: "menu-label", "Options" }
                                 if has_fast {
-                                    {
-                                        let se = sel_effort.clone();
-                                        rsx! {
-                                            button { class: "menu-item", title: "Faster responses, at a higher price",
-                                                onclick: move |_| pick2(se.clone(), !sel_fast),
-                                                span { "Fast" }
-                                                span { class: if sel_fast { "toggle on sm" } else { "toggle sm" } }
-                                            }
-                                        }
+                                    button { class: "menu-item", title: "Faster responses, at a higher price",
+                                        onclick: toggle_fast,
+                                        span { "Fast" }
+                                        span { class: if sel_fast { "toggle on sm" } else { "toggle sm" } }
                                     }
                                 }
                                 if has_ultra {

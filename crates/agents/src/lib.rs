@@ -13,6 +13,7 @@ pub mod models;
 pub mod harness;
 pub mod request;
 pub mod runtime;
+pub mod task_tree;
 pub mod codex_login;
 pub mod updates;
 pub mod user_items;

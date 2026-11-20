@@ -269,6 +269,11 @@ pub struct ClaudeLive {
     tasks: Vec<(String, Option<String>)>,
     /// `stop_task` requests in flight, by request id.
     stopping: HashSet<String>,
+    /// Tasks the user stopped (Claude's task ids): Claude doesn't report
+    /// back on these in a turn of its own.
+    stopped_tasks: HashSet<String>,
+    /// Claude Code's process id (its background shells are its children).
+    agent_pid: Option<u32>,
     /// The reply is done and background tasks still run: the turn goes on
     /// until they end (Claude reports back on them), or the user stops it.
     /// Claude is idle meanwhile and takes new messages.
@@ -565,6 +570,7 @@ impl super::process::Interactive for ClaudeLive {
                 }
             }
             "system" if s(&v, "subtype") == Some("background_tasks_changed") => {
+                let before: Vec<String> = self.tasks.iter().map(|(t, _)| t.clone()).collect();
                 self.background = v["tasks"].as_array().map(|a| a.len()).unwrap_or(0);
                 self.tasks = v["tasks"]
                     .as_array()
@@ -573,6 +579,16 @@ impl super::process::Interactive for ClaudeLive {
                 // Claude reports back on finished work in a turn of its own,
                 // however long that takes: no limit of Lary's.
                 self.inner.handle(line, sink);
+                // But not on work the user stopped (it only notes it for the
+                // next message): with the last of it stopped while the reply
+                // was done, the turn is over.
+                let gone: Vec<&String> = before.iter().filter(|t| !self.tasks.iter().any(|(n, _)| n == *t)).collect();
+                if self.waiting && !self.finished && self.background == 0 && !gone.is_empty() && gone.iter().all(|t| self.stopped_tasks.contains(*t)) {
+                    self.waiting = false;
+                    self.inner.done = true;
+                    self.finished = true;
+                    sink.done(true, Some("success".into()));
+                }
             }
             // The mode Claude runs in; it changes when a plan is approved.
             "system" if s(&v, "permissionMode").is_some() => {
@@ -617,9 +633,16 @@ impl super::process::Interactive for ClaudeLive {
             TurnCommand::Permission { request_id, reply } => self.answer(&request_id, reply, sink),
             TurnCommand::StopTask { tool_id, description } => match self.task_of(&tool_id, description.as_deref()) {
                 Some(task) => {
+                    // What a command started can outlive its shell (an
+                    // emulator, a server): noted now, ended if it does.
+                    let tree = self.agent_pid.zip(self.inner.bg_commands.get(&tool_id)).and_then(|(pid, c)| crate::task_tree::note(pid, c));
+                    if let Some(tree) = tree {
+                        crate::task_tree::end_later(tree, std::time::Duration::from_millis(2500));
+                    }
                     self.host_requests += 1;
                     let rid = format!("lary_{}", self.host_requests);
                     self.stopping.insert(rid.clone());
+                    self.stopped_tasks.insert(task.clone());
                     self.out.push(json!({"type": "control_request", "request_id": rid, "request": {"subtype": "stop_task", "task_id": task}}).to_string());
                 }
                 None => sink.notice("Claude Code doesn't list that task as running, so it couldn't be stopped on its own"),
@@ -659,6 +682,10 @@ impl super::process::Interactive for ClaudeLive {
 
     fn stop_deadline(&self) -> Option<std::time::Instant> {
         self.stop_at
+    }
+
+    fn started(&mut self, pid: u32) {
+        self.agent_pid = Some(pid);
     }
 }
 
@@ -713,6 +740,8 @@ pub struct ClaudeStream {
     bg_by_task: HashMap<String, String>,
     /// Tool calls started with `run_in_background`.
     bg_tools: HashSet<String>,
+    /// The command each background shell call runs (its tool call id).
+    bg_commands: HashMap<String, String>,
     /// TaskStop / KillShell call id → task id it targets.
     stop_calls: HashMap<String, String>,
     /// BashOutput / TaskOutput call id → task id it reads.
@@ -1163,6 +1192,9 @@ impl ClaudeStream {
     fn track_background(&mut self, id: &str, name: &str, input: &Value) {
         if input.get("run_in_background").and_then(|b| b.as_bool()).unwrap_or(false) || name == "Monitor" {
             self.bg_tools.insert(id.to_string());
+            if let Some(c) = s(input, "command") {
+                self.bg_commands.insert(id.to_string(), c.to_string());
+            }
         }
         let target = ["task_id", "shell_id", "bash_id", "agent_id", "id"].iter().find_map(|k| s(input, k)).map(|t| t.to_string());
         if let Some(t) = target {
@@ -2207,6 +2239,40 @@ mod tests {
         p.command(TurnCommand::StopTask { tool_id: "agent2".into(), description: Some("Something else".into()) }, &sink);
         assert!(p.take_output().is_empty());
         assert!(matches!(rx.try_recv(), Ok(AgentEvent::Notice { .. })));
+    }
+
+    /// Real sequence (2.1.328): the reply is done and waits on one command;
+    /// the user stops it. Claude only queues a note for the next message, so
+    /// the turn ends there, not never. A command that ends by itself is still
+    /// waited on for Claude's own report.
+    #[test]
+    fn a_stopped_last_task_ends_the_wait() {
+        let mut p = ClaudeLive::default();
+        feed(&mut p, &[
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"bl3","task_type":"local_bash","description":"Long ping tree"}]}"#,
+            r#"{"type":"assistant","message":{"id":"m1","role":"assistant","content":[{"type":"tool_use","id":"bash1","name":"Bash","input":{"command":"ping","run_in_background":true}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bash1","content":"Command running in background with ID: bl3"}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"started"}],"stop_reason":"end_turn"}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"started","session_id":"s1","total_cost_usd":0.01}"#,
+        ]);
+        assert!(p.waiting && !p.finished());
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        p.command(TurnCommand::StopTask { tool_id: "bash1".into(), description: None }, &EventSink::new(tx));
+        let ev = feed(&mut p, &[
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"lary_1","response":{}}}"#,
+            r#"{"type":"system","subtype":"task_notification","task_id":"bl3","tool_use_id":"bash1","status":"stopped"}"#,
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#,
+        ]);
+        assert!(matches!(ev.last(), Some(AgentEvent::Done { ok: true, .. })), "{ev:?}");
+        assert!(p.finished());
+        // Ended by itself: Claude reports back, so the turn waits for that.
+        let mut q = ClaudeLive::default();
+        feed(&mut q, &[
+            r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b9"}]}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"session_id":"s1"}"#,
+        ]);
+        let ev = feed(&mut q, &[r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#]);
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Done { .. })) && q.waiting, "{ev:?}");
     }
 
     /// The reply ends while a background subagent still works: the turn

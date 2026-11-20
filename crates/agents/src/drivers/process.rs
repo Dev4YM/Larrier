@@ -131,6 +131,8 @@ pub trait Interactive {
     fn finished(&self) -> bool;
     /// A stop was asked for: past this moment the process is killed.
     fn stop_deadline(&self) -> Option<std::time::Instant>;
+    /// The agent's process started, with this id.
+    fn started(&mut self, _pid: u32) {}
 }
 
 /// Spawn `cmd`, write `first` lines, then feed `parser` every stdout line
@@ -150,6 +152,9 @@ pub async fn run_interactive<P: Interactive>(
             return ProcessOutcome { exit_code: None, cancelled: false, stderr_tail: vec![e.to_string()] };
         }
     };
+    if let Some(pid) = child.id() {
+        parser.started(pid);
+    }
     let mut stdin = child.stdin.take();
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");

@@ -1243,6 +1243,9 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
 .chat-row.unread .bullet .pt { width: 7px; height: 7px; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-c, var(--blue)) 18%, transparent); }
 .chat-row .bullet { position: relative; }
 .chat-row .bullet .unread-dot { position: absolute; right: -1px; top: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-c, var(--blue)); box-shadow: 0 0 0 2px var(--win); }
+/* Waiting for your answer: the unread mark in amber. */
+.chat-row.asking .bullet .unread-dot { background: var(--amber); }
+.chat-row.asking .bullet .pt, .chat-row.asking.unread .bullet .pt { width: 7px; height: 7px; background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 20%, transparent); }
 
 /* Side panel tool tabs (preview tabs are italic until kept). */
 .rp-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; overflow-x: auto; }

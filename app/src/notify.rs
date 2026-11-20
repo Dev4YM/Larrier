@@ -42,19 +42,71 @@ fn settings() -> Settings {
 // Agent events → toast + chime
 // ---------------------------------------------------------------------------
 
-/// An agent finished a turn (or needs input). `ok == false` for failures.
+/// An agent finished a turn. `ok == false` for failures; `viewing`: its
+/// chat is the one shown.
 ///
 /// Plays the completion chime when `completion_sound` is on and shows a
-/// native notification when `notify_on_finish` is on and the window is not
-/// focused. Call from inside the Dioxus runtime (the chime goes through the
-/// webview); the notification itself is shown on a background thread.
-pub fn agent_event(title: &str, body: &str, ok: bool) {
+/// native notification when `notify_on_finish` is on, unless the user is
+/// looking at that chat in Lary already (the window focused and the chat
+/// shown): on another chat, or away from the window, it shows. Call from
+/// inside the Dioxus runtime (the chime goes through the webview); the
+/// notification itself is shown on a background thread.
+pub fn agent_event(title: &str, body: &str, ok: bool, viewing: bool) {
     let s = settings();
     if s.completion_sound {
         play_sound(ok);
     }
-    if s.notify_on_finish && !is_focused() {
+    if s.notify_on_finish && !(is_focused() && viewing) {
         show_notification(title, body);
+    }
+}
+
+/// Requests waiting for an answer, gathered for one notification: each
+/// one's chat title.
+static ASKS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// An agent asks for the user's answer (a permission, a question) in chat
+/// `title` (`viewing`: it's the one shown). Like [`agent_event`], but the
+/// requests that come close together make one notification ("4 requests
+/// need your answer"), not one each.
+pub fn ask_event(title: &str, viewing: bool) {
+    let s = settings();
+    if !s.notify_on_finish || (is_focused() && viewing) {
+        return;
+    }
+    let first = {
+        let Ok(mut asks) = ASKS.lock() else { return };
+        asks.push(title.to_string());
+        asks.len() == 1
+    };
+    if !first {
+        return;
+    }
+    if s.completion_sound {
+        play_sound(true);
+    }
+    let _ = std::thread::Builder::new().name("lary-asks".into()).spawn(|| {
+        std::thread::sleep(Duration::from_millis(1200));
+        let asks = ASKS.lock().map(|mut a| std::mem::take(&mut *a)).unwrap_or_default();
+        let (title, body) = asks_note(&asks);
+        if !asks.is_empty() {
+            show_notification(&title, &body);
+        }
+    });
+}
+
+/// The notification for requests waiting in chats `asks` (one title each).
+fn asks_note(asks: &[String]) -> (String, String) {
+    let mut chats: Vec<&String> = Vec::new();
+    for a in asks {
+        if !chats.contains(&a) {
+            chats.push(a);
+        }
+    }
+    match (asks.len(), chats.as_slice()) {
+        (1, [c]) => (c.to_string(), format!("{c} needs your input")),
+        (n, [c]) => (c.to_string(), format!("{n} requests need your answer")),
+        (n, cs) => ("Lary".into(), format!("{n} requests need your answer, in {}", cs.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", "))),
     }
 }
 
@@ -645,6 +697,15 @@ pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
     use lary_core::{AgentKind, Session, ToolCall};
+
+    /// Requests that come together make one notification.
+    #[test]
+    fn asks_make_one_notification() {
+        let one = |t: &str| t.to_string();
+        assert_eq!(asks_note(&[one("GIVITY")]), ("GIVITY".into(), "GIVITY needs your input".into()));
+        assert_eq!(asks_note(&[one("GIVITY"), one("GIVITY"), one("GIVITY"), one("GIVITY")]), ("GIVITY".into(), "4 requests need your answer".into()));
+        assert_eq!(asks_note(&[one("GIVITY"), one("1p.sa"), one("GIVITY")]), ("Lary".into(), "3 requests need your answer, in GIVITY, 1p.sa".into()));
+    }
 
     const MON: MonitorRect = MonitorRect { x: 0.0, y: 0.0, width: 1920.0, height: 1040.0 };
     const RIGHT: MonitorRect = MonitorRect { x: 1920.0, y: 0.0, width: 2560.0, height: 1400.0 };

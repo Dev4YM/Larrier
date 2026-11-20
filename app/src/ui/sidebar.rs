@@ -729,12 +729,18 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool, #[props(default = "list"
         return rsx! { DraftRow { s, logo } };
     }
     let mut app = use_app();
-    let running = ctx.running.contains(&s.id);
     let selected = ctx.selected.as_deref() == Some(s.id.as_str());
+    // It waits for your answer (a permission, a question) while you're on
+    // another chat: an unread mark, amber, instead of the working spinner.
+    let asking = !selected && app.permissions.read().get(&s.id).is_some_and(|v| !v.is_empty());
+    let running = ctx.running.contains(&s.id) && !asking;
     let (id, id2, id3) = (s.id.clone(), s.id.clone(), s.id.clone());
     let mut cls = String::from("chat-row");
     if selected {
         cls.push_str(" selected");
+    }
+    if asking {
+        cls.push_str(" asking");
     }
     // Just started here: it slides into its project.
     if chrono::Utc::now() - s.created_at < chrono::Duration::seconds(8) {
@@ -835,10 +841,10 @@ fn ChatRow(s: SessionSummary, ctx: SideCtx, logo: bool, #[props(default = "list"
                 } else if s.icon.is_some() || s.color.is_some() {
                     // Its own look (from its Edit dialog).
                     super::projects::ProjectMark { icon: s.icon.clone(), color: s.color.clone(), size: 14, fallback: Some("message-square") }
-                    if s.unread { span { class: "unread-dot" } }
+                    if s.unread || asking { span { class: "unread-dot" } }
                 } else if logo {
                     AgentGlyph { kind: s.agent.clone() }
-                    if s.unread { span { class: "unread-dot" } }
+                    if s.unread || asking { span { class: "unread-dot" } }
                 } else {
                     span { class: "pt" }
                 }

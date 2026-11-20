@@ -1716,7 +1716,7 @@ impl App {
                             AgentEvent::Permission { request } => {
                                 idle = Some(false);
                                 app.permissions.write().entry(id.clone()).or_default().push(request.clone());
-                                crate::notify::agent_event(&s.title, &format!("{} needs your input", s.title), true);
+                                crate::notify::ask_event(&s.title, app.current_id().as_deref() == Some(id.as_str()));
                             }
                             AgentEvent::Steered { text, .. } => {
                                 if let Some(v) = app.steering.write().get_mut(&id) {
@@ -1894,7 +1894,7 @@ impl App {
             if let Some((t, st)) = &title {
                 let ok = *st != SessionStatus::Error;
                 let what = if ok { "is ready for review" } else { "failed" };
-                crate::notify::agent_event(t, &format!("{t} {what}"), ok);
+                crate::notify::agent_event(t, &format!("{t} {what}"), ok, app.current_id().as_deref() == Some(id.as_str()));
             }
             // Messages sent into the turn that it never took in go first in
             // the queue.

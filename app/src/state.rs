@@ -1629,6 +1629,9 @@ impl App {
             let mut done = false;
             // The agent used the browser this turn (the tab opened once).
             let mut browsing = false;
+            // The reply rests (its answer given, background work going on)
+            // and hasn't gone on since.
+            let mut at_rest = false;
             let Some(mut sig) = app.open.peek().get(&id).copied() else {
                 app.running.write().remove(&id);
                 crate::live::mark_idle(&id);
@@ -1670,6 +1673,8 @@ impl App {
                 let mut resting = false;
                 // The reply came to rest in this batch (whatever came after).
                 let mut rested = false;
+                // The agent wrote or did something in this batch.
+                let mut went_on = false;
                 {
                     let mut s = sig.write();
                     let s = &mut *s;
@@ -1691,6 +1696,7 @@ impl App {
                             | AgentEvent::Error { .. } => {
                                 idle = Some(false);
                                 resting = false;
+                                went_on = true;
                             }
                             _ => {}
                         }
@@ -1769,6 +1775,32 @@ impl App {
                             s.extra.insert(key, serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
                         } else if done && s.extra.contains_key(&key) {
                             s.extra.remove(&key);
+                        }
+                        // Each time it rests and goes on again: one more
+                        // "Worked for" in the turn (see `TurnView`).
+                        let (mid, len) = (m.id.clone(), m.parts.len());
+                        let now = chrono::Utc::now().to_rfc3339();
+                        let rkey = format!("rounds:{mid}");
+                        let mut rounds: Vec<Round> = s.extra.get(&rkey).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+                        let before = rounds.clone();
+                        if at_rest && went_on {
+                            // Gone on again (a message, or its own report on
+                            // finished work).
+                            if let Some(r) = rounds.last_mut().filter(|r| r.resumed.is_none()) {
+                                r.resumed = Some(now.clone());
+                            }
+                            at_rest = false;
+                        }
+                        if rested && resting {
+                            match rounds.last_mut() {
+                                // Rested again with nothing new: the same rest.
+                                Some(r) if r.at == len => {}
+                                _ => rounds.push(Round { at: len, rested: now, resumed: None }),
+                            }
+                            at_rest = true;
+                        }
+                        if rounds != before {
+                            s.extra.insert(rkey, serde_json::to_value(&rounds).unwrap_or_default());
                         }
                     }
                     // Save every few seconds and refresh the sidebar row a few
@@ -3351,6 +3383,17 @@ pub fn signed_in_as(account: &lary_core::Account) -> (bool, Option<String>) {
         }
         _ => (true, None),
     }
+}
+
+/// A point where a reply came to rest with its answer given while work it
+/// started ran on (kept as `rounds:<message id>`): the parts before `at`
+/// are what it did up to then. `resumed`: when it went on again.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug, Default)]
+pub struct Round {
+    pub at: usize,
+    pub rested: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumed: Option<String>,
 }
 
 /// The folder an agent's chats run in as an account (the chat's, else the

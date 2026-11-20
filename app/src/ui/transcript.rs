@@ -575,6 +575,158 @@ fn worked_for(secs: i64) -> String {
     }
 }
 
+/// One round of a turn: what the agent did until it gave an answer and
+/// rested (or until now).
+struct Seg {
+    /// Its component key: where in the replies it starts.
+    id: String,
+    /// The key its opened/folded state is kept under.
+    store: String,
+    replies: Vec<Message>,
+    secs: i64,
+    /// An earlier round: the agent went on after it.
+    complete: bool,
+}
+
+/// The replies' parts from `from` up to `to` (message, part), or to the end.
+/// A message cut short keeps its own id; its usage (the turn's model, tokens
+/// and cost, shown once) stays only with the round that ends the turn.
+fn slice_replies(replies: &[Message], from: (usize, usize), to: Option<(usize, usize)>, keep_usage: bool) -> Vec<Message> {
+    let to = to.unwrap_or((replies.len(), 0));
+    let mut out = Vec::new();
+    for (mi, m) in replies.iter().enumerate() {
+        if mi < from.0 || mi > to.0 || (mi == to.0 && to.1 == 0) {
+            continue;
+        }
+        let a = if mi == from.0 { from.1.min(m.parts.len()) } else { 0 };
+        let b = if mi == to.0 { to.1.min(m.parts.len()) } else { m.parts.len() };
+        if a >= b && !(a == 0 && m.parts.is_empty()) {
+            continue;
+        }
+        let mut part = m.clone();
+        part.parts = m.parts[a..b.max(a)].to_vec();
+        if !keep_usage {
+            part.usage = None;
+        }
+        out.push(part);
+    }
+    out
+}
+
+/// A round's steps, folded under "Worked for …" (or "Working" while what it
+/// started runs on) once it gave its answer, with the answer drawn out
+/// below; open while it's written, or when it was stopped before the end.
+/// Opened or folded by hand, it stays so, kept with the chat.
+#[component]
+fn Segment(
+    session_id: String,
+    store: String,
+    replies: Vec<Message>,
+    secs: i64,
+    complete: bool,
+    live: bool,
+    waiting: bool,
+    resting: bool,
+    stopped: bool,
+    show_reasoning: bool,
+    fold_steps: bool,
+) -> Element {
+    let mut chosen = use_signal(|| None::<bool>);
+    let mut steps = use_signal(|| STEP_WINDOW);
+    // The answer: the last text, when nothing the agent did came after it
+    // (words before a step are narration, not the answer).
+    let mut final_at: Option<(usize, usize)> = None;
+    for (mi, m) in replies.iter().enumerate().rev() {
+        if let Some(pi) = m.parts.iter().rposition(|p| matches!(p, Part::Text { text } if !text.trim().is_empty())) {
+            final_at = Some((mi, pi));
+            break;
+        }
+    }
+    let work_after = |(fmi, fpi): (usize, usize)| replies.iter().enumerate().any(|(mi, m)| m.parts.iter().enumerate().any(|(pi, p)| (mi, pi) > (fmi, fpi) && matches!(p, Part::Tool(_) | Part::Plan { .. })));
+    // Folded once the agent gave its answer: an earlier round always; the
+    // round now when the agent finished, or rests on work still running
+    // ("Working"). Not while it writes, nor when it was stopped first.
+    let finished = (complete || (!live && !stopped)) && final_at.is_some_and(|f| !work_after(f));
+    let final_at = final_at.filter(|_| finished);
+    let has_work = replies.iter().enumerate().any(|(mi, m)| m.parts.iter().enumerate().any(|(pi, p)| Some((mi, pi)) != final_at && !matches!(p, Part::Error { .. })));
+    let working = resting && !complete;
+    let label = match worked_for(secs) {
+        _ if working => "Working".to_string(),
+        s if s.is_empty() || secs > 6 * 3600 => "Worked".to_string(),
+        s => format!("Worked for {s}"),
+    };
+    let hidden = replies.len().saturating_sub(steps());
+    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == store).map(|(_, o)| o)).unwrap_or(!(finished && fold_steps));
+    let final_mi = final_at.map(|(mi, _)| mi);
+    // "Planning next moves": from sending until the agent answers, and
+    // between its steps. One row in one place inside the turn, so it never
+    // jumps when the first reply arrives.
+    let planning = !complete
+        && match replies.last() {
+            None => waiting,
+            Some(m) => live && !last_is_live(m),
+        };
+    // What a folded round shows: its errors and its answer, by when they came.
+    let mut folded: Vec<(usize, usize)> = replies
+        .iter()
+        .enumerate()
+        .flat_map(|(mi, m)| m.parts.iter().enumerate().filter(|(_, p)| matches!(p, Part::Error { .. })).map(move |(pi, _)| (mi, pi)))
+        .collect();
+    folded.extend(final_at);
+    folded.sort();
+    let folded: Vec<(String, Part)> = folded
+        .into_iter()
+        .map(|(mi, pi)| (if Some((mi, pi)) == final_at { format!("f-{store}") } else { format!("e-{store}-{mi}-{pi}") }, replies[mi].parts[pi].clone()))
+        .collect();
+    let n = replies.len();
+    rsx! {
+        // While it runs the steps show as they come, with no heading; once
+        // it rests or ends "Worked for …" heads them. The steps stay the
+        // same components when it ends, so nothing is made again.
+        if has_work && !live {
+            div { class: "step worked",
+                onclick: {
+                    let (sid, key) = (session_id.clone(), store.clone());
+                    move |_| {
+                        chosen.set(Some(!open));
+                        set_turn_open(&sid, &key, !open);
+                    }
+                },
+                span { class: if working { "verb shimmer" } else { "verb" }, "{label}" }
+                span { class: "chev", if open { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
+            }
+        }
+        // The steps: in sight while it runs, then folded (they slide shut);
+        // once the answer is given it's below them, never in.
+        super::Collapse { open: live || open, class: "trace".to_string(),
+            // The newest steps; a long round shows earlier ones on demand.
+            if hidden > 0 {
+                button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
+            }
+            for (mi, m) in replies.iter().enumerate().skip(hidden) {
+                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == n, show_reasoning, planning: false,
+                    skip_final: finished && Some(mi) == final_mi, drop_errors: finished }
+            }
+        }
+        if planning {
+            div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
+        }
+        if finished {
+            // The answer and any errors, in the order they happened (a limit
+            // hit after the answer shows after it).
+            for (k, part) in folded {
+                PartView {
+                    key: "{k}",
+                    session_id: session_id.clone(),
+                    part,
+                    live: false,
+                    show_reasoning,
+                }
+            }
+        }
+    }
+}
+
 /// A turn. Reads its messages without subscribing: it re-renders only when
 /// its fingerprint (`fp`) or liveness changes.
 #[component]
@@ -598,13 +750,8 @@ fn TurnView(
     fold_steps: bool,
 ) -> Element {
     let app = use_app();
-    // The work's steps show while it runs and fold away, smoothly, when it
-    // ends: the answer stays in sight. Opened or folded by hand, a turn stays
-    // so, kept with the chat.
-    let mut chosen = use_signal(|| None::<bool>);
-    let mut steps = use_signal(|| STEP_WINDOW);
     let _ = fp;
-    let Some((turn, feedback, stopped)) = app.peek_session(&session_id, |s| {
+    let Some((turn, feedback, stopped, cuts)) = app.peek_session(&session_id, |s| {
         let end = end.min(s.messages.len());
         let start = start.min(end);
         let t = build_turn(&s.messages[start..end]);
@@ -617,57 +764,61 @@ fn TurnView(
             .to_string();
         // Stopped by the user, or failed, before the agent finished.
         let stopped = t.replies.last().is_some_and(|m| s.extra.contains_key(&format!("stopped:{}", m.id)));
-        (t, fb, stopped)
+        // Where the reply rested with its answer given (and went on later).
+        let cuts: Vec<(usize, crate::state::Round)> = t
+            .replies
+            .iter()
+            .enumerate()
+            .flat_map(|(mi, m)| {
+                let rounds: Vec<crate::state::Round> = s.extra.get(&format!("rounds:{}", m.id)).and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+                rounds.into_iter().map(move |r| (mi, r))
+            })
+            .collect();
+        (t, fb, stopped, cuts)
     }) else {
         return rsx! {};
     };
-    // The answer: the last text, when nothing the agent did came after it
-    // (words before a step are narration, not the answer).
-    let mut final_at: Option<(usize, usize)> = None;
-    for (mi, m) in turn.replies.iter().enumerate().rev() {
-        if let Some(pi) = m.parts.iter().rposition(|p| matches!(p, Part::Text { text } if !text.trim().is_empty())) {
-            final_at = Some((mi, pi));
-            break;
+    let at = |t: &str| chrono::DateTime::parse_from_rfc3339(t).ok().map(|t| t.with_timezone(&chrono::Utc));
+    let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
+    // The turn in rounds: each time the agent gave its answer and rested on
+    // work it started, then went on, a round ends. Each folds on its own
+    // under "Worked for …", its answer below it.
+    let mut segs: Vec<Seg> = Vec::new();
+    let (mut from, mut t0) = ((0usize, 0usize), started);
+    for (mi, r) in cuts {
+        let Some(m) = turn.replies.get(mi) else { continue };
+        let to = (mi, r.at.min(m.parts.len()));
+        let rested = at(&r.rested).unwrap_or(ended);
+        if to <= from {
+            continue;
+        }
+        let id = format!("{turn_key}@{}.{}", from.0, from.1);
+        segs.push(Seg { store: id.clone(), id, replies: slice_replies(&turn.replies, from, Some(to), false), secs: (rested - t0).num_seconds(), complete: true });
+        from = to;
+        t0 = r.resumed.as_deref().and_then(at).unwrap_or(rested);
+    }
+    let rest = slice_replies(&turn.replies, from, None, true);
+    let tail = !rest.is_empty() || segs.is_empty() || live || waiting;
+    if tail {
+        let id = format!("{turn_key}@{}.{}", from.0, from.1);
+        segs.push(Seg { store: id.clone(), id, replies: rest, secs: (ended - t0).num_seconds(), complete: false });
+    } else if let Some(s) = segs.last_mut() {
+        // Rested and nothing since: that round is the one now (still
+        // "Working" while its work runs).
+        s.complete = false;
+        if let Some(m) = turn.replies.last() {
+            if let Some(last) = s.replies.last_mut() {
+                last.usage = m.usage.clone();
+            }
         }
     }
-    let work_after = |(fmi, fpi): (usize, usize)| turn.replies.iter().enumerate().any(|(mi, m)| m.parts.iter().enumerate().any(|(pi, p)| (mi, pi) > (fmi, fpi) && matches!(p, Part::Tool(_) | Part::Plan { .. })));
-    // Folded, with its answer drawn out below, only once the agent truly
-    // finished: not stopped, not resting on work still running, its last
-    // words after its last step. Otherwise its steps stay open, in order.
-    let finished = !live && !resting && !stopped && final_at.is_some_and(|f| !work_after(f));
-    let final_at = final_at.filter(|_| finished);
-    let has_work = turn.replies.iter().enumerate().any(|(mi, m)| m.parts.iter().enumerate().any(|(pi, p)| Some((mi, pi)) != final_at && !matches!(p, Part::Error { .. })));
-    let secs = (ended - started).num_seconds();
-    let label = match worked_for(secs) {
-        _ if resting => "Working".to_string(),
-        s if s.is_empty() || secs > 6 * 3600 => "Worked".to_string(),
-        s => format!("Worked for {s}"),
-    };
+    // The first round keeps the turn's own key (what was opened by hand
+    // before rounds were told apart stays so).
+    if let Some(s) = segs.first_mut() {
+        s.store = turn_key.clone();
+    }
+    let n_segs = segs.len();
     let last_reply = turn.replies.last().cloned();
-    let hidden = turn.replies.len().saturating_sub(steps());
-    let turn_key = turn.user.as_ref().or(turn.replies.first()).map(|m| m.id.clone()).unwrap_or_default();
-    let open = chosen().or_else(|| turns_open(&session_id).into_iter().find(|(k, _)| *k == turn_key).map(|(_, o)| o)).unwrap_or(!(finished && fold_steps));
-    let final_mi = final_at.map(|(mi, _)| mi);
-    // "Planning next moves": from sending until the agent answers, and
-    // between its steps. One row in one place inside the turn, so it never
-    // jumps when the first reply arrives.
-    let planning = match turn.replies.last() {
-        None => waiting,
-        Some(m) => live && !last_is_live(m),
-    };
-    // What a folded turn shows: its errors and its answer, by when they came.
-    let mut folded: Vec<(usize, usize)> = turn
-        .replies
-        .iter()
-        .enumerate()
-        .flat_map(|(mi, m)| m.parts.iter().enumerate().filter(|(_, p)| matches!(p, Part::Error { .. })).map(move |(pi, _)| (mi, pi)))
-        .collect();
-    folded.extend(final_at);
-    folded.sort();
-    let folded: Vec<(String, usize, usize)> = folded
-        .into_iter()
-        .map(|(mi, pi)| (if Some((mi, pi)) == final_at { format!("f-{turn_key}") } else { format!("e-{}-{pi}", turn.replies[mi].id) }, mi, pi))
-        .collect();
     // Each turn is its own box so its sticky prompt card scrolls away when
     // the next prompt arrives (instead of stacking under it).
     rsx! {
@@ -683,47 +834,24 @@ fn TurnView(
                 }
             }
         }
-        // While it runs the steps show as they come, with no heading; once
-        // it ends "Worked for …" heads them. The steps stay the same
-        // components when the turn ends, so nothing is made again.
-        if has_work && !live {
-            div { class: "step worked",
-                onclick: {
-                    let (sid, key) = (session_id.clone(), turn_key.clone());
-                    move |_| {
-                        chosen.set(Some(!open));
-                        set_turn_open(&sid, &key, !open);
+        for (k, seg) in segs.into_iter().enumerate() {
+            {
+                let now = k + 1 == n_segs;
+                rsx! {
+                    Segment {
+                        key: "{seg.id}",
+                        session_id: session_id.clone(),
+                        store: seg.store,
+                        replies: seg.replies,
+                        secs: seg.secs,
+                        complete: seg.complete,
+                        live: live && now,
+                        waiting: waiting && now,
+                        resting: resting && now,
+                        stopped: stopped && now,
+                        show_reasoning,
+                        fold_steps,
                     }
-                },
-                span { class: if resting { "verb shimmer" } else { "verb" }, "{label}" }
-                span { class: "chev", if open { Icon { i: I::ChevronDown, size: 12 } } else { Icon { i: I::ChevronRight, size: 12 } } }
-            }
-        }
-        // The steps: in sight while it runs, then folded (they slide shut);
-        // once it's done the answer and errors are below them, never in.
-        super::Collapse { open: live || open, class: "trace".to_string(),
-            // The newest steps; a long turn shows earlier ones on demand.
-            if hidden > 0 {
-                button { class: "load-earlier", onclick: move |e| { e.stop_propagation(); steps.set(steps() + STEP_WINDOW * 3); }, "Show {hidden} earlier steps" }
-            }
-            for (mi, m) in turn.replies.iter().enumerate().skip(hidden) {
-                AssistantMessage { key: "{mi}-{m.id}", session_id: session_id.clone(), msg: m.clone(), streaming: live && mi + 1 == turn.replies.len(), show_reasoning, planning: false,
-                    skip_final: finished && Some(mi) == final_mi, drop_errors: finished }
-            }
-        }
-        if planning {
-            div { class: "thinking-row", span { class: "shimmer", "Planning next moves" } }
-        }
-        if finished {
-            // The answer and any errors, in the order they happened (a limit
-            // hit after the answer shows after it).
-            for (k, mi, pi) in folded {
-                PartView {
-                    key: "{k}",
-                    session_id: session_id.clone(),
-                    part: turn.replies[mi].parts[pi].clone(),
-                    live: false,
-                    show_reasoning,
                 }
             }
         }

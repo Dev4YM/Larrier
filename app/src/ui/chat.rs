@@ -114,7 +114,9 @@ pub fn AgentView(id: String, #[props(default)] sub: Option<String>) -> Element {
                 // merged, under the panel's tab shown), so going back finds
                 // it as it was.
                 ChatColumn { id: id.clone(), input_id: "composer-input" }
-                if let Some(tool) = sub.clone() {
+                // Merged, a panel tab shown takes the place of a subagent's
+                // transcript too (drawn over it, it left the tab blank).
+                if let Some(tool) = sub.clone().filter(|_| !merged || on_chat) {
                     div { key: "{tool}", class: "sub-layer",
                         super::tasks::SubagentTranscript { session_id: id.clone(), tool_id: tool }
                     }
@@ -749,25 +751,35 @@ fn ChatTabChip(tab: ChatTab, active: bool) -> Element {
     let sid = tab.view.session_id().unwrap_or("").to_string();
     let sid_m = sid.clone();
     let summary = use_memo(move || app.sessions.read().iter().find(|s| s.id == sid_m).map(|s| (s.title.clone(), s.agent.clone(), s.unread)));
-    let running = app.is_active(&sid);
-    let sub = match &tab.view {
+    // A subagent's tab: named by its task ("Audit the docs", as the agent
+    // described it), the kind of agent after it in the tip; working only while
+    // that subagent does, not while its chat goes on.
+    let sub_info = match &tab.view {
+        // Read subscribing: the tab follows the subagent finishing.
         View::Subagent { session, tool } => Some(
-            app.peek_session(session, |s| {
-                s.messages
-                    .iter()
-                    .flat_map(|m| m.tool_calls())
-                    .find(|t| &t.id == tool)
-                    .and_then(|t| t.agent_name.clone().or_else(|| t.title.clone()))
-            })
-            .flatten()
-            .unwrap_or_else(|| "Subagent".into()),
+            app.session_sig(session)
+                .and_then(|sig| {
+                    let s = sig.read();
+                    let found = s.messages.iter().flat_map(|m| m.tool_calls()).find(|t| &t.id == tool).map(|t| {
+                        let task = t.input["description"].as_str().map(str::trim).filter(|d| !d.is_empty()).map(String::from).or_else(|| t.title.clone()).filter(|d| !d.is_empty());
+                        (task, t.agent_name.clone(), matches!(t.status, lary_core::ToolStatus::Running | lary_core::ToolStatus::Pending))
+                    });
+                    found
+                })
+                .unwrap_or((None, None, false)),
         ),
         _ => None,
     };
+    let running = match &sub_info {
+        Some((_, _, working)) => *working,
+        None => app.is_active(&sid),
+    };
+    let sub = sub_info.as_ref().map(|(task, kind, _)| task.clone().or_else(|| kind.clone()).unwrap_or_else(|| "Subagent".into()));
+    let sub_kind = sub_info.as_ref().and_then(|(task, kind, _)| kind.clone().filter(|_| task.is_some()));
     let (title, agent, unread) = summary().unwrap_or_else(|| ("Agent".into(), lary_core::AgentKind::ClaudeCode, false));
     let label = sub.clone().unwrap_or_else(|| title.clone());
     let tip = match &sub {
-        Some(s) => format!("{s} · subagent of {title}{}", if tab.preview { "\nPreview — double-click to keep open" } else { "" }),
+        Some(s) => format!("{s} · {} of {title}{}", sub_kind.as_deref().unwrap_or("subagent"), if tab.preview { "\nPreview — double-click to keep open" } else { "" }),
         None => format!("{} · {title}", agent.display_name()),
     };
     let preview = tab.preview;

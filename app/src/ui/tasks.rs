@@ -766,11 +766,23 @@ pub fn shell_title(t: &ToolCall) -> String {
 /// The latest step of a subagent, or the latest output line of a command.
 fn activity(t: &ToolCall) -> Option<String> {
     let line = if !t.subagent.is_empty() {
-        t.subagent.iter().rev().flat_map(|m| m.parts.iter().rev()).find_map(|p| match p {
-            Part::Tool(x) => Some(x.title.clone().unwrap_or_else(|| x.name.clone())),
+        let last_words = |p: &Part| match p {
             Part::Text { text } => text.lines().rev().map(str::trim).find(|l| !l.is_empty()).map(str::to_string),
             _ => None,
-        })?
+        };
+        let parts = || t.subagent.iter().rev().flat_map(|m| m.parts.iter().rev());
+        // Done: what it answered. Working: its latest step — not Claude
+        // Code's own handing back at the end (`SubagentHandback`).
+        let done = !matches!(t.status, ToolStatus::Running | ToolStatus::Pending);
+        let answer = if done { parts().find_map(last_words) } else { None };
+        match answer {
+            Some(a) => a,
+            None => parts().find_map(|p| match p {
+                Part::Tool(x) if x.name == "SubagentHandback" => None,
+                Part::Tool(x) => Some(x.title.clone().unwrap_or_else(|| x.name.clone())),
+                p => last_words(p),
+            })?,
+        }
     } else if t.is_subagent() {
         // Without its transcript a subagent's output is the launch notice
         // ("Async agent launched … output_file: …"), not its work.

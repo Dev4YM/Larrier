@@ -934,11 +934,13 @@ select.input { cursor: pointer; padding-right: 4px; }
 
 /* Header: repo chip + tab strip */
 .main-head { gap: 4px; min-width: 0; }
-.repo-chip { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 6px; border-radius: var(--r-md); color: var(--fg-2); font-size: var(--ui-md); flex-shrink: 1; min-width: 0; max-width: 180px; }
+/* The project's name stays whole (up to its cap); the tabs beside it scroll
+   when there's no room, rather than either squeezing to a few letters. */
+.repo-chip { height: 26px; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 6px; border-radius: var(--r-md); color: var(--fg-2); font-size: var(--ui-md); flex-shrink: 0; min-width: 0; max-width: 180px; }
 .repo-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); font-weight: 500; }
 .tab-strip { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding: 0 2px; }
 .tab-strip::-webkit-scrollbar { display: none; }
-.ctab { height: 28px; display: inline-flex; align-items: center; gap: 7px; padding: 0 4px 0 9px; border-radius: var(--r-md); font-size: var(--ui-md); color: var(--fg-2); flex: 0 1 auto; min-width: 72px; max-width: 240px; cursor: default; user-select: none; position: relative; }
+.ctab { height: 28px; display: inline-flex; align-items: center; gap: 7px; padding: 0 4px 0 9px; border-radius: var(--r-md); font-size: var(--ui-md); color: var(--fg-2); flex: none; max-width: 240px; cursor: default; user-select: none; position: relative; }
 .ctab:hover { background: var(--hover); color: var(--fg); }
 .ctab.on { background: var(--chip); color: var(--fg); }
 .ctab.static { padding-right: 10px; }
@@ -1259,6 +1261,17 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
    panel's, alike), and the panel's tab shown lies over the chat, which stays
    laid out under it, as it was when its tab comes back. */
 .chat-col.merged > .main-head .rp-tab { font-size: var(--ui-md); padding: 0 4px 0 9px; gap: 7px; }
+/* One row: it scrolls as a whole (the wheel too, a thin bar on hover). */
+.merged-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 auto; overflow-x: auto; overflow-y: hidden; }
+.merged-tabs > .tab-strip, .merged-tabs > .rp-tabs { flex: none; overflow: visible; }
+.merged-tabs::-webkit-scrollbar { height: 3px; }
+.merged-tabs::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+.merged-tabs:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--fg-3) 45%, transparent); }
+/* A row of tabs fades at an edge with more past it (set by the window's
+   script): the tab cut there reads as "more this way". */
+:is(.merged-tabs, .rp-tabs, .browser-tabs, .tab-strip).more-right { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+:is(.merged-tabs, .rp-tabs, .browser-tabs, .tab-strip).more-left { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+:is(.merged-tabs, .rp-tabs, .browser-tabs, .tab-strip).more-left.more-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .chat-col.merged > .main-head .rp-tab:hover { background: var(--hover); }
 .chat-col.merged > .main-head .rp-tab.active { background: var(--chip); }
 .agent-frame.with-toggle .chat-col.merged > .main-head { padding-right: 46px; }

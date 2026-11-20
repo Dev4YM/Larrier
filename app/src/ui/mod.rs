@@ -215,11 +215,31 @@ pub fn Root() -> Element {
         // wheel too (a plain wheel only goes up and down).
         document::eval(
             r#"
+            // An edge with more tabs past it fades (`more-left`, `more-right`):
+            // a tab cut there reads as "more this way", not as cut off.
+            if (!window.__laryTabEdges) {
+              window.__laryTabEdges = true;
+              const SEL = '.merged-tabs, .rp-tabs, .browser-tabs, .tab-strip';
+              const edge = (r) => {
+                r.classList.toggle('more-left', r.scrollLeft > 1);
+                r.classList.toggle('more-right', r.scrollLeft + r.clientWidth < r.scrollWidth - 1);
+              };
+              let due = false;
+              const all = () => { if (due) return; due = true; requestAnimationFrame(() => { due = false; document.querySelectorAll(SEL).forEach(edge); }); };
+              document.addEventListener('scroll', (e) => { if (e.target.matches && e.target.matches(SEL)) edge(e.target); }, true);
+              window.addEventListener('resize', all);
+              new MutationObserver(all).observe(document.body, { childList: true, subtree: true });
+              all();
+            }
             if (!window.__laryTabWheel) {
               window.__laryTabWheel = true;
               document.addEventListener('wheel', (e) => {
-                const row = e.target.closest && e.target.closest('.rp-tabs, .browser-tabs');
-                if (!row || row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+                // The nearest such row that overflows (merged, the chat's and
+                // the panel's tabs scroll as one row).
+                const ROWS = '.merged-tabs, .rp-tabs, .browser-tabs';
+                let row = e.target.closest && e.target.closest(ROWS);
+                while (row && row.scrollWidth <= row.clientWidth) row = row.parentElement && row.parentElement.closest(ROWS);
+                if (!row || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
                 row.scrollLeft += e.deltaY;
                 e.preventDefault();
               }, { passive: false });

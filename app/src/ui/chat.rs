@@ -593,9 +593,15 @@ fn ChatHeader(id: String, #[props(default)] merged: bool) -> Element {
                     span { class: "nm", dir: "auto", "{name}" }
                 }
             }
-            TabStrip {}
+            // Merged: the chat's tabs and the panel's are one row that
+            // scrolls as a whole, not two that each squeeze their tabs.
             if merged {
-                super::right::PanelTabs { id: id.clone(), merged: true }
+                div { class: "merged-tabs",
+                    TabStrip {}
+                    super::right::PanelTabs { id: id.clone(), merged: true }
+                }
+            } else {
+                TabStrip {}
             }
             DragRegion {}
             if let Some((number, url, repo)) = h.pr.clone() {

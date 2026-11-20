@@ -359,28 +359,49 @@ pub fn Root() -> Element {
             // in the chat moves.
             if (!window.__laryPins) {
               window.__laryPins = true;
-              const reset = (c) => { if (c.classList.contains('pinned')) { c.classList.remove('pinned', 'cut'); c.style.removeProperty('--pin-t'); c.style.removeProperty('--pin-vis'); c.style.removeProperty('--pin-cut'); } };
+              // The card's row also learns how much of it shows (what's
+              // behind the card covers only that).
+              const reset = (c) => { if (c.classList.contains('pinned')) { c.classList.remove('pinned', 'cut'); c.style.removeProperty('--pin-t'); c.style.removeProperty('--pin-vis'); c.style.removeProperty('--pin-cut'); c.style.removeProperty('--pin-pb'); if (c.parentElement) { c.parentElement.style.removeProperty('--pin-shown'); c.parentElement.classList.remove('folded'); } } };
               const pin = (sc) => {
                 for (const msg of sc.querySelectorAll('.turn > .user-msg')) {
                   const card = msg.querySelector(':scope > .user-card');
                   if (!card) continue;
                   const turn = msg.parentElement;
                   const d = msg.getBoundingClientRect().top - (turn.getBoundingClientRect().top + (parseFloat(getComputedStyle(turn).paddingTop) || 0));
+                  // Over its reply now: a light shadow says it floats there.
+                  msg.classList.toggle('floating', d >= 1);
                   if (d < 1 || card.classList.contains('expanded') || card.classList.contains('editing')) { reset(card); continue; }
                   const full = card.offsetHeight;
                   const imgs = card.querySelector(':scope > .msg-images');
                   const imgH = imgs ? imgs.offsetHeight + (parseFloat(getComputedStyle(imgs).marginBottom) || 0) : 0;
-                  const lh = parseFloat(getComputedStyle(card).lineHeight) || 22;
-                  const least = Math.min(full - imgH, Math.round(lh * 3 + 20));
+                  const cs = getComputedStyle(card);
+                  const lh = parseFloat(cs.lineHeight) || 22;
+                  // Its padding and outline, around the lines.
+                  const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+                  const least = Math.min(full - imgH, Math.round(lh * 3 + pad));
                   const t = Math.round(Math.min(d, imgH));
-                  const vis = Math.round(Math.max(least, full - d));
+                  let vis = Math.round(Math.max(least, full - d));
+                  // Folded to whole lines: a normal box, its outline whole,
+                  // not a line cut through or faded out at its foot.
+                  // (Its pictures, if any, are out of sight by then.)
+                  if (t === Math.round(imgH) && vis < full - t) {
+                    const lines = Math.max(1, Math.floor((vis - pad + 1) / lh));
+                    vis = Math.min(full - t, Math.round(lines * lh + pad));
+                  }
                   const cut = Math.max(0, full - t - vis);
                   if (t === 0 && cut === 0) { reset(card); continue; }
                   card.classList.add('pinned');
                   card.classList.toggle('cut', cut > 0);
+                  // Folded: the box (its color, outline, shadow) is drawn by
+                  // its row, as tall as it shows; the card's words end at the
+                  // last whole line, so none of the next shows in its foot.
+                  msg.classList.toggle('folded', cut > 0);
+                  const pb = (parseFloat(cs.paddingBottom) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
                   card.style.setProperty('--pin-t', t + 'px');
                   card.style.setProperty('--pin-vis', vis + 'px');
-                  card.style.setProperty('--pin-cut', cut + 'px');
+                  card.style.setProperty('--pin-cut', (cut > 0 ? cut + pb : 0) + 'px');
+                  card.style.setProperty('--pin-pb', pb + 'px');
+                  msg.style.setProperty('--pin-shown', vis + 'px');
                 }
               };
               const due = new Set();

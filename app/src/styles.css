@@ -706,10 +706,15 @@ select.input { cursor: pointer; padding-right: 4px; }
 .user-card { background: var(--card-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 10px 14px; font-size: 14px; line-height: 22px; max-height: 132px; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.04);
   -webkit-mask-image: linear-gradient(#000 72%, transparent); mask-image: linear-gradient(#000 72%, transparent); }
 .user-card.expanded, .user-card.short { -webkit-mask-image: none; mask-image: none; }
-/* What scrolls under the pinned card stays hidden at its rounded corners,
-   its fading bottom and just beside it (a list's numbers hang a little left
-   of the column): behind the card, the chat's own colour, so no band shows. */
-.user-msg::before { content: ""; position: absolute; inset: 0 -12px; background: var(--pane); z-index: -1; pointer-events: none; }
+/* What scrolls under the pinned card stays hidden at its rounded corners
+   and just beside it (a list's numbers hang a little left of the column):
+   behind the card, the chat's own colour, so no band shows. Only as tall as
+   the card shows: a long one folded up while pinned (`--pin-shown`) leaves
+   the rest of its row open, not a blank block. */
+.user-msg::before { content: ""; position: absolute; top: 0; left: -12px; right: -12px; height: calc(var(--pin-shown, 100%) + 10px); pointer-events: none; z-index: -1;
+  /* The reply going under it fades out as it nears the card, under its
+     shadow, rather than cut at its very edge. */
+  background: linear-gradient(to bottom, var(--pane) calc(100% - 10px), color-mix(in srgb, var(--pane) 0%, transparent)); }
 .user-card .q { color: var(--blue); }
 .user-card .q svg { display: inline-block; vertical-align: -2px; margin-right: 4px; }
 .a-text { font-size: 14px; line-height: 24px; padding: 4px 0 8px; }
@@ -1372,9 +1377,23 @@ button:disabled, .menu-item.disabled { cursor: not-allowed; }
    turn moves under it (see the page script): its pictures go first, then
    its lines, down to three. Drawn only (clipped and shifted), so nothing in
    the chat moves; its border is redrawn around what shows. */
-.user-card.pinned { transform: translateY(calc(var(--pin-t, 0px) * -1)); clip-path: inset(var(--pin-t, 0px) 0 var(--pin-cut, 0px) 0 round 12px); border-color: transparent; }
-.user-card.pinned::before { content: ""; position: absolute; left: 0; right: 0; top: var(--pin-t, 0px); height: var(--pin-vis, 100%); border: 1px solid var(--border); border-radius: var(--r-lg); pointer-events: none; z-index: 2; }
-.user-card.pinned.cut::after { display: block; top: calc(var(--pin-t, 0px) + var(--pin-vis, 0px) - 44px); bottom: auto; }
+.user-card.pinned { transform: translateY(calc(var(--pin-t, 0px) * -1)); clip-path: inset(var(--pin-t, 0px) 0 var(--pin-cut, 0px) 0 round var(--r-lg)); border-color: transparent; }
+/* Its outline round what shows, the bottom edge too: inside the clip by a
+   pixel (on the clip's own edge it's shaved off), its corners the clip's. */
+.user-card.pinned::before { content: ""; position: absolute; left: 0; right: 0; top: var(--pin-t, 0px); height: calc(var(--pin-vis, 100%) - 1px); border: 1px solid var(--border); border-radius: var(--r-lg); pointer-events: none; z-index: 2; }
+/* Folded to whole lines (see the pinning script): a normal box, its outline
+   whole, drawn by its row (below); the card's words end at the last whole
+   line, which fades a little into the box's foot. */
+.user-card.pinned.cut { background: transparent; }
+.user-card.pinned.cut::before { display: none; }
+.user-card.pinned.cut::after { display: block; top: calc(var(--pin-t, 0px) + var(--pin-vis, 0px) - var(--pin-pb, 11px) - 14px); bottom: auto; height: 14px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--card-2) 0%, transparent), var(--card-2)); border-radius: 0; }
+/* Floating over its reply: a light shadow under it (on the row, which isn't
+   clipped like the card); folded, the row draws the whole box. */
+.user-msg.floating::after { content: ""; position: absolute; top: 0; left: 0; right: 0; height: var(--pin-shown, 100%); border-radius: var(--r-lg); pointer-events: none; z-index: -1; box-sizing: border-box;
+  box-shadow: 0 6px 14px -8px rgba(38, 37, 30, .22), 0 2px 4px -2px rgba(38, 37, 30, .08); }
+.user-msg.floating.folded::after { background: var(--card-2); border: 1px solid var(--border); }
+.app[data-theme="dark"] .user-msg.floating::after { box-shadow: 0 8px 16px -8px rgba(0, 0, 0, .7), 0 2px 4px -2px rgba(0, 0, 0, .4); }
 .user-card.expanded { max-height: none; }
 .user-card.short::after { display: none; }
 .user-card:not(.expanded)::after { height: 44px; background: linear-gradient(to bottom, transparent, var(--card-2) 88%); }

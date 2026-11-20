@@ -801,7 +801,11 @@ fn TurnView(
     let tail = !rest.is_empty() || segs.is_empty() || live || waiting;
     if tail {
         let id = format!("{turn_key}@{}.{}", from.0, from.1);
-        segs.push(Seg { store: id.clone(), id, replies: rest, secs: (ended - t0).num_seconds(), complete: false });
+        // A round after a rest is timed from when it went on: one under a
+        // second still shows its time ("Worked for 1s"), not a bare "Worked".
+        let secs = (ended - t0).num_seconds();
+        let secs = if from != (0, 0) { secs.max(1) } else { secs };
+        segs.push(Seg { store: id.clone(), id, replies: rest, secs, complete: false });
     } else if let Some(s) = segs.last_mut() {
         // Rested and nothing since: that round is the one now (still
         // "Working" while its work runs).

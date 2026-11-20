@@ -122,9 +122,14 @@ starting.
 **Plan & Usage** shows each account's plan limits and reset times where the
 agent records them (Claude Code, Codex, Cursor, Gemini CLI): Claude Code's
 5-hour window, its week and each model's own week (Fable's). A Claude Code
-account on a **setup token** is a subscription too, but its token can't ask
-for the limits, so Lary shows the ones Claude Code reported in that
-account's latest chat, with how long ago.
+account on a **setup token** is a subscription too, but its token can't use
+the usage endpoint: when you open a plan panel or press its refresh, Lary
+asks the plan with the smallest call there is (Haiku, one token of reply),
+whose answer carries the plan's windows; otherwise it shows the ones Claude
+Code reported in that account's latest chat, with how long ago.
+
+Stopping one of Claude Code's background commands ends what it started
+too (an emulator, a server), and the chat no longer waits on it.
 
 ## Models
 

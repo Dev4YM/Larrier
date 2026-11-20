@@ -5,6 +5,23 @@ Every Lary release and what changed in it. Versions follow
 changes, the minor for new features, the patch for fixes. Previews carry a
 suffix such as `-beta.2`.
 
+## 0.1.54 — 2026-11-20
+
+### New
+
+- A chat waiting for your answer shows an amber mark, and notifications skip the chat you're looking at and come as one for requests together
+
+### Look and feel
+
+- A long prompt pinned over its reply folds to whole lines as a whole box: its outline intact, its last line fading a little, a light shadow while it floats
+
+### Fixed
+
+- Stopping a background command ends what it started (an emulator, a server), and a chat whose last command you stopped no longer stays working
+- A turn that rests on background work and goes on folds each round under its own "Worked for", with its answer below; resting with its answer given, it folds under "Working"
+- The model menu stays open when you turn Fast or Ultracode on or off
+- A setup-token account's plan limits are asked for when you open a plan panel or refresh it, and a chat's context breakdown loads while it waits on background work
+- A subagent's tab is named by its task and stops spinning once it's done, its summary is its answer, and Background Tasks shows while a subagent's tab is open
 ## 0.1.53 — 2026-11-18
 
 ### Look and feel
